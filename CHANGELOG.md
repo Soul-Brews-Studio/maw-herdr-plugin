@@ -7,7 +7,11 @@
 - `maw herdr a <session>` (alias `attach`), with `--print`: attach to a herdr
   session; targets resolve like `maw a` (exact, unique prefix, unique
   substring), ambiguity lists candidates, stopped and unknown sessions are
-  refused.
+  refused. Usage mistakes exit 2, lookup failures exit 1, like `maw a`.
+- Attach only queries `herdr session list`; pane/agent counts are fetched by
+  `ls` alone, so one wedged session cannot stall an attach.
+- Without a terminal on stdin (maw before #992), attach refuses with the exact
+  `herdr` command to run instead of launching a TUI into a null stdin.
 - `cli.interactive: true` in the manifest so maw can inherit stdin for the TUI
   (maw-rs #992).
 - `smoke.sh`, CI-safe: skips herdr-dependent checks when the binary is absent.

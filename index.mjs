@@ -12,9 +12,21 @@ const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', blue: '\x1b[94m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
   : { dim: '', cyan: '', blue: '', green: '', red: '', off: '' };
 
+// Usage mistakes exit 2 like maw's own verbs; lookup failures exit 1.
+class UsageError extends Error {}
+
 function herdr(args, session) {
   const argv = session ? ['--session', session, ...args] : args;
   return execFileSync('herdr', argv, { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function sessionIndex() {
+  const raw = JSON.parse(herdr(['session', 'list', '--json']));
+  return (raw.sessions ?? []).map(s => ({
+    session: s.name,
+    status: s.running ? 'active' : 'stale',
+    ...(s.default ? { default: true } : {}),
+  }));
 }
 
 function countFor(session) {
@@ -30,15 +42,13 @@ function countFor(session) {
 }
 
 function listSessions() {
-  const raw = JSON.parse(herdr(['session', 'list', '--json']));
-  return (raw.sessions ?? []).map(s => {
-    const status = s.running ? 'active' : 'stale';
-    const counts = s.running ? countFor(s.name) : { panes: 0, agents: 0 };
-    return { session: s.name, status, panes: counts.panes, agents: counts.agents, ...(s.default ? { default: true } : {}) };
+  return sessionIndex().map(s => {
+    const counts = s.status === 'active' ? countFor(s.session) : { panes: 0, agents: 0 };
+    return { session: s.session, status: s.status, ...counts, ...(s.default ? { default: true } : {}) };
   });
 }
 
-// Mirrors maw a: exact name, then unique prefix, then unique substring.
+// Mirrors maw a's first tiers: exact name, then unique prefix, then unique substring.
 function resolveSession(known, target) {
   const names = known.map(s => s.session);
   const exact = known.find(s => s.session === target);
@@ -60,7 +70,7 @@ function plural(n, word) {
 function cmdLs(args) {
   const json = args.includes('--json');
   const rest = args.filter(a => a !== '--json');
-  if (rest.length) throw new Error(`unknown argument: ${rest[0]}`);
+  if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
   const sessions = listSessions();
   if (json) {
     console.log(JSON.stringify({ command: 'ls', mode: 'compact', scope: 'herdr', json: true, sessions }));
@@ -81,11 +91,10 @@ function cmdAttach(args) {
   const print = args.includes('--print');
   const rest = args.filter(a => a !== '--print');
   const target = rest.shift();
-  if (!target) throw new Error('attach needs a session name: maw herdr a <session>');
-  if (rest.length) throw new Error(`unknown argument: ${rest[0]}`);
+  if (!target) throw new UsageError('attach needs a session name: maw herdr a <session>');
+  if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
 
-  const known = listSessions();
-  const match = resolveSession(known, target);
+  const match = resolveSession(sessionIndex(), target);
   if (match.status !== 'active') throw new Error(`herdr session '${match.session}' is stopped; start it before attaching`);
 
   const argv = match.default ? ['herdr'] : ['herdr', '--session', match.session];
@@ -93,6 +102,9 @@ function cmdAttach(args) {
   if (print) {
     console.log(argv.join(' '));
     return;
+  }
+  if (!process.stdin.isTTY) {
+    throw new Error(`stdin is not a terminal, so herdr's TUI cannot run here.\n  maw hands plugins a terminal only with cli.interactive support (maw-rs #992);\n  until then run it yourself: ${argv.join(' ')}`);
   }
   const run = spawnSync(argv[0], argv.slice(1), { stdio: 'inherit' });
   process.exitCode = run.status ?? 1;
@@ -104,8 +116,8 @@ try {
   if (['help', '--help', '-h'].includes(command)) console.log(HELP);
   else if (command === 'ls' || command === 'list') cmdLs(args);
   else if (command === 'a' || command === 'attach') cmdAttach(args);
-  else throw new Error(`unknown command: ${command}`);
+  else throw new UsageError(`unknown command: ${command}`);
 } catch (err) {
   console.error(`maw herdr: ${err.message}`);
-  process.exitCode = 1;
+  process.exitCode = err instanceof UsageError ? 2 : 1;
 }
