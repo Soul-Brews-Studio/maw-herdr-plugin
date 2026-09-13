@@ -47,8 +47,11 @@ then a unique prefix, then a unique substring — with a session named
 `reviewer`, `maw herdr a rev` attaches to it and prints
 `resolved: rev → reviewer`. Several matches list the candidates and ask for the
 full name. A stopped session is refused, and an unknown one lists the known
-names in the error. Usage mistakes exit 2, lookup failures exit 1, as with
-`maw a`.
+names in the error — and, because herdr and tmux cannot see each other, asks
+`maw ls --json` whether the name lives in tmux instead and points you at
+`maw a <session>` when it does (`maw herdr a neo` → "Found nearby (tmux, not
+herdr): 1. tmux 44-neo (Exact, stale) → maw a 44-neo"). Usage mistakes exit 2,
+lookup failures exit 1, as with `maw a`.
 
 ## `--json` shape
 

@@ -60,7 +60,38 @@ function resolveSession(known, target) {
       throw new Error(`'${target}' matches multiple sessions: ${hits.map(s => s.session).join(', ')}\n  use the full name: maw herdr a <exact-session>`);
     }
   }
-  throw new Error(`no herdr session '${target}'. known: ${names.join(', ') || '(none)'}`);
+  let message = `no herdr session '${target}'. known: ${names.join(', ') || '(none)'}`;
+  const nearby = nearbyTmuxSessions(target);
+  if (nearby.length) {
+    message += '\n  Found nearby (tmux, not herdr):';
+    nearby.slice(0, 5).forEach((s, i) => {
+      message += `\n  ${i + 1}. tmux ${s.session} (${s.how}, ${s.status})   → maw a ${s.session}`;
+    });
+  }
+  throw new Error(message);
+}
+
+// herdr and tmux are blind to each other, so when a name is not a herdr session
+// ask maw's own listing whether it lives in tmux instead. Silent on any failure.
+function nearbyTmuxSessions(target) {
+  let sessions;
+  try {
+    const raw = execFileSync('maw', ['ls', '--json'], { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    sessions = JSON.parse(raw).sessions ?? [];
+  } catch {
+    return [];
+  }
+  const bare = n => n.replace(/^\d+-/, '');
+  const tiers = [
+    ['Exact', n => n === target || bare(n) === target],
+    ['Prefix', n => n.startsWith(target) || bare(n).startsWith(target)],
+    ['Substring', n => n.includes(target)],
+  ];
+  for (const [how, test] of tiers) {
+    const hits = sessions.filter(s => typeof s.session === 'string' && test(s.session));
+    if (hits.length) return hits.map(s => ({ how, session: s.session, status: s.status ?? 'unknown' }));
+  }
+  return [];
 }
 
 function plural(n, word) {
