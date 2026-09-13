@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
+import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileP = promisify(execFile);
 
 const HELP = `maw herdr <ls|a|attach|wake> [args]
   ls [--json]                          list herdr sessions with pane and agent counts
@@ -38,23 +41,26 @@ function sessionIndex() {
   }));
 }
 
-function countFor(session) {
-  let panes = 0;
-  let agents = 0;
-  try {
-    panes = herdrJson(['pane', 'list'], session).result?.panes?.length ?? 0;
-  } catch {}
-  try {
-    agents = herdrJson(['agent', 'list'], session).result?.agents?.length ?? 0;
-  } catch {}
+async function herdrJsonAsync(args, session) {
+  const argv = session ? ['--session', session, ...args] : args;
+  const { stdout } = await execFileP('herdr', argv, { encoding: 'utf8', timeout: 10_000 });
+  return JSON.parse(stdout);
+}
+
+// Every count is an independent herdr call, so run them all at once.
+async function countFor(session) {
+  const [panes, agents] = await Promise.all([
+    herdrJsonAsync(['pane', 'list'], session).then(r => r.result?.panes?.length ?? 0, () => 0),
+    herdrJsonAsync(['agent', 'list'], session).then(r => r.result?.agents?.length ?? 0, () => 0),
+  ]);
   return { panes, agents };
 }
 
-function listSessions() {
-  return sessionIndex().map(s => {
-    const counts = s.status === 'active' ? countFor(s.session) : { panes: 0, agents: 0 };
+async function listSessions() {
+  return Promise.all(sessionIndex().map(async s => {
+    const counts = s.status === 'active' ? await countFor(s.session) : { panes: 0, agents: 0 };
     return { session: s.session, status: s.status, ...counts, ...(s.default ? { default: true } : {}) };
-  });
+  }));
 }
 
 // Mirrors maw a's first tiers: exact name, then unique prefix, then unique substring.
@@ -107,11 +113,11 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-function cmdLs(args) {
+async function cmdLs(args) {
   const json = args.includes('--json');
   const rest = args.filter(a => a !== '--json');
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
-  const sessions = listSessions();
+  const sessions = await listSessions();
   if (json) {
     console.log(JSON.stringify({ command: 'ls', mode: 'compact', scope: 'herdr', json: true, sessions }));
     return;
@@ -305,7 +311,7 @@ const args = process.argv.slice(2);
 const command = args.shift() || 'help';
 try {
   if (['help', '--help', '-h'].includes(command)) console.log(HELP);
-  else if (command === 'ls' || command === 'list') cmdLs(args);
+  else if (command === 'ls' || command === 'list') await cmdLs(args);
   else if (command === 'a' || command === 'attach') cmdAttach(args);
   else if (command === 'wake') cmdWake(args);
   else throw new UsageError(`unknown command: ${command}`);
