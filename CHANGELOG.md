@@ -8,6 +8,11 @@
   session; targets resolve like `maw a` (exact, unique prefix, unique
   substring), ambiguity lists candidates, stopped and unknown sessions are
   refused. Usage mistakes exit 2, lookup failures exit 1, like `maw a`.
+- `maw herdr wake <oracle>`: `maw wake` for herdr — one headless herdr
+  session per oracle (named after the repo), a workspace in the checkout, and
+  `herdr agent start` with `--engine` mapped onto herdr's agent kinds;
+  `--prompt`, `--attach`, `--dry-run`; idempotent when the agent already runs.
+  Targets resolve from `~/.maw/oracles.json` by name, `org/repo`, or path.
 - Unknown session: the error also lists matching tmux sessions from
   `maw ls --json` as "Found nearby (tmux, not herdr)" with the `maw a` command
   to run, since the two multiplexers cannot see each other.

@@ -53,6 +53,28 @@ else
   echo "SKIP: no active herdr session for attach --print"
 fi
 
+# wake --dry-run must plan without starting anything; needs an oracle registry.
+if [ -f "$HOME/.maw/oracles.json" ]; then
+  if oracle=$(node -e '
+const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+const o = (d.oracles || []).find(x => require("node:fs").existsSync(x.local_path));
+if (o) process.stdout.write(o.org + "/" + o.repo);
+' "$HOME/.maw/oracles.json") && [ -n "$oracle" ]; then
+    before=$(maw herdr ls --json | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0,"utf8")).sessions.length))')
+    out=$(maw herdr wake "$oracle" --dry-run 2>&1) || fail "maw herdr wake $oracle --dry-run exited non-zero: $out"
+    case "$out" in
+      *"agent start"*) echo "ok: maw herdr wake $oracle --dry-run plans an agent start" ;;
+      *) fail "wake --dry-run printed no plan: $out" ;;
+    esac
+    after=$(maw herdr ls --json | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0,"utf8")).sessions.length))')
+    [ "$before" = "$after" ] || fail "wake --dry-run changed the session count ($before -> $after)"
+  else
+    echo "SKIP: no oracle with a local checkout in ~/.maw/oracles.json"
+  fi
+else
+  echo "SKIP: no ~/.maw/oracles.json for wake --dry-run"
+fi
+
 if out=$(maw herdr a __no_such_session__ 2>&1); then
   fail "maw herdr a __no_such_session__ exited 0"
 fi

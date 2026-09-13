@@ -38,6 +38,7 @@ maw herdr ls                    # list sessions with pane and agent counts
 maw herdr ls --json             # same, as JSON
 maw herdr a <session>           # attach (alias: maw herdr attach)
 maw herdr a <session> --print   # print the herdr command instead of running it
+maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
 ```
 
 `ls` marks each session `●` active or `◌` stale.
@@ -52,6 +53,28 @@ names in the error — and, because herdr and tmux cannot see each other, asks
 `maw a <session>` when it does (`maw herdr a neo` → "Found nearby (tmux, not
 herdr): 1. tmux 44-neo (Exact, stale) → maw a 44-neo"). Usage mistakes exit 2,
 lookup failures exit 1, as with `maw a`.
+
+## Wake
+
+`maw herdr wake <oracle>` is `maw wake` for herdr: it gives the oracle its own
+herdr session (named after the repo, e.g. `neo` → `neo-oracle`, the convention
+the fleet already uses), creates a workspace in the oracle's checkout, and
+starts the agent there — `herdr agent start <name> --kind <engine>`, so
+`--engine` takes any herdr agent kind (`claude` by default, `codex`, `gemini`,
+…). Waking an oracle that is already awake reports the existing agent instead
+of starting a second one.
+
+The target is resolved from `~/.maw/oracles.json`: a registry `name`, an
+`org/repo` (needed when a name is reused across orgs — the registry has such
+collisions), or a directory. `--dry-run` prints the herdr commands it would run;
+`--prompt` sends a first prompt; `--attach` attaches afterwards (needs a
+terminal — see below).
+
+```bash
+maw herdr wake neo --dry-run
+maw herdr wake laris-co/neo-oracle --engine codex
+maw herdr wake neo --prompt "recap the last session" --attach
+```
 
 ## `--json` shape
 

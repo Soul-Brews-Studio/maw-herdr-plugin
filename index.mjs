@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
 
-const HELP = `maw herdr <ls|a|attach> [args]
-  ls [--json]        list herdr sessions with pane and agent counts
-  a <session> [--print]   attach to a herdr session (alias: attach)
+const HELP = `maw herdr <ls|a|attach|wake> [args]
+  ls [--json]                          list herdr sessions with pane and agent counts
+  a <session> [--print]                attach to a herdr session (alias: attach)
+  wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
+                                       start an oracle's agent in its own herdr session
 
-Mirrors 'maw ls' and 'maw a' against the herdr multiplexer.
+Mirrors 'maw ls', 'maw a' and 'maw wake' against the herdr multiplexer.
 herdr is a sibling multiplexer: it cannot see tmux panes, and maw cannot see herdr panes.`;
 
 const C = process.stdout.isTTY
@@ -15,13 +20,17 @@ const C = process.stdout.isTTY
 // Usage mistakes exit 2 like maw's own verbs; lookup failures exit 1.
 class UsageError extends Error {}
 
-function herdr(args, session) {
+function herdr(args, session, timeout = 10_000) {
   const argv = session ? ['--session', session, ...args] : args;
-  return execFileSync('herdr', argv, { encoding: 'utf8', timeout: 10_000, stdio: ['ignore', 'pipe', 'pipe'] });
+  return execFileSync('herdr', argv, { encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function herdrJson(args, session, timeout) {
+  return JSON.parse(herdr(args, session, timeout));
 }
 
 function sessionIndex() {
-  const raw = JSON.parse(herdr(['session', 'list', '--json']));
+  const raw = herdrJson(['session', 'list', '--json']);
   return (raw.sessions ?? []).map(s => ({
     session: s.name,
     status: s.running ? 'active' : 'stale',
@@ -33,10 +42,10 @@ function countFor(session) {
   let panes = 0;
   let agents = 0;
   try {
-    panes = JSON.parse(herdr(['pane', 'list'], session)).result?.panes?.length ?? 0;
+    panes = herdrJson(['pane', 'list'], session).result?.panes?.length ?? 0;
   } catch {}
   try {
-    agents = JSON.parse(herdr(['agent', 'list'], session)).result?.agents?.length ?? 0;
+    agents = herdrJson(['agent', 'list'], session).result?.agents?.length ?? 0;
   } catch {}
   return { panes, agents };
 }
@@ -118,6 +127,18 @@ function cmdLs(args) {
   }
 }
 
+function attachArgv(match) {
+  return match.default ? ['herdr'] : ['herdr', '--session', match.session];
+}
+
+function runAttach(argv) {
+  if (!process.stdin.isTTY) {
+    throw new Error(`stdin is not a terminal, so herdr's TUI cannot run here.\n  maw hands plugins a terminal only with cli.interactive support (maw-rs #992);\n  until then run it yourself: ${argv.join(' ')}`);
+  }
+  const run = spawnSync(argv[0], argv.slice(1), { stdio: 'inherit' });
+  process.exitCode = run.status ?? 1;
+}
+
 function cmdAttach(args) {
   const print = args.includes('--print');
   const rest = args.filter(a => a !== '--print');
@@ -128,17 +149,156 @@ function cmdAttach(args) {
   const match = resolveSession(sessionIndex(), target);
   if (match.status !== 'active') throw new Error(`herdr session '${match.session}' is stopped; start it before attaching`);
 
-  const argv = match.default ? ['herdr'] : ['herdr', '--session', match.session];
+  const argv = attachArgv(match);
   if (match.session !== target) console.log(`  resolved: ${target} → ${match.session}`);
   if (print) {
     console.log(argv.join(' '));
     return;
   }
-  if (!process.stdin.isTTY) {
-    throw new Error(`stdin is not a terminal, so herdr's TUI cannot run here.\n  maw hands plugins a terminal only with cli.interactive support (maw-rs #992);\n  until then run it yourself: ${argv.join(' ')}`);
+  runAttach(argv);
+}
+
+// --- wake -------------------------------------------------------------------
+
+function readOracleRegistry() {
+  const path = process.env.MAW_ORACLES_JSON || join(homedir(), '.maw', 'oracles.json');
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    return { oracles: raw.oracles ?? [], ghqRoot: raw.ghq_root };
+  } catch {
+    return { oracles: [], ghqRoot: undefined };
   }
-  const run = spawnSync(argv[0], argv.slice(1), { stdio: 'inherit' });
-  process.exitCode = run.status ?? 1;
+}
+
+function isDir(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function oracleFromPath(path) {
+  const repo = basename(path);
+  return { name: repo.replace(/-oracle$/, ''), repo, path, org: basename(resolve(path, '..')) };
+}
+
+// Accepts a directory, org/repo, or a registry name; registry names are not
+// unique across orgs (fleet trap), so a collision must be disambiguated by org/repo.
+function resolveOracle(target) {
+  if (target.startsWith('/') || target.startsWith('.') || target.startsWith('~')) {
+    const path = resolve(target.replace(/^~(?=\/|$)/, homedir()));
+    if (!isDir(path)) throw new Error(`wake: '${target}' is not a directory`);
+    return oracleFromPath(path);
+  }
+  const { oracles, ghqRoot } = readOracleRegistry();
+  if (target.includes('/')) {
+    const [org, repo] = target.split('/');
+    const hit = oracles.find(o => o.org === org && o.repo === repo);
+    if (hit) return { name: hit.name, repo: hit.repo, path: hit.local_path, org: hit.org };
+    const guess = ghqRoot ? join(ghqRoot, 'github.com', org, repo) : null;
+    if (guess && isDir(guess)) return { ...oracleFromPath(guess), name: repo.replace(/-oracle$/, '') };
+    throw new Error(`wake: '${target}' is not in ~/.maw/oracles.json and has no local checkout`);
+  }
+  const hits = oracles.filter(o => o.name === target && isDir(o.local_path));
+  if (hits.length === 1) return { name: hits[0].name, repo: hits[0].repo, path: hits[0].local_path, org: hits[0].org };
+  if (hits.length > 1) {
+    throw new Error(`wake: '${target}' names ${hits.length} oracles; pick one by org/repo:\n${hits.map(h => `  maw herdr wake ${h.org}/${h.repo}`).join('\n')}`);
+  }
+  let located;
+  try {
+    located = execFileSync('maw', ['locate', target, '--path', '--no-remote'], { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {}
+  if (located && isDir(located)) return oracleFromPath(located);
+  throw new Error(`wake: no oracle '${target}' in ~/.maw/oracles.json (try org/repo or a path)`);
+}
+
+function agentNameFor(oracle) {
+  const name = oracle.name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[^a-z]+/, '');
+  return (name || 'oracle').slice(0, 32);
+}
+
+function waitForSession(session, timeoutMs = 8_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (sessionIndex().some(s => s.session === session && s.status === 'active')) return true;
+    } catch {}
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+  return false;
+}
+
+function cmdWake(args) {
+  const opts = { engine: 'claude', prompt: null, attach: false, dryRun: false };
+  let target;
+  while (args.length) {
+    const arg = args.shift();
+    if (arg === '--engine' || arg === '--kind') opts.engine = args.shift() ?? '';
+    else if (arg === '--prompt') opts.prompt = args.shift() ?? '';
+    else if (arg === '--attach' || arg === '-a') opts.attach = true;
+    else if (arg === '--dry-run') opts.dryRun = true;
+    else if (arg.startsWith('-')) throw new UsageError(`unknown argument: ${arg}`);
+    else if (target === undefined) target = arg;
+    else throw new UsageError(`unexpected argument: ${arg}`);
+  }
+  if (!target) throw new UsageError('wake needs an oracle: maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]');
+  if (!opts.engine) throw new UsageError('--engine needs a value (herdr agent kind, e.g. claude, codex, gemini)');
+
+  const oracle = resolveOracle(target);
+  const session = oracle.repo;
+  const agent = agentNameFor(oracle);
+  const plan = [
+    `herdr --session ${session} server   # headless, detached (only if not running)`,
+    `herdr --session ${session} workspace create --cwd ${oracle.path} --label ${oracle.name} --no-focus`,
+    `herdr --session ${session} agent start ${agent} --kind ${opts.engine} --pane <root pane>`,
+    ...(opts.prompt !== null ? [`herdr --session ${session} agent prompt ${agent} <prompt>`] : []),
+    ...(opts.attach ? [`herdr --session ${session}`] : []),
+  ];
+  console.log(`  ${C.cyan}${oracle.name}${C.off} ${C.dim}→ ${oracle.org}/${oracle.repo}  herdr session ${session}, agent ${agent} (${opts.engine})${C.off}`);
+  if (opts.dryRun) {
+    console.log('Plan:');
+    for (const line of plan) console.log(`  ${line}`);
+    return;
+  }
+
+  const running = sessionIndex().some(s => s.session === session && s.status === 'active');
+  if (!running) {
+    spawn('herdr', ['--session', session, 'server'], { detached: true, stdio: 'ignore' }).unref();
+    if (!waitForSession(session)) throw new Error(`wake: herdr session '${session}' did not come up; see ~/.config/herdr/sessions/${session}/herdr-server.log`);
+    console.log(`  ${C.green}●${C.off} started herdr session ${session}`);
+  }
+
+  const existing = (herdrJson(['agent', 'list'], session).result?.agents ?? []).find(a => a.name === agent);
+  if (existing) {
+    console.log(`  already awake: ${agent} in ${session} pane ${existing.pane_id} (${existing.agent_status ?? 'unknown'})`);
+    if (opts.attach) runAttach(['herdr', '--session', session]);
+    else console.log(`  attach with: maw herdr a ${session}`);
+    return;
+  }
+
+  const created = herdrJson(['workspace', 'create', '--cwd', oracle.path, '--label', oracle.name, '--no-focus'], session);
+  const pane = created.result?.root_pane?.pane_id;
+  if (!pane) throw new Error(`wake: workspace create returned no root pane: ${JSON.stringify(created).slice(0, 200)}`);
+
+  let started;
+  try {
+    started = herdr(['agent', 'start', agent, '--kind', opts.engine, '--pane', pane], session, 60_000);
+  } catch (err) {
+    const detail = (err.stderr || err.stdout || err.message || '').toString().trim().split('\n')[0];
+    throw new Error(`wake: agent start failed in ${session} pane ${pane}: ${detail}`);
+  }
+  const status = (() => {
+    try { return JSON.parse(started).result?.agent?.agent_status ?? JSON.parse(started).result?.agent_status; } catch { return undefined; }
+  })();
+  console.log(`  ${C.green}●${C.off} woke ${agent} (${opts.engine}) in ${session} pane ${pane}${status ? ` — ${status}` : ''}`);
+
+  if (opts.prompt !== null) {
+    herdr(['agent', 'prompt', agent, opts.prompt], session, 30_000);
+    console.log(`  prompt sent`);
+  }
+  if (opts.attach) runAttach(['herdr', '--session', session]);
+  else console.log(`  attach with: maw herdr a ${session}`);
 }
 
 const args = process.argv.slice(2);
@@ -147,6 +307,7 @@ try {
   if (['help', '--help', '-h'].includes(command)) console.log(HELP);
   else if (command === 'ls' || command === 'list') cmdLs(args);
   else if (command === 'a' || command === 'attach') cmdAttach(args);
+  else if (command === 'wake') cmdWake(args);
   else throw new UsageError(`unknown command: ${command}`);
 } catch (err) {
   console.error(`maw herdr: ${err.message}`);
