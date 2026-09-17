@@ -336,6 +336,60 @@ async function cmdLsAgents(json) {
   console.log(`  ${C.dim}${plural(agents.length, 'agent pane')} · maw herdr peek <target> · maw herdr hey <target> "…"${C.off}`);
 }
 
+/**
+ * Every agent on every node the federation can reach, grouped by node.
+ *
+ * `ls --agents` asks the local herdr socket and therefore stops at this
+ * machine. This asks the federation node instead, so one command answers
+ * "what is running anywhere" — including nodes we hold no link to, seen
+ * through a hub.
+ */
+async function cmdLsFederation(json, agentsOnly) {
+  let fleet;
+  try {
+    fleet = await fleetRoster();
+  } catch (err) {
+    throw new Error(`no federation node at ${FED_URL} — ${String(err).replace(/^Error:\s*/, '')}\n  start one: cd <herdr-federation> && just node start\n  or point at another: HERDR_FED_URL=http://host:6750 maw herdr ls --federation`);
+  }
+  const rows = agentsOnly ? fleet.rows.filter(isAgent) : fleet.rows;
+
+  if (json) {
+    console.log(JSON.stringify({
+      command: 'ls', mode: 'federation', scope: 'herdr', json: true,
+      node: fleet.node, url: FED_URL,
+      panes: rows.map(r => ({ node: r.node, via: r.via, pane: r.pane, handle: r.handle, kind: r.kind ?? null, status: r.status ?? null, where: r.where ?? null, workspace: r.workspace ?? null })),
+    }));
+    return;
+  }
+
+  console.log(`  ${C.blue}federation${C.off} · ${C.cyan}${fleet.node}${C.off}  ${C.dim}${FED_URL}${C.off}`);
+  console.log();
+  if (!rows.length) {
+    console.log(`  ${C.dim}nothing to list — no agent panes on any reachable node${C.off}`);
+    return;
+  }
+  // this node first, then direct peers, then anything behind a hub
+  const order = [...new Set(rows.map(r => r.node))].sort((a, b) => {
+    const rank = n => (n === fleet.node ? 0 : fleet.relayed[n] ? 2 : 1);
+    return rank(a) - rank(b) || a.localeCompare(b);
+  });
+  const wide = Math.max(...rows.map(r => (r.handle ?? r.pane).length), 8);
+  for (const node of order) {
+    const mine = rows.filter(r => r.node === node);
+    const via = fleet.relayed[node]?.via;
+    const tag = node === fleet.node ? `${C.dim}this node${C.off}` : via ? `${C.dim}via ${via}${C.off}` : `${C.dim}direct${C.off}`;
+    const agents = mine.filter(isAgent).length;
+    console.log(`  ${via ? `${C.dim}◌${C.off}` : `${C.green}●${C.off}`} ${C.cyan}${node}${C.off}  ${tag} ${C.dim}· ${plural(agents, 'agent')} of ${plural(mine.length, 'pane')}${C.off}`);
+    for (const r of mine) {
+      const dot = isAgent(r) ? statusDot(r.status) : `${C.dim}·${C.off}`;
+      const place = r.workspace ?? r.where ?? '';
+      console.log(`      ${dot} ${(r.handle ?? r.pane).padEnd(wide)} ${C.dim}${r.pane.padEnd(8)} ${r.kind ?? 'shell'}${place ? ` · ${place}` : ''}${C.off}`);
+    }
+  }
+  console.log();
+  console.log(`  ${C.dim}${plural(rows.filter(isAgent).length, 'agent')} across ${plural(order.length, 'node')} · peek one: maw herdr peek <node>:<pane>${C.off}`);
+}
+
 /** The old listing: herdr server instances. Real, but not where work lives. */
 async function cmdLsSessions(json) {
   const sessions = await listSessions();
@@ -368,6 +422,12 @@ async function cmdLs(args) {
     rest.shift();
     if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
     return cmdLsSessions(json);
+  }
+  if (rest[0] === '--federation' || rest[0] === '--fed') {
+    rest.shift();
+    const agentsOnly = rest[0] === '--agents' && (rest.shift(), true);
+    if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+    return cmdLsFederation(json, agentsOnly);
   }
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
 
@@ -483,6 +543,19 @@ function cmdAttach(args) {
  */
 const FED_URL = process.env.HERDR_FED_URL || "http://127.0.0.1:6750";
 
+async function fedPost(path, body, timeout = 20_000) {
+  const res = await fetch(`${FED_URL}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeout),
+  });
+  const out = await res.json();
+  if (out?.error) throw new Error(out.error);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return out;
+}
+
 async function fedGet(path, timeout = 5000) {
   const res = await fetch(`${FED_URL}${path}`, { signal: AbortSignal.timeout(timeout) });
   const body = await res.json();
@@ -490,6 +563,27 @@ async function fedGet(path, timeout = 5000) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return body;
 }
+
+/**
+ * Every agent pane on every node this federation node can reach — its own, its
+ * peers', and, since the hub model, whatever its peers relay. One shape whether
+ * a pane is local, one hop away, or behind a hub; `via` says which.
+ *
+ * This is the only listing that does NOT go through the local herdr socket:
+ * `ls --agents` asks herdr directly and can only ever see this machine.
+ */
+async function fleetRoster() {
+  const status = await fedGet('/api/status');
+  const relayed = status.relayed ?? {};
+  const rows = [];
+  for (const m of status.members ?? []) rows.push({ ...m, node: status.node, via: null, local: true });
+  for (const [node, list] of Object.entries(status.peerMembers ?? {}))
+    for (const m of list ?? []) rows.push({ ...m, node, via: relayed[node]?.via ?? null, local: false });
+  return { node: status.node, rows, relayed };
+}
+
+/** A pane is something to talk to only if herdr found an agent in it. */
+const isAgent = m => m.kind && m.kind !== 'shell';
 
 const AGO_UNITS = [[86400, "d"], [3600, "h"], [60, "m"]];
 function ago(iso) {
@@ -700,9 +794,41 @@ async function cmdPeek(args) {
     if (!Number.isInteger(lines) || lines < 1) throw new UsageError('--lines needs a positive integer');
     rest.splice(at, 2);
   }
+  const target0 = rest[0];
+  // `<node>:<pane>` — read a pane on another node, through the federation.
+  //
+  // Pane ids are colon-shaped too (`w2V:p1`), so the split is only a node
+  // address when the part before the colon names a node the federation knows.
+  // Otherwise `w2V:p1` would be read as node `w2V`, and every local peek by
+  // pane id would break.
+  if (target0 && target0.includes(':')) {
+    const [maybeNode, ...restOfTarget] = target0.split(':');
+    const pane = restOfTarget.join(':');
+    if (pane) {
+      let fleet = null;
+      try { fleet = await fleetRoster(); } catch { /* no node here; fall through to local */ }
+      if (fleet && (maybeNode === fleet.node || fleet.rows.some(r => r.node === maybeNode))) {
+        rest.shift();
+        if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+        const known = fleet.rows.find(r => r.node === maybeNode && (r.pane === pane || r.handle === pane));
+        const paneId = known?.pane ?? pane;
+        const out = await fedPost('/api/fleet/pane', { node: maybeNode, pane: paneId, lines });
+        if (json) {
+          console.log(JSON.stringify({ command: 'peek', node: out.node, pane: out.pane, via: fleet.relayed[maybeNode]?.via ?? null, source: 'visible', lines: out.lines, text: out.text }));
+          return;
+        }
+        const via = fleet.relayed[maybeNode]?.via;
+        console.log(`  ${C.cyan}${out.node}${C.off}${via ? ` ${C.dim}via ${via}${C.off}` : ''} ${C.dim}${out.pane}${known?.handle ? ` · ${known.handle}` : ''} · last ${out.lines} lines${C.off}`);
+        console.log();
+        console.log(out.text);
+        return;
+      }
+    }
+  }
+
   const { pool, verb } = await poolFor(rest, 'peek');
   const target = rest.shift();
-  if (!target) throw new UsageError('peek needs a target: maw herdr peek <target> [--lines N]');
+  if (!target) throw new UsageError('peek needs a target: maw herdr peek <target> [--lines N]\n  across the federation: maw herdr peek <node>:<pane>');
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
 
   const hit = resolveAgent(pool, target, verb);
