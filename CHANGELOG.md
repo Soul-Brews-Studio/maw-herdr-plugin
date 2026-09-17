@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.0 — 2026-09-17
+
+Root-cause fix: **the plugin mapped tmux's "session" onto herdr's "session" by
+name, not by role.** In tmux a session is the thing you attach to and work in; in
+herdr a session is a *server process*, and the noun that plays that role is a
+*workspace*. Measured: `herdr session list` returned 8 sessions, 7 stopped and
+reporting 0 panes, while the one running session held 22 workspaces across 7
+repos with 13 linked worktrees.
+
+- `maw herdr ls` now lists **workspaces**, grouped machine → repo → worktree, in
+  the shape herdr's own sidebar draws — with branch and `↑↓` from local git reads
+  only (one `rev-list --left-right --count`, never a fetch). A worktree's branch
+  is printed only when it differs from the label, and a workspace with no
+  `worktree` block still gets one from its pane's cwd. Remote machines are
+  separate SSH-reached servers, so the listing is local and names them rather
+  than implying the fleet is one machine.
+- `maw herdr ls --sessions` keeps the old server listing and now names the
+  stopped ones as what they are.
+- `maw herdr wake` creates a workspace in the **running** session instead of
+  spawning a server per oracle — the same confusion in the other direction, and
+  the source of seven stopped socket directories under
+  `~/.config/herdr/sessions/`, which were precisely the seven noise rows in the
+  old `ls`. `--own-session` restores the old behaviour; without it wake refuses
+  rather than silently starting a server when no session is running.
+
 ## 0.2.0 — 2026-09-17
 
 - `maw herdr hey <target> <message>`: `maw hey` for herdr — resolves a target and

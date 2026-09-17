@@ -28,17 +28,34 @@ if ! command -v herdr >/dev/null 2>&1; then
   exit 0
 fi
 
+# Default ls lists WORKSPACES — a herdr session is a server process, and the
+# workspace is what corresponds to a tmux session.
 maw herdr ls --json | node -e '
 const out = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-if (!Array.isArray(out.sessions)) {
-  console.error("ls --json has no sessions array");
+if (out.mode !== "workspaces" || !Array.isArray(out.workspaces)) {
+  console.error("ls --json is not a workspaces listing: " + JSON.stringify(out).slice(0, 160));
   process.exit(1);
 }
-console.log(`ok: maw herdr ls --json (${out.sessions.length} session(s))`);
-' || fail "maw herdr ls --json did not parse as JSON with a sessions array"
+for (const w of out.workspaces) {
+  for (const k of ["session", "id", "label", "panes", "linked"]) {
+    if (!(k in w)) { console.error("workspace row missing " + k); process.exit(1); }
+  }
+}
+console.log(`ok: maw herdr ls --json (${out.workspaces.length} workspace(s))`);
+' || fail "maw herdr ls --json is not a workspaces listing"
+
+# --sessions keeps the old server listing.
+maw herdr ls --sessions --json | node -e '
+const out = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (out.mode !== "sessions" || !Array.isArray(out.sessions)) {
+  console.error("ls --sessions --json has no sessions array");
+  process.exit(1);
+}
+console.log(`ok: maw herdr ls --sessions --json (${out.sessions.length} session(s))`);
+' || fail "maw herdr ls --sessions --json did not parse as JSON with a sessions array"
 
 # Attach --print on a real active session must succeed and name the herdr command.
-active=$(maw herdr ls --json | node -e '
+active=$(maw herdr ls --sessions --json | node -e '
 const out = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
 const s = out.sessions.find(x => x.status === "active");
 if (s) process.stdout.write(s.session);
@@ -60,14 +77,26 @@ const d = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
 const o = (d.oracles || []).find(x => require("node:fs").existsSync(x.local_path));
 if (o) process.stdout.write(o.org + "/" + o.repo);
 ' "$HOME/.maw/oracles.json") && [ -n "$oracle" ]; then
-    before=$(maw herdr ls --json | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0,"utf8")).sessions.length))')
+    before=$(maw herdr ls --sessions --json | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0,"utf8")).sessions.length))')
     out=$(maw herdr wake "$oracle" --dry-run 2>&1) || fail "maw herdr wake $oracle --dry-run exited non-zero: $out"
     case "$out" in
       *"agent start"*) echo "ok: maw herdr wake $oracle --dry-run plans an agent start" ;;
       *) fail "wake --dry-run printed no plan: $out" ;;
     esac
-    after=$(maw herdr ls --json | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0,"utf8")).sessions.length))')
+    after=$(maw herdr ls --sessions --json | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0,"utf8")).sessions.length))')
     [ "$before" = "$after" ] || fail "wake --dry-run changed the session count ($before -> $after)"
+
+    # The default wake path must NOT plan a server — that is what left seven
+    # stopped sockets behind. Only --own-session may.
+    case "$out" in
+      *"server"*) fail "wake --dry-run plans a server without --own-session: $out" ;;
+      *) echo "ok: maw herdr wake --dry-run creates a workspace, not a server" ;;
+    esac
+    own=$(maw herdr wake "$oracle" --dry-run --own-session 2>&1) || fail "wake --own-session --dry-run exited non-zero: $own"
+    case "$own" in
+      *"server"*) echo "ok: maw herdr wake --own-session --dry-run still plans a server" ;;
+      *) fail "wake --own-session --dry-run planned no server: $own" ;;
+    esac
   else
     echo "SKIP: no oracle with a local checkout in ~/.maw/oracles.json"
   fi

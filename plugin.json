@@ -1,11 +1,11 @@
 {
   "name": "herdr",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "sdk": "^1.0.0",
   "runtime": "bun-dev",
   "target": "js",
   "entry": "index.mjs",
-  "description": "herdr sessions and agents through maw's own verbs: ls, attach, wake, hey, peek",
+  "description": "herdr workspaces and agents through maw's own verbs: ls, attach, wake, hey, peek",
   "capabilities": [
     "proc:exec:herdr"
   ],
