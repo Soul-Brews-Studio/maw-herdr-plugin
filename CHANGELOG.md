@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.3.0 — 2026-09-17
+
+Root-cause fix: **the plugin mapped tmux's "session" onto herdr's "session" by
+name, not by role.** In tmux a session is the thing you attach to and work in; in
+herdr a session is a *server process*, and the noun that plays that role is a
+*workspace*. Measured: `herdr session list` returned 8 sessions, 7 stopped and
+reporting 0 panes, while the one running session held 22 workspaces across 7
+repos with 13 linked worktrees.
+
+- `maw herdr ls` now lists **workspaces**, grouped machine → repo → worktree, in
+  the shape herdr's own sidebar draws — with branch and `↑↓` from local git reads
+  only (one `rev-list --left-right --count`, never a fetch). A worktree's branch
+  is printed only when it differs from the label, and a workspace with no
+  `worktree` block still gets one from its pane's cwd. Remote machines are
+  separate SSH-reached servers, so the listing is local and names them rather
+  than implying the fleet is one machine.
+- `maw herdr ls --sessions` keeps the old server listing and now names the
+  stopped ones as what they are.
+- `maw herdr wake` creates a workspace in the **running** session instead of
+  spawning a server per oracle — the same confusion in the other direction, and
+  the source of seven stopped socket directories under
+  `~/.config/herdr/sessions/`, which were precisely the seven noise rows in the
+  old `ls`. `--own-session` restores the old behaviour; without it wake refuses
+  rather than silently starting a server when no session is running.
+
+## 0.2.0 — 2026-09-17
+
+- `maw herdr hey <target> <message>`: `maw hey` for herdr — resolves a target and
+  runs `herdr agent prompt <pane> <message>`. Everything after the target is the
+  message, so quotes are optional. `--dry-run` prints the herdr call and sends
+  nothing.
+- `maw herdr peek <target>` (alias `read`), with `--lines N` and `--json`: read
+  what an agent's pane is showing.
+- `maw herdr ls --agents`, with `--json`: every agent pane across every running
+  session, grouped by session, with status and the focused pane marked.
+- Targets resolve by pane id, agent name, workspace label, tab label, then a
+  unique prefix or substring of the label. **Workspace labels are the handle that
+  matters**: 0 of 28 panes on the reference machine carried an `agent_name`, so a
+  name-based design would have addressed nothing. A plural match is narrowed to
+  the focused pane, then the workspace's active tab; anything left is listed
+  rather than guessed. `--session <name>` scopes first — a flag, never a
+  `session:target` prefix, because pane ids are colon-shaped too.
+- `peek` always reads `--source visible`, and that is deliberately not
+  configurable: herdr's own default is `recent`, which asks for scrollback and,
+  on an idle agent, is serviced by driving the pane's own mouse-scroll — the
+  operator watches their real terminal scroll and snap back once per read (and a
+  400-line `recent` read measured 13.8s against ~0.1s for `visible`).
+- The roster comes from `herdr api snapshot`, not `agent list`: the latter
+  returns one row per agent and collapses a split tab into a single entry (25
+  against 28 panes on the same machine), and carries no `tab_id`/`workspace_id`
+  to resolve a label with.
+
 ## 0.1.0 — 2026-09-13
 
 - `maw herdr ls` / `maw herdr ls --json`: list herdr sessions with pane and
