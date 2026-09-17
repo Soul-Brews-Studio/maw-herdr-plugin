@@ -22,14 +22,38 @@ maw herdr ls
 ```
 
 `owner/repo` expands to the GitHub URL; `owner/repo@ref` pins a branch or tag.
-From a local clone: `maw plugin install /path/to/maw-herdr-plugin --root ~/.maw/plugins`
-(add `--force` to overwrite an existing install).
+
+From a clone, use the justfile rather than installing the checkout directly:
+
+```bash
+just install                      # here
+just remote god@white.local       # ship a clean tree and install it there
+just remote-smoke god@white.local # run smoke.sh against what is installed there
+just status god@white.local       # versions, here and there
+```
+
+### Never `maw plugin install .` from a checkout that has been through `/incubate`
+
+`/incubate` leaves a `ψ` symlink pointing at the oracle vault, and that vault
+holds `incubate/<owner>/<repo>/origin` symlinks back to this repo **and to every
+other incubated repo** — a cycle. `maw plugin install` dereferences it and walks
+forever. Measured: **3.5 GB written** before it was killed, leaving the installed
+plugin with no `index.mjs` at all, so `maw herdr` reported itself uninstalled.
+
+`just install` stages through `git archive`, which emits tracked files only — no
+`ψ`, no `.git`, no `.claude` — so there is nothing for the installer to walk
+into. The same hazard applies to `rsync -L`, `cp -RL`, `tar -h`, and Docker build
+contexts over an incubated repo.
 
 ## Requirements
 
 - `herdr` on `PATH` (verified against herdr 0.9.0). Without it, `maw herdr help`
   still works and everything else exits non-zero.
 - `bun`, because maw runs dev-tier plugins with bun.
+
+Verified on macOS (m5, herdr 0.9.0, maw-rs v26.8.31-alpha) and Linux
+(white.local, herdr 0.9.0, maw-rs v26.9.12-alpha) — 13 smoke checks, rc=0 on
+both.
 
 ## Verbs
 
@@ -264,7 +288,8 @@ different `prefix` in herdr's `config.toml` before nesting them.
 ## Smoke
 
 ```bash
-bash smoke.sh
+just smoke                        # here
+just remote-smoke god@white.local # there
 ```
 
 Runs against the *installed* plugin through `maw herdr …`, so it needs `maw`
