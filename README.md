@@ -187,6 +187,55 @@ maw herdr wake neo --prompt "recap the last session" --attach
 maw herdr wake neo --own-session          # its own herdr server, the old behaviour
 ```
 
+## The federation map
+
+`maw herdr federation` (alias `fed`) draws the mesh. It is the one verb that does
+not talk to the herdr socket: herdr has no remote RPC, so a plugin on the local
+socket can never see past this host. It reads a
+[herdr-federation](https://github.com/Soul-Brews-Studio/herdr-federation) node
+over HTTP instead — the sibling service, one per machine, which already syncs
+every peer's pane roster.
+
+```
+$ maw herdr federation
+  federation · m5 key 574e75573d85d100  http://127.0.0.1:6750
+
+  ● m5  26 panes · this node
+  └─ ⇄ ● white  1 pane · seen 0s ago
+         http://100.97.212.120:6750
+
+  elsewhere in the mesh — what peers report, read-only
+    white federates with m5
+
+  5 live invites · 0 bans · 18 entries in the audit
+  1/1 link mutual · panes elsewhere: 1
+```
+
+`HERDR_FED_URL` points it at a node other than `http://127.0.0.1:6750`.
+`--json` gives the same thing machine-readably.
+
+### Reciprocity is the point
+
+Enforcement in that service is **local only** — a kick binds the node that issued
+it — so "we hold them" and "they report holding us" are two separate facts, and a
+map drawing one undirected line between two nodes would hide the state you most
+need to see. The arrow says which:
+
+| | |
+|---|---|
+| `⇄` | mutual — both sides hold each other |
+| `→` | we hold them; they do not report holding us |
+| `←` | they hold us; we do not hold them — they can reach us, we cannot act on them |
+| `··` | heard from, never joined |
+| `⇠⇢` | **stale** — the link is failing, so what they report arrived on the last successful pull and may no longer be true |
+
+That last one is not decoration. What a peer reports about itself only arrives on
+a successful pull, and while the link is down the cache keeps answering.
+Measured: after m5 kicked white, white still drew `⇄ m5` and "m5 federates with
+white" while every pull returned 401. A map that asserts stale state as current
+is worse than one that shows nothing, so the staleness rides on the edge and on
+each mesh row.
+
 ## Hey and peek
 
 `maw hey` reaches tmux oracles over federation and cannot see a herdr pane at

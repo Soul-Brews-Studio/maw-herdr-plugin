@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0 — 2026-09-17
+
+- `maw herdr federation` (alias `fed`): draws the mesh — who federates with whom,
+  each link's health, panes per node, and what peers report about themselves. The
+  one verb that does not talk to the herdr socket, because herdr has no remote RPC
+  (`herdr --remote` is launch-only); it reads a herdr-federation node over HTTP,
+  which already syncs every peer's roster. `HERDR_FED_URL` retargets it, `--json`
+  for machines.
+- Reciprocity is drawn, not assumed: `⇄` mutual, `→` we hold them, `←` they hold
+  us, `··` heard but never joined. Enforcement in that service is local-only, so
+  a single undirected line would hide the asymmetry that matters.
+- `⇠⇢` marks a **stale** edge. What a peer reports arrives only on a successful
+  pull, and while the link is down the cache keeps answering — measured: after m5
+  kicked white, white still drew `⇄ m5` and "m5 federates with white" while every
+  pull returned 401.
+- Fixed "17 audit entrys".
+
 ## 0.3.1 — 2026-09-17
 
 - Fix: **agent names were never matched.** The name lives on the agent record,

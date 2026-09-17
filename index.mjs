@@ -17,6 +17,7 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek> [args]
                                        running session (--own-session: its own server)
   hey <target> <message> [--dry-run]   submit a prompt to an agent (herdr's 'maw hey')
   peek <target> [--lines N] [--json]   read what an agent's pane is showing
+  federation [--json]                  the mesh: who federates with whom (alias: fed)
 
 Mirrors 'maw ls', 'maw a', 'maw wake' and 'maw hey' against the herdr multiplexer.
 herdr is a sibling multiplexer: it cannot see tmux panes, and maw cannot see herdr panes.
@@ -31,8 +32,8 @@ workspace label is the handle that always exists. Name one to address it directl
 Scope to one session with --session <name> when two sessions share a label.`;
 
 const C = process.stdout.isTTY
-  ? { dim: '\x1b[2m', cyan: '\x1b[36m', blue: '\x1b[94m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
-  : { dim: '', cyan: '', blue: '', green: '', red: '', off: '' };
+  ? { dim: '\x1b[2m', cyan: '\x1b[36m', blue: '\x1b[94m', green: '\x1b[32m', red: '\x1b[31m', warnTag: '\x1b[33m', off: '\x1b[0m' }
+  : { dim: '', cyan: '', blue: '', green: '', red: '', warnTag: '', off: '' };
 
 // Usage mistakes exit 2 like maw's own verbs; lookup failures exit 1.
 class UsageError extends Error {}
@@ -123,8 +124,12 @@ function nearbyTmuxSessions(target) {
   return [];
 }
 
+// "17 audit entrys". Only the irregulars this codebase actually uses live here;
+// a general pluraliser would be more code than the problem deserves.
+const PLURALS = { entry: 'entries' };
+
 function plural(n, word) {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
+  return `${n} ${n === 1 ? word : PLURALS[word] ?? `${word}s`}`;
 }
 
 // --- workspaces -------------------------------------------------------------
@@ -459,6 +464,171 @@ function cmdAttach(args) {
   runAttach(argv);
 }
 
+// --- federation -------------------------------------------------------------
+
+/**
+ * The federation map.
+ *
+ * Everything here comes from a herdr-federation node over HTTP — the sibling
+ * service, one per machine, whose only dependency is the herdr socket. It is the
+ * only thing on a machine that knows about OTHER machines: herdr itself has no
+ * remote RPC (`herdr --remote` is launch-only), so a plugin talking to the local
+ * socket can never see past this host. The node already syncs every peer's pane
+ * roster, which is what makes a map possible at all.
+ *
+ * Reciprocity is the point. "We joined them" and "they joined us" are separate
+ * facts in this design — enforcement is local-only, so a kick binds one side —
+ * and a map that drew a single undirected line between two nodes would hide
+ * exactly the state a person needs to see.
+ */
+const FED_URL = process.env.HERDR_FED_URL || "http://127.0.0.1:6750";
+
+async function fedGet(path, timeout = 5000) {
+  const res = await fetch(`${FED_URL}${path}`, { signal: AbortSignal.timeout(timeout) });
+  const body = await res.json();
+  if (body?.error) throw new Error(body.error);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return body;
+}
+
+const AGO_UNITS = [[86400, "d"], [3600, "h"], [60, "m"]];
+function ago(iso) {
+  if (!iso) return "never";
+  const s = Math.round((Date.now() - Date.parse(iso)) / 1000);
+  if (!Number.isFinite(s)) return "never";
+  for (const [size, tag] of AGO_UNITS) if (s >= size) return `${Math.round(s / size)}${tag} ago`;
+  return `${Math.max(s, 0)}s ago`;
+}
+
+function healthOf(peer) {
+  const fails = peer.consecutive ?? 0;
+  if (fails === 0 && peer.ok) return { dot: `${C.green}●${C.off}`, note: `seen ${ago(peer.lastSeen)}` };
+  if (fails === 0) return { dot: `${C.dim}○${C.off}`, note: "not contacted yet" };
+  return { dot: `${C.red}○${C.off}`, note: `${fails} failed since ${ago(peer.lastOkAt)} · ${(peer.lastError || "unreachable").slice(0, 40)}` };
+}
+
+async function cmdFederation(args) {
+  const json = args.includes("--json");
+  const rest = args.filter((a) => a !== "--json");
+  if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+
+  let status, admin;
+  try {
+    [status, admin] = await Promise.all([fedGet("/api/status"), fedGet("/api/admin").catch(() => null)]);
+  } catch (err) {
+    throw new Error(`no federation node at ${FED_URL} — ${String(err).replace(/^Error:\s*/, "")}\n  start one: cd <herdr-federation> && just node start\n  or point at another: HERDR_FED_URL=http://host:6750 maw herdr federation`);
+  }
+
+  const self = status.node;
+  const peers = status.peers ?? [];
+  const peerMembers = status.peerMembers ?? {};
+  const mesh = admin?.meshMembers ?? {};
+  const weJoined = new Set((admin?.members ?? []).map((m) => m.node));
+  const heardOnly = (status.known ?? []).filter((k) => !peers.some((p) => p.name === k.node));
+
+  // An edge is two facts, not one: whether WE hold them as a member, and whether
+  // THEY report holding us. Only both make it mutual.
+  const edges = peers.map((p) => {
+    // What a peer reports about itself only arrived on the last SUCCESSFUL pull.
+    // While the link is failing that cache keeps answering, and it will happily
+    // claim a mutual edge to a node that has kicked us — measured: after m5
+    // kicked white, white still drew "⇄ m5 · m5 federates with white" while every
+    // pull returned 401. A map that asserts stale state as current is worse than
+    // one that shows nothing, so staleness is carried on the edge.
+    const stale = (p.consecutive ?? 0) > 0;
+    const theyJoined = (mesh[p.name] ?? []).some((m) => m.node === self);
+    const ours = weJoined.has(p.name);
+    const mutual = ours && theyJoined && !stale;
+    return {
+      peer: p.name,
+      url: p.url,
+      ours,
+      theirs: theyJoined,
+      stale,
+      arrow: stale ? "⇠⇢" : mutual ? "⇄" : ours ? "→" : theyJoined ? "←" : "··",
+      mutual,
+      panes: (peerMembers[p.name] ?? []).length,
+      health: p,
+    };
+  });
+
+  if (json) {
+    console.log(JSON.stringify({
+      command: "federation", scope: "herdr", json: true, node: self,
+      url: FED_URL, identity: status.identity ?? null,
+      panes: (status.members ?? []).length,
+      edges: edges.map(({ health, ...e }) => ({ ...e, ok: health.ok ?? null, consecutive: health.consecutive ?? null, lastSeen: health.lastSeen ?? null })),
+      heardOnly: heardOnly.map((k) => ({ node: k.node, url: k.url ?? null, lastHeard: k.lastHeard })),
+      invites: (admin?.invites ?? []).filter((i) => i.status === "active").length,
+      bans: (admin?.bans ?? []).length,
+    }));
+    return;
+  }
+
+  const key = status.identity?.fingerprint ? ` ${C.dim}key ${status.identity.fingerprint}${C.off}` : "";
+  console.log(`  ${C.blue}federation${C.off} · ${C.cyan}${self}${C.off}${key}  ${C.dim}${FED_URL}${C.off}`);
+  console.log();
+
+  const mine = (status.members ?? []).length;
+  console.log(`  ${C.green}●${C.off} ${C.cyan}${self}${C.off}  ${C.dim}${plural(mine, "pane")} · this node${C.off}`);
+
+  // Only when there is genuinely nothing: a node we have heard from but never
+  // joined is still something, and printing "no peers" above it contradicted
+  // the very next line.
+  if (!edges.length && !heardOnly.length) {
+    console.log(`  ${C.dim}no peers — create an invite and send the link:${C.off}`);
+    console.log(`  ${C.dim}  cd <herdr-federation> && just fed invite${C.off}`);
+  }
+  edges.forEach((e, i) => {
+    const last = i === edges.length - 1 && !heardOnly.length;
+    const { dot, note } = healthOf(e.health);
+    console.log(`  ${C.dim}${last ? "└─" : "├─"}${C.off} ${e.arrow} ${dot} ${C.cyan}${e.peer}${C.off}  ${C.dim}${plural(e.panes, "pane")} · ${note}${C.off}`);
+    const lead = last ? "   " : `  ${C.dim}│${C.off}`;
+    console.log(`  ${lead}    ${C.dim}${e.url}${C.off}`);
+    // The asymmetry is the finding, so it is stated rather than implied by a glyph.
+    if (e.stale) {
+      console.log(`  ${lead}    ${C.warnTag}stale${C.off} ${C.dim}— everything below came from the last successful pull, ${ago(e.health.lastOkAt)}; ${e.peer} may have dropped us since${C.off}`);
+    } else if (!e.mutual) {
+      const why = e.ours
+        ? `we hold ${e.peer} as a member; ${e.peer} does not report holding us`
+        : e.theirs
+          ? `${e.peer} reports holding us; we do not hold them — they can reach us, we cannot act on them`
+          : `neither side reports the other as a member`;
+      console.log(`  ${lead}    ${C.red}one-way${C.off} ${C.dim}— ${why}${C.off}`);
+    }
+  });
+
+  heardOnly.forEach((k, i) => {
+    const last = i === heardOnly.length - 1;
+    console.log(`  ${C.dim}${last ? "└─" : "├─"}${C.off} ·· ${C.dim}○${C.off} ${k.node}  ${C.dim}heard ${ago(k.lastHeard)}, never joined${C.off}`);
+    if (k.url) console.log(`  ${last ? "   " : `  ${C.dim}│${C.off}`}    ${C.dim}${k.url}${C.off}`);
+  });
+
+  // What the mesh says about itself, kept apart from what WE federate with —
+  // the service enforces locally, so merging the two would claim an authority
+  // this node does not have.
+  const reported = Object.entries(mesh).filter(([, v]) => (v ?? []).length);
+  if (reported.length) {
+    const stalePeers = new Set(edges.filter((e) => e.stale).map((e) => e.peer));
+    console.log();
+    console.log(`  ${C.dim}elsewhere in the mesh — what peers report, read-only${C.off}`);
+    for (const [peer, list] of reported) {
+      const mark = stalePeers.has(peer) ? ` ${C.warnTag}(stale)${C.off}` : "";
+      console.log(`    ${peer}${mark} ${C.dim}federates with${C.off} ${list.map((m) => m.node).join(", ")}`);
+    }
+  }
+
+  if (admin) {
+    const live = (admin.invites ?? []).filter((i) => i.status === "active").length;
+    console.log();
+    console.log(`  ${C.dim}${plural(live, "live invite")} · ${plural((admin.bans ?? []).length, "ban")} · ${plural((admin.audit ?? []).length, "entry")} in the audit${C.off}`);
+  }
+  const mutual = edges.filter((e) => e.mutual).length;
+  const stale = edges.filter((e) => e.stale).length;
+  const staleNote = stale ? ` · ${C.warnTag}${stale} stale${C.off}` : "";
+  console.log(`  ${C.dim}${mutual}/${edges.length} link${edges.length === 1 ? "" : "s"} mutual${C.off}${staleNote}${C.dim} · panes elsewhere: ${edges.reduce((n, e) => n + e.panes, 0)}${C.off}`);
+}
+
 // --- hey / peek -------------------------------------------------------------
 
 function takeSession(args) {
@@ -713,6 +883,7 @@ try {
   else if (command === 'wake') cmdWake(args);
   else if (command === 'hey') await cmdHey(args);
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
+  else if (command === 'federation' || command === 'fed') await cmdFederation(args);
   else throw new UsageError(`unknown command: ${command}`);
 } catch (err) {
   console.error(`maw herdr: ${err.message}`);
