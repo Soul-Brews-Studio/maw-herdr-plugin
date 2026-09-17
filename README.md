@@ -147,16 +147,28 @@ maw herdr peek digger --lines 40           # read the answer
 maw herdr hey wF:p1 "…" --dry-run          # resolve and print the herdr call, send nothing
 ```
 
-### Targets are workspace labels, because agent names are not there
+### Targets: agent name, pane id, or workspace label
 
 `<target>` resolves in tiers: pane id, agent name, workspace label, tab label,
 then a unique prefix or substring of the workspace label.
 
-**In practice the workspace label is the only handle that exists.** On the fleet
-machine this was written against, **0 of 28 panes carried an `agent_name`** — so
-a design built on names would have addressed nothing. Workspace labels are the
-oracle names the fleet already uses (`digger-oracle`, `pulse-oracle`), which is
-why `maw herdr hey digger …` works and reads like `maw hey`.
+**The workspace label is the handle that always exists.** An agent has no name
+until someone runs `herdr agent rename`, and the fleet mostly does not — so
+workspace labels, which are the oracle names already in use (`digger-oracle`,
+`pulse-oracle`), are what makes `maw herdr hey digger …` read like `maw hey`.
+
+Name an agent and it becomes directly addressable:
+
+```bash
+herdr agent rename "$HERDR_PANE_ID" reviewer
+maw herdr hey reviewer "take a look at #12"
+```
+
+**The name lives on the agent record, not on the pane.** `snapshot.panes[]`
+carries neither `name` nor `agent_name`; `snapshot.agents[]` carries `name`, and
+the two are joined by `pane_id`. Reading it off a pane yields `undefined` for
+every agent, named or not — which is exactly the bug 0.3.1 fixes, and why 0.2.0
+reported that no agent anywhere had a name.
 
 A workspace routinely holds several agent panes — a split tab, or several tabs.
 An exact label match is therefore often plural, and the tie is broken by the
@@ -221,6 +233,9 @@ reports zero panes and agents; herdr cannot count what is not running.
 `{session, pane, agent, name, status, workspace, tab, tabLabel, focused, cwd}`.
 `peek --json` answers `{command, pane, session, workspace, agent, status,
 source, lines, text}` — `source` is always `"visible"`.
+
+Agent names are joined in from `snapshot.agents[]` by `pane_id`; a pane carries
+no name field of its own.
 
 The roster is built from `herdr api snapshot`, never from `agent list`:
 `agent list` returns one row per agent and so collapses a split tab into a single

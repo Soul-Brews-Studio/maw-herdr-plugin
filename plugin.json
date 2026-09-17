@@ -1,6 +1,6 @@
 {
   "name": "herdr",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "sdk": "^1.0.0",
   "runtime": "bun-dev",
   "target": "js",

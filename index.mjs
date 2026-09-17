@@ -25,9 +25,9 @@ A herdr SESSION is a server process, not a workspace. The thing that plays a tmu
 session's role — the place work lives — is a WORKSPACE, and one session holds many.
 'ls' therefore lists workspaces; 'ls --sessions' lists the servers.
 
-<target> is a workspace label (the oracle name), a pane id, or an agent name.
-Herdr agents are usually unnamed — 0 of 28 panes carried one on the machine this
-was written for — so the workspace label is the handle that actually exists.
+<target> is an agent name, a pane id, or a workspace label (the oracle name).
+Most herdr agents are unnamed until someone runs 'herdr agent rename', so the
+workspace label is the handle that always exists. Name one to address it directly.
 Scope to one session with --session <name> when two sessions share a label.`;
 
 const C = process.stdout.isTTY
@@ -229,6 +229,12 @@ async function roster() {
     }
     const spaces = new Map((snapshot.workspaces ?? []).map(w => [w.workspace_id, w]));
     const tabs = new Map((snapshot.tabs ?? []).map(t => [t.tab_id, t]));
+    // The name lives on the AGENT record, not on the pane. `panes[]` carries
+    // neither `name` nor `agent_name`, so reading it off a pane always yielded
+    // undefined and the name tier in resolveAgent could never match — measured:
+    // `herdr agent get zzz-probe` resolved while `maw herdr peek zzz-probe` said
+    // no such agent. Join by pane_id.
+    const names = new Map((snapshot.agents ?? []).filter(a => a.name).map(a => [a.pane_id, a.name]));
     return (snapshot.panes ?? [])
       .filter(p => p.agent)          // a bare shell is not something to talk to
       .map(p => {
@@ -237,7 +243,7 @@ async function roster() {
           session: s.session,
           pane: p.pane_id,
           agent: p.agent,
-          name: p.agent_name ?? null,
+          name: names.get(p.pane_id) ?? null,
           status: p.agent_status ?? 'unknown',
           workspace: space?.label ?? p.workspace_id ?? '?',
           activeTab: space?.active_tab_id,

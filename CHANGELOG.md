@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1 — 2026-09-17
+
+- Fix: **agent names were never matched.** The name lives on the agent record,
+  not on the pane — `snapshot.panes[]` carries neither `name` nor `agent_name`,
+  while `snapshot.agents[]` carries `name`, joined by `pane_id`. Reading it off a
+  pane returned `undefined` for every agent, so the name tier in target
+  resolution was dead code: `herdr agent get zzz-probe` resolved while
+  `maw herdr peek zzz-probe` answered "no agent". Joined by `pane_id`, 8 of 26
+  agents on the reference machine turned out to be named.
+- This also corrects 0.2.0's claim that "0 of 28 panes carried an `agent_name`".
+  That was true, and misleading: the field does not exist on a pane at all. The
+  conclusion drawn from it — that workspace labels are the handle that always
+  exists — still holds, because an agent has no name until someone runs
+  `herdr agent rename`.
+
 ## 0.3.0 — 2026-09-17
 
 Root-cause fix: **the plugin mapped tmux's "session" onto herdr's "session" by
