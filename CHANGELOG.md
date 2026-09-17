@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.0 — 2026-09-17
+
+- `maw herdr federation` (alias `fed`): draws the mesh — who federates with whom,
+  each link's health, panes per node, and what peers report about themselves. The
+  one verb that does not talk to the herdr socket, because herdr has no remote RPC
+  (`herdr --remote` is launch-only); it reads a herdr-federation node over HTTP,
+  which already syncs every peer's roster. `HERDR_FED_URL` retargets it, `--json`
+  for machines.
+- Reciprocity is drawn, not assumed: `⇄` mutual, `→` we hold them, `←` they hold
+  us, `··` heard but never joined. Enforcement in that service is local-only, so
+  a single undirected line would hide the asymmetry that matters.
+- `⇠⇢` marks a **stale** edge. What a peer reports arrives only on a successful
+  pull, and while the link is down the cache keeps answering — measured: after m5
+  kicked white, white still drew `⇄ m5` and "m5 federates with white" while every
+  pull returned 401.
+- Fixed "17 audit entrys".
+
+## 0.3.1 — 2026-09-17
+
+- Fix: **agent names were never matched.** The name lives on the agent record,
+  not on the pane — `snapshot.panes[]` carries neither `name` nor `agent_name`,
+  while `snapshot.agents[]` carries `name`, joined by `pane_id`. Reading it off a
+  pane returned `undefined` for every agent, so the name tier in target
+  resolution was dead code: `herdr agent get zzz-probe` resolved while
+  `maw herdr peek zzz-probe` answered "no agent". Joined by `pane_id`, 8 of 26
+  agents on the reference machine turned out to be named.
+- This also corrects 0.2.0's claim that "0 of 28 panes carried an `agent_name`".
+  That was true, and misleading: the field does not exist on a pane at all. The
+  conclusion drawn from it — that workspace labels are the handle that always
+  exists — still holds, because an agent has no name until someone runs
+  `herdr agent rename`.
+
 ## 0.3.0 — 2026-09-17
 
 Root-cause fix: **the plugin mapped tmux's "session" onto herdr's "session" by

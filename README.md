@@ -22,14 +22,68 @@ maw herdr ls
 ```
 
 `owner/repo` expands to the GitHub URL; `owner/repo@ref` pins a branch or tag.
-From a local clone: `maw plugin install /path/to/maw-herdr-plugin --root ~/.maw/plugins`
-(add `--force` to overwrite an existing install).
+
+From a clone, use the justfile rather than installing the checkout directly. It
+is split one module per place the plugin can live — `local` and `remote`:
+
+```bash
+just                            # modules and top-level recipes
+just --list local               # one module's recipes
+just local install              # check, then install here from a clean tree
+just local smoke                # smoke suite against what is installed here
+just remote up god@white.local  # install there, then smoke it there
+just status god@white.local     # versions, here and there
+
+just fleet status               # what every machine has, and what it is missing
+just fleet install              # install onto every machine that can take it
+just fleet smoke                # smoke every machine that has it
+```
+
+### A "machine" is a (host, user) pair, not a host
+
+`herdr machine list` is the default fleet, and its entries are **ssh targets**.
+That distinction is load-bearing. Measured 2026-09-17:
+
+```
+TARGET                 HOST         OS     TOOLS                              PLUGIN
+white.local            white        Linux  maw bun just node python3          none
+nm@white.local         white        Linux  maw herdr bun just node python3    herdr@0.3.1
+god                    white        Linux  maw herdr bun just node python3    herdr@0.3.1
+nazt@100.84.206.23     lima-linux   Linux  just python3                       none
+```
+
+Three of those four are the **same host** under different users, and they do not
+agree: `white.local` has no `herdr` on `PATH` at all, while `god` and
+`nm@white.local` each run their own herdr server with its own panes. Any address
+scheme that says "white" without saying which user is ambiguous on this fleet
+today.
+
+`just fleet install` skips a target with the reason (`no herdr`, `no maw`,
+`unreachable`) rather than failing the run, so one bare box does not stop the
+rest. Set `HERDR_FLEET="a b c"` to use a list herdr has never been told about.
+
+### Never `maw plugin install .` from a checkout that has been through `/incubate`
+
+`/incubate` leaves a `ψ` symlink pointing at the oracle vault, and that vault
+holds `incubate/<owner>/<repo>/origin` symlinks back to this repo **and to every
+other incubated repo** — a cycle. `maw plugin install` dereferences it and walks
+forever. Measured: **3.5 GB written** before it was killed, leaving the installed
+plugin with no `index.mjs` at all, so `maw herdr` reported itself uninstalled.
+
+`just install` stages through `git archive`, which emits tracked files only — no
+`ψ`, no `.git`, no `.claude` — so there is nothing for the installer to walk
+into. The same hazard applies to `rsync -L`, `cp -RL`, `tar -h`, and Docker build
+contexts over an incubated repo.
 
 ## Requirements
 
 - `herdr` on `PATH` (verified against herdr 0.9.0). Without it, `maw herdr help`
   still works and everything else exits non-zero.
 - `bun`, because maw runs dev-tier plugins with bun.
+
+Verified on macOS (m5, herdr 0.9.0, maw-rs v26.8.31-alpha) and Linux
+(white.local, herdr 0.9.0, maw-rs v26.9.12-alpha) — 13 smoke checks, rc=0 on
+both.
 
 ## Verbs
 
@@ -133,6 +187,55 @@ maw herdr wake neo --prompt "recap the last session" --attach
 maw herdr wake neo --own-session          # its own herdr server, the old behaviour
 ```
 
+## The federation map
+
+`maw herdr federation` (alias `fed`) draws the mesh. It is the one verb that does
+not talk to the herdr socket: herdr has no remote RPC, so a plugin on the local
+socket can never see past this host. It reads a
+[herdr-federation](https://github.com/Soul-Brews-Studio/herdr-federation) node
+over HTTP instead — the sibling service, one per machine, which already syncs
+every peer's pane roster.
+
+```
+$ maw herdr federation
+  federation · m5 key 574e75573d85d100  http://127.0.0.1:6750
+
+  ● m5  26 panes · this node
+  └─ ⇄ ● white  1 pane · seen 0s ago
+         http://100.97.212.120:6750
+
+  elsewhere in the mesh — what peers report, read-only
+    white federates with m5
+
+  5 live invites · 0 bans · 18 entries in the audit
+  1/1 link mutual · panes elsewhere: 1
+```
+
+`HERDR_FED_URL` points it at a node other than `http://127.0.0.1:6750`.
+`--json` gives the same thing machine-readably.
+
+### Reciprocity is the point
+
+Enforcement in that service is **local only** — a kick binds the node that issued
+it — so "we hold them" and "they report holding us" are two separate facts, and a
+map drawing one undirected line between two nodes would hide the state you most
+need to see. The arrow says which:
+
+| | |
+|---|---|
+| `⇄` | mutual — both sides hold each other |
+| `→` | we hold them; they do not report holding us |
+| `←` | they hold us; we do not hold them — they can reach us, we cannot act on them |
+| `··` | heard from, never joined |
+| `⇠⇢` | **stale** — the link is failing, so what they report arrived on the last successful pull and may no longer be true |
+
+That last one is not decoration. What a peer reports about itself only arrives on
+a successful pull, and while the link is down the cache keeps answering.
+Measured: after m5 kicked white, white still drew `⇄ m5` and "m5 federates with
+white" while every pull returned 401. A map that asserts stale state as current
+is worse than one that shows nothing, so the staleness rides on the edge and on
+each mesh row.
+
 ## Hey and peek
 
 `maw hey` reaches tmux oracles over federation and cannot see a herdr pane at
@@ -147,16 +250,28 @@ maw herdr peek digger --lines 40           # read the answer
 maw herdr hey wF:p1 "…" --dry-run          # resolve and print the herdr call, send nothing
 ```
 
-### Targets are workspace labels, because agent names are not there
+### Targets: agent name, pane id, or workspace label
 
 `<target>` resolves in tiers: pane id, agent name, workspace label, tab label,
 then a unique prefix or substring of the workspace label.
 
-**In practice the workspace label is the only handle that exists.** On the fleet
-machine this was written against, **0 of 28 panes carried an `agent_name`** — so
-a design built on names would have addressed nothing. Workspace labels are the
-oracle names the fleet already uses (`digger-oracle`, `pulse-oracle`), which is
-why `maw herdr hey digger …` works and reads like `maw hey`.
+**The workspace label is the handle that always exists.** An agent has no name
+until someone runs `herdr agent rename`, and the fleet mostly does not — so
+workspace labels, which are the oracle names already in use (`digger-oracle`,
+`pulse-oracle`), are what makes `maw herdr hey digger …` read like `maw hey`.
+
+Name an agent and it becomes directly addressable:
+
+```bash
+herdr agent rename "$HERDR_PANE_ID" reviewer
+maw herdr hey reviewer "take a look at #12"
+```
+
+**The name lives on the agent record, not on the pane.** `snapshot.panes[]`
+carries neither `name` nor `agent_name`; `snapshot.agents[]` carries `name`, and
+the two are joined by `pane_id`. Reading it off a pane yields `undefined` for
+every agent, named or not — which is exactly the bug 0.3.1 fixes, and why 0.2.0
+reported that no agent anywhere had a name.
 
 A workspace routinely holds several agent panes — a split tab, or several tabs.
 An exact label match is therefore often plural, and the tie is broken by the
@@ -222,6 +337,9 @@ reports zero panes and agents; herdr cannot count what is not running.
 `peek --json` answers `{command, pane, session, workspace, agent, status,
 source, lines, text}` — `source` is always `"visible"`.
 
+Agent names are joined in from `snapshot.agents[]` by `pane_id`; a pane carries
+no name field of its own.
+
 The roster is built from `herdr api snapshot`, never from `agent list`:
 `agent list` returns one row per agent and so collapses a split tab into a single
 entry (25 agents against the snapshot's 28 panes on the same machine). The
@@ -249,7 +367,8 @@ different `prefix` in herdr's `config.toml` before nesting them.
 ## Smoke
 
 ```bash
-bash smoke.sh
+just local smoke                  # here
+just remote smoke god@white.local # there
 ```
 
 Runs against the *installed* plugin through `maw herdr …`, so it needs `maw`

@@ -1,17 +1,17 @@
 {
   "name": "herdr",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "sdk": "^1.0.0",
   "runtime": "bun-dev",
   "target": "js",
   "entry": "index.mjs",
-  "description": "herdr workspaces and agents through maw's own verbs: ls, attach, wake, hey, peek",
+  "description": "herdr workspaces, agents and the federation through maw's own verbs: ls, attach, wake, hey, peek, federation",
   "capabilities": [
     "proc:exec:herdr"
   ],
   "cli": {
     "command": "herdr",
-    "help": "maw herdr <ls|a|wake|hey|peek> [--json] [--print]",
+    "help": "maw herdr <ls|a|wake|hey|peek|federation> [--json] [--print]",
     "interactive": true
   }
 }

@@ -135,6 +135,19 @@ for (const a of d.agents) {
     echo "SKIP: no agent panes for hey --dry-run"
   fi
 
+  # A named agent must be reachable BY NAME. The name lives on the agent record,
+  # not on the pane, so reading it off a pane silently addressed nothing.
+  named=$(printf '%s' "$out" | node -e 'const d=JSON.parse(require("node:fs").readFileSync(0,"utf8")); const a=d.agents.find(x=>x.name); if(a) process.stdout.write(a.name)')
+  if [ -n "$named" ]; then
+    plan=$(maw herdr hey "$named" smoke --dry-run 2>&1) || fail "maw herdr hey <name> --dry-run exited non-zero: $plan"
+    case "$plan" in
+      *"matched by agent name"*) echo "ok: maw herdr hey resolves a named agent by name" ;;
+      *) fail "named agent did not match on the name tier: $plan" ;;
+    esac
+  else
+    echo "SKIP: no named agent (herdr agent rename <pane> <name>) for the name tier"
+  fi
+
   # An unknown target must be refused before anything is read.
   if out=$(maw herdr peek __no_such_agent__ 2>&1); then
     fail "maw herdr peek __no_such_agent__ exited 0"
