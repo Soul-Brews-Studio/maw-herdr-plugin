@@ -597,6 +597,30 @@ async function fleetRoster() {
   return { node: status.node, rows, relayed, nodes: [...new Set(nodes)], health };
 }
 
+/**
+ * `<node>:<target>` — an address on another machine, or null when it is not one.
+ *
+ * The colon is only a NODE address when the part before it names a node the
+ * federation knows. Herdr pane ids are colon-shaped too (`w2V:p1`), so an
+ * unconditional split would read `w2V` as a node and break every local call.
+ *
+ * Shared by peek and hey deliberately. They had separate answers to "is this a
+ * node address" — peek had this branch and hey had none, so `peek m5:w4:p1`
+ * crossed machines while `hey m5:w4:p1` silently resolved against the local
+ * roster and reported "no agent". One resolver means that cannot recur.
+ */
+async function resolveFleetTarget(raw) {
+  if (!raw || !raw.includes(':')) return null;
+  const [maybeNode, ...rest] = raw.split(':');
+  const target = rest.join(':');
+  if (!target) return null;
+  let fleet = null;
+  try { fleet = await fleetRoster(); } catch { return null; }   // no node here — caller falls back to local
+  if (maybeNode !== fleet.node && !fleet.rows.some(r => r.node === maybeNode)) return null;
+  const known = fleet.rows.find(r => r.node === maybeNode && (r.pane === target || r.handle === target));
+  return { fleet, node: maybeNode, target, pane: known?.pane ?? target, handle: known?.handle ?? null, via: fleet.relayed[maybeNode]?.via ?? null };
+}
+
 /** A pane is something to talk to only if herdr found an agent in it. */
 const isAgent = m => m.kind && m.kind !== 'shell';
 
@@ -777,9 +801,32 @@ async function cmdHey(args) {
   // resolution and the exact herdr call before committing to it.
   const dryRun = args.includes('--dry-run');
   if (dryRun) args.splice(args.indexOf('--dry-run'), 1);
+  // `<node>:<target>` — deliver on another machine, through the federation.
+  // Same resolver peek uses, so the two can never disagree about what a colon
+  // means. Routing is the node's job: a direct peer gets an authenticated
+  // /api/fed/hey, a node behind a hub goes through that hub's /api/fed/relay.
+  const fleetHit = await resolveFleetTarget(args[0]);
+  if (fleetHit) {
+    args.shift();
+    const msg = args.join(' ').trim();
+    if (!msg) throw new UsageError(`hey needs a message: maw herdr hey ${fleetHit.node}:${fleetHit.target} "<message>"`);
+    const label = `${C.cyan}${fleetHit.node}${C.off}${fleetHit.via ? ` ${C.dim}via ${fleetHit.via}${C.off}` : ''} ${C.dim}${fleetHit.pane}${fleetHit.handle ? ` · ${fleetHit.handle}` : ''}${C.off}`;
+    if (dryRun) {
+      console.log(`  ${label}`);
+      console.log(`  ${C.dim}would POST ${FED_URL}/api/fleet/hey ${JSON.stringify({ node: fleetHit.node, to: fleetHit.pane, text: msg })}${C.off}`);
+      console.log(`  ${C.dim}nothing was sent${C.off}`);
+      return;
+    }
+    const out = await fedPost('/api/fleet/hey', { node: fleetHit.node, to: fleetHit.pane, text: msg });
+    console.log(`  ${label}`);
+    console.log(`  sent ${C.dim}(delivered ${out.delivered}${out.to ? ` to ${out.to}` : ''})${C.off}`);
+    console.log(`  read it back: maw herdr peek ${fleetHit.node}:${fleetHit.pane}`);
+    return;
+  }
+
   const { pool, verb } = await poolFor(args, 'hey');
   const target = args.shift();
-  if (!target) throw new UsageError('hey needs a target and a message: maw herdr hey <target> <message>');
+  if (!target) throw new UsageError('hey needs a target and a message: maw herdr hey <target> <message>\n  across the federation: maw herdr hey <node>:<pane> "…"');
   // Everything after the target is the message, unquoted included — `maw hey`
   // behaves this way and retyping quotes for a sentence is friction nobody wants.
   const message = args.join(' ').trim();
@@ -809,36 +856,19 @@ async function cmdPeek(args) {
     if (!Number.isInteger(lines) || lines < 1) throw new UsageError('--lines needs a positive integer');
     rest.splice(at, 2);
   }
-  const target0 = rest[0];
-  // `<node>:<pane>` — read a pane on another node, through the federation.
-  //
-  // Pane ids are colon-shaped too (`w2V:p1`), so the split is only a node
-  // address when the part before the colon names a node the federation knows.
-  // Otherwise `w2V:p1` would be read as node `w2V`, and every local peek by
-  // pane id would break.
-  if (target0 && target0.includes(':')) {
-    const [maybeNode, ...restOfTarget] = target0.split(':');
-    const pane = restOfTarget.join(':');
-    if (pane) {
-      let fleet = null;
-      try { fleet = await fleetRoster(); } catch { /* no node here; fall through to local */ }
-      if (fleet && (maybeNode === fleet.node || fleet.rows.some(r => r.node === maybeNode))) {
-        rest.shift();
-        if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
-        const known = fleet.rows.find(r => r.node === maybeNode && (r.pane === pane || r.handle === pane));
-        const paneId = known?.pane ?? pane;
-        const out = await fedPost('/api/fleet/pane', { node: maybeNode, pane: paneId, lines });
-        if (json) {
-          console.log(JSON.stringify({ command: 'peek', node: out.node, pane: out.pane, via: fleet.relayed[maybeNode]?.via ?? null, source: 'visible', lines: out.lines, text: out.text }));
-          return;
-        }
-        const via = fleet.relayed[maybeNode]?.via;
-        console.log(`  ${C.cyan}${out.node}${C.off}${via ? ` ${C.dim}via ${via}${C.off}` : ''} ${C.dim}${out.pane}${known?.handle ? ` · ${known.handle}` : ''} · last ${out.lines} lines${C.off}`);
-        console.log();
-        console.log(out.text);
-        return;
-      }
+  const fleetHit = await resolveFleetTarget(rest[0]);
+  if (fleetHit) {
+    rest.shift();
+    if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+    const out = await fedPost('/api/fleet/pane', { node: fleetHit.node, pane: fleetHit.pane, lines });
+    if (json) {
+      console.log(JSON.stringify({ command: 'peek', node: out.node, pane: out.pane, via: fleetHit.via, source: 'visible', lines: out.lines, text: out.text }));
+      return;
     }
+    console.log(`  ${C.cyan}${out.node}${C.off}${fleetHit.via ? ` ${C.dim}via ${fleetHit.via}${C.off}` : ''} ${C.dim}${out.pane}${fleetHit.handle ? ` · ${fleetHit.handle}` : ''} · last ${out.lines} lines${C.off}`);
+    console.log();
+    console.log(out.text);
+    return;
   }
 
   const { pool, verb } = await poolFor(rest, 'peek');
