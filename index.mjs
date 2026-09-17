@@ -528,7 +528,12 @@ async function cmdFederation(args) {
 
   // An edge is two facts, not one: whether WE hold them as a member, and whether
   // THEY report holding us. Only both make it mutual.
-  const edges = peers.map((p) => {
+  // A node we see only through a hub is not our edge: no reciprocity to judge,
+  // nothing to hold or be held by. It is listed under its hub instead.
+  const relayed = peers.filter((p) => p.via);
+  const direct = peers.filter((p) => !p.via);
+
+  const edges = direct.map((p) => {
     // What a peer reports about itself only arrived on the last SUCCESSFUL pull.
     // While the link is failing that cache keeps answering, and it will happily
     // claim a mutual edge to a node that has kicked us — measured: after m5
@@ -559,6 +564,7 @@ async function cmdFederation(args) {
       panes: (status.members ?? []).length,
       edges: edges.map(({ health, ...e }) => ({ ...e, ok: health.ok ?? null, consecutive: health.consecutive ?? null, lastSeen: health.lastSeen ?? null })),
       heardOnly: heardOnly.map((k) => ({ node: k.node, url: k.url ?? null, lastHeard: k.lastHeard })),
+      relayed: relayed.map((p) => ({ node: p.name, via: p.via, panes: (peerMembers[p.name] ?? []).length, ok: p.ok ?? null, consecutive: p.consecutive ?? null, lastOkAt: p.lastOkAt ?? null })),
       invites: (admin?.invites ?? []).filter((i) => i.status === "active").length,
       bans: (admin?.bans ?? []).length,
     }));
@@ -583,8 +589,17 @@ async function cmdFederation(args) {
     const last = i === edges.length - 1 && !heardOnly.length;
     const { dot, note } = healthOf(e.health);
     console.log(`  ${C.dim}${last ? "└─" : "├─"}${C.off} ${e.arrow} ${dot} ${C.cyan}${e.peer}${C.off}  ${C.dim}${plural(e.panes, "pane")} · ${note}${C.off}`);
-    const lead = last ? "   " : `  ${C.dim}│${C.off}`;
+    const lead = last ? " " : `${C.dim}│${C.off}`;
     console.log(`  ${lead}    ${C.dim}${e.url}${C.off}`);
+    // what this hub lets us see — one hop, no edge of ours
+    const through = relayed.filter((r) => r.via === e.peer);
+    through.forEach((r, j) => {
+      const rl = j === through.length - 1;
+      const fails = r.consecutive ?? 0;
+      const rd = fails === 0 ? `${C.green}●${C.off}` : `${C.red}○${C.off}`;
+      const rn = fails === 0 ? `hub reached it ${ago(r.lastOkAt)}` : `hub: ${fails} failed since ${ago(r.lastOkAt)}`;
+      console.log(`  ${lead}    ${C.dim}${rl ? "└─" : "├─"}${C.off} ${C.dim}◌${C.off} ${rd} ${C.cyan}${r.name}${C.off}  ${C.dim}${plural((peerMembers[r.name] ?? []).length, "pane")} · via ${e.peer} · ${rn}${C.off}`);
+    });
     // The asymmetry is the finding, so it is stated rather than implied by a glyph.
     if (e.stale) {
       console.log(`  ${lead}    ${C.warnTag}stale${C.off} ${C.dim}— everything below came from the last successful pull, ${ago(e.health.lastOkAt)}; ${e.peer} may have dropped us since${C.off}`);
@@ -601,7 +616,7 @@ async function cmdFederation(args) {
   heardOnly.forEach((k, i) => {
     const last = i === heardOnly.length - 1;
     console.log(`  ${C.dim}${last ? "└─" : "├─"}${C.off} ·· ${C.dim}○${C.off} ${k.node}  ${C.dim}heard ${ago(k.lastHeard)}, never joined${C.off}`);
-    if (k.url) console.log(`  ${last ? "   " : `  ${C.dim}│${C.off}`}    ${C.dim}${k.url}${C.off}`);
+    if (k.url) console.log(`  ${last ? " " : `${C.dim}│${C.off}`}    ${C.dim}${k.url}${C.off}`);
   });
 
   // What the mesh says about itself, kept apart from what WE federate with —
