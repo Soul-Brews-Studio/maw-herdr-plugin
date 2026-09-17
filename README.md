@@ -33,7 +33,34 @@ just local install              # check, then install here from a clean tree
 just local smoke                # smoke suite against what is installed here
 just remote up god@white.local  # install there, then smoke it there
 just status god@white.local     # versions, here and there
+
+just fleet status               # what every machine has, and what it is missing
+just fleet install              # install onto every machine that can take it
+just fleet smoke                # smoke every machine that has it
 ```
+
+### A "machine" is a (host, user) pair, not a host
+
+`herdr machine list` is the default fleet, and its entries are **ssh targets**.
+That distinction is load-bearing. Measured 2026-09-17:
+
+```
+TARGET                 HOST         OS     TOOLS                              PLUGIN
+white.local            white        Linux  maw bun just node python3          none
+nm@white.local         white        Linux  maw herdr bun just node python3    herdr@0.3.1
+god                    white        Linux  maw herdr bun just node python3    herdr@0.3.1
+nazt@100.84.206.23     lima-linux   Linux  just python3                       none
+```
+
+Three of those four are the **same host** under different users, and they do not
+agree: `white.local` has no `herdr` on `PATH` at all, while `god` and
+`nm@white.local` each run their own herdr server with its own panes. Any address
+scheme that says "white" without saying which user is ambiguous on this fleet
+today.
+
+`just fleet install` skips a target with the reason (`no herdr`, `no maw`,
+`unreachable`) rather than failing the run, so one bare box does not stop the
+rest. Set `HERDR_FLEET="a b c"` to use a list herdr has never been told about.
 
 ### Never `maw plugin install .` from a checkout that has been through `/incubate`
 

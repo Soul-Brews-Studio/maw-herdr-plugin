@@ -8,11 +8,14 @@
 #
 #   just local install               install here
 #   just remote up god@white.local   install there, then smoke it
+#   just fleet status                what every machine has, and what it is missing
+#   just fleet install               install onto every machine that can take it
 #   just status god@white.local      versions, here and there
 #   just --list local                one module's recipes
 
 mod local  'just/01-local.just'
 mod remote 'just/02-remote.just'
+mod fleet  'just/03-fleet.just'
 
 default:
     @just --list
