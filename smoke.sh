@@ -75,6 +75,55 @@ else
   echo "SKIP: no ~/.maw/oracles.json for wake --dry-run"
 fi
 
+# ls --agents: shape only. Empty is a legitimate answer on a machine with no
+# agent panes, so this asserts the envelope, never a count.
+if command -v herdr >/dev/null 2>&1; then
+  out=$(maw herdr ls --agents --json) || fail "maw herdr ls --agents --json exited non-zero"
+  printf '%s' "$out" | node -e '
+const d = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+if (d.mode !== "agents" || d.scope !== "herdr" || !Array.isArray(d.agents)) {
+  console.error("bad envelope: " + JSON.stringify(d).slice(0, 200));
+  process.exit(1);
+}
+for (const a of d.agents) {
+  for (const k of ["session", "pane", "agent", "status", "workspace"]) {
+    if (!(k in a)) { console.error("agent row missing " + k); process.exit(1); }
+  }
+}
+' || fail "maw herdr ls --agents --json shape is wrong"
+  echo "ok: maw herdr ls --agents --json shape"
+
+  # hey --dry-run against the first listed pane: resolves and prints the herdr
+  # call, sends nothing. Skipped when no agent pane exists.
+  pane=$(printf '%s' "$out" | node -e 'const d=JSON.parse(require("node:fs").readFileSync(0,"utf8")); if(d.agents[0]) process.stdout.write(d.agents[0].pane)')
+  if [ -n "$pane" ]; then
+    plan=$(maw herdr hey "$pane" smoke test --dry-run 2>&1) || fail "maw herdr hey --dry-run exited non-zero: $plan"
+    case "$plan" in
+      *"agent prompt $pane"*"nothing was sent"*) echo "ok: maw herdr hey --dry-run plans without sending" ;;
+      *) fail "hey --dry-run printed no plan: $plan" ;;
+    esac
+  else
+    echo "SKIP: no agent panes for hey --dry-run"
+  fi
+
+  # An unknown target must be refused before anything is read.
+  if out=$(maw herdr peek __no_such_agent__ 2>&1); then
+    fail "maw herdr peek __no_such_agent__ exited 0"
+  fi
+  case "$out" in
+    *"no agent"*) echo "ok: maw herdr peek rejects an unknown target" ;;
+    *) fail "unknown-agent error did not mention 'no agent': $out" ;;
+  esac
+else
+  echo "SKIP: herdr not installed — ls --agents, hey, peek"
+fi
+
+# A missing message is a usage error, and never reaches herdr.
+if maw herdr hey sometarget >/dev/null 2>&1; then
+  fail "maw herdr hey with no message exited 0"
+fi
+echo "ok: maw herdr hey with no message is refused"
+
 if out=$(maw herdr a __no_such_session__ 2>&1); then
   fail "maw herdr a __no_such_session__ exited 0"
 fi

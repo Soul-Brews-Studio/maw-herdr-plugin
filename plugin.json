@@ -1,17 +1,17 @@
 {
   "name": "herdr",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "sdk": "^1.0.0",
   "runtime": "bun-dev",
   "target": "js",
   "entry": "index.mjs",
-  "description": "List and attach herdr multiplexer sessions, mirroring maw ls and maw a",
+  "description": "herdr sessions and agents through maw's own verbs: ls, attach, wake, hey, peek",
   "capabilities": [
     "proc:exec:herdr"
   ],
   "cli": {
     "command": "herdr",
-    "help": "maw herdr <ls|a> [--json] [--print]",
+    "help": "maw herdr <ls|a|wake|hey|peek> [--json] [--print]",
     "interactive": true
   }
 }

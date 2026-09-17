@@ -7,14 +7,22 @@ import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek> [args]
   ls [--json]                          list herdr sessions with pane and agent counts
+  ls --agents [--json]                 list every agent pane across all sessions
   a <session> [--print]                attach to a herdr session (alias: attach)
   wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
                                        start an oracle's agent in its own herdr session
+  hey <target> <message> [--dry-run]   submit a prompt to an agent (herdr's 'maw hey')
+  peek <target> [--lines N] [--json]   read what an agent's pane is showing
 
-Mirrors 'maw ls', 'maw a' and 'maw wake' against the herdr multiplexer.
-herdr is a sibling multiplexer: it cannot see tmux panes, and maw cannot see herdr panes.`;
+Mirrors 'maw ls', 'maw a', 'maw wake' and 'maw hey' against the herdr multiplexer.
+herdr is a sibling multiplexer: it cannot see tmux panes, and maw cannot see herdr panes.
+
+<target> is a workspace label (the oracle name), a pane id, or an agent name.
+Herdr agents are usually unnamed — 0 of 28 panes carried one on the machine this
+was written for — so the workspace label is the handle that actually exists.
+Scope to one session with --session <name> when two sessions share a label.`;
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', blue: '\x1b[94m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
@@ -113,9 +121,138 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
+// --- roster -----------------------------------------------------------------
+
+// A snapshot arrives wrapped as {id, result:{snapshot}} from the socket, but the
+// shape has moved before; unwrap defensively rather than index blindly.
+function unwrapSnapshot(raw) {
+  return raw?.result?.snapshot ?? raw?.snapshot ?? raw?.result ?? raw;
+}
+
+/**
+ * Every agent pane in every running session, flattened.
+ *
+ * Built from `api snapshot`, never from `agent list`: agent list returns one row
+ * per agent and so collapses a split tab into a single entry — it reported 25
+ * agents where the snapshot's panes array held 28. The snapshot also carries
+ * tab_id and workspace_id, which is what makes a workspace label usable as a
+ * target at all.
+ */
+async function roster() {
+  const sessions = sessionIndex().filter(s => s.status === 'active');
+  const rows = await Promise.all(sessions.map(async s => {
+    let snapshot;
+    try {
+      snapshot = unwrapSnapshot(await herdrJsonAsync(['api', 'snapshot'], s.session));
+    } catch {
+      return [];
+    }
+    const spaces = new Map((snapshot.workspaces ?? []).map(w => [w.workspace_id, w]));
+    const tabs = new Map((snapshot.tabs ?? []).map(t => [t.tab_id, t]));
+    return (snapshot.panes ?? [])
+      .filter(p => p.agent)          // a bare shell is not something to talk to
+      .map(p => {
+        const space = spaces.get(p.workspace_id);
+        return {
+          session: s.session,
+          pane: p.pane_id,
+          agent: p.agent,
+          name: p.agent_name ?? null,
+          status: p.agent_status ?? 'unknown',
+          workspace: space?.label ?? p.workspace_id ?? '?',
+          activeTab: space?.active_tab_id,
+          tab: p.tab_id,
+          tabLabel: tabs.get(p.tab_id)?.label ?? null,
+          focused: !!p.focused,
+          cwd: p.cwd ?? null,
+        };
+      });
+  }));
+  return rows.flat();
+}
+
+// A tab keeps its number as its label until someone renames it, and "digger-oracle/1"
+// says less than "digger-oracle". Only a real name earns the suffix.
+const named = t => t && t !== '' && !/^\d+$/.test(t);
+const label = a => `${a.workspace}${named(a.tabLabel) && a.tabLabel !== a.workspace ? `/${a.tabLabel}` : ''}`;
+
+// A workspace commonly holds several agent panes (a split tab, or several tabs),
+// so an exact label match is routinely plural. Prefer the pane the operator is
+// looking at, then the workspace's own active tab. Anything left is genuinely
+// ambiguous and is reported rather than guessed.
+function narrow(hits) {
+  const focused = hits.filter(a => a.focused);
+  if (focused.length === 1) return { pick: focused[0], why: 'focused pane' };
+  const active = hits.filter(a => a.tab && a.tab === a.activeTab);
+  if (active.length === 1) return { pick: active[0], why: 'active tab' };
+  return null;
+}
+
+function resolveAgent(all, target, verb) {
+  if (!all.length) throw new Error('no agent panes in any running herdr session');
+  // Pane ids are colon-shaped too (wD:p4), so scoping is a flag, never a prefix.
+  const tiers = [
+    ['pane', a => a.pane === target],
+    ['agent name', a => a.name === target],
+    ['workspace', a => a.workspace === target],
+    ['tab', a => a.tabLabel === target],
+    ['prefix', a => a.workspace.startsWith(target)],
+    ['substring', a => a.workspace.includes(target) || (a.name ?? '').includes(target)],
+  ];
+  for (const [how, test] of tiers) {
+    const hits = all.filter(test);
+    if (hits.length === 1) return { ...hits[0], how };
+    if (hits.length > 1) {
+      const narrowed = narrow(hits);
+      if (narrowed) return { ...narrowed.pick, how: `${how}, ${narrowed.why}` };
+      const lines = hits.map(a => `    ${a.pane.padEnd(8)} ${label(a).padEnd(22)} ${a.agent} (${a.status})`);
+      throw new Error(
+        `'${target}' matches ${hits.length} agent panes and none is focused:\n${lines.join('\n')}\n  target one by pane id: maw herdr ${verb} ${hits[0].pane}${verb === 'hey' ? ' "…"' : ''}`,
+      );
+    }
+  }
+  const known = [...new Set(all.map(a => a.workspace))].sort();
+  throw new Error(`no agent '${target}'. workspaces: ${known.join(', ') || '(none)'}\n  see them all: maw herdr ls --agents`);
+}
+
+function statusDot(status) {
+  if (status === 'working') return `${C.green}●${C.off}`;
+  if (status === 'blocked') return `${C.red}●${C.off}`;
+  return `${C.dim}○${C.off}`;
+}
+
+async function cmdLsAgents(json) {
+  const agents = await roster();
+  if (json) {
+    console.log(JSON.stringify({ command: 'ls', mode: 'agents', scope: 'herdr', json: true, agents }));
+    return;
+  }
+  if (!agents.length) {
+    console.log(`${C.dim}no agent panes in any running herdr session${C.off}`);
+    return;
+  }
+  // width from the data, so one long worktree name does not shear the column
+  const wide = Math.max(...agents.map(a => label(a).length));
+  let last = null;
+  for (const a of agents) {
+    if (a.session !== last) {
+      console.log(`  ${C.cyan}${a.session}${C.off}`);
+      last = a.session;
+    }
+    const focus = a.focused ? ` ${C.blue}◂${C.off}` : '';
+    console.log(`    ${statusDot(a.status)} ${a.pane.padEnd(8)} ${label(a).padEnd(wide)} ${C.dim}${a.agent}${C.off}${focus}`);
+  }
+  console.log(`  ${C.dim}${plural(agents.length, 'agent pane')} · maw herdr peek <target> · maw herdr hey <target> "…"${C.off}`);
+}
+
 async function cmdLs(args) {
   const json = args.includes('--json');
   const rest = args.filter(a => a !== '--json');
+  if (rest[0] === '--agents') {
+    rest.shift();
+    if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+    return cmdLsAgents(json);
+  }
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
   const sessions = await listSessions();
   if (json) {
@@ -162,6 +299,90 @@ function cmdAttach(args) {
     return;
   }
   runAttach(argv);
+}
+
+// --- hey / peek -------------------------------------------------------------
+
+function takeSession(args) {
+  const at = args.indexOf('--session');
+  if (at === -1) return null;
+  const value = args[at + 1];
+  if (!value || value.startsWith('-')) throw new UsageError('--session needs a name');
+  args.splice(at, 2);
+  return value;
+}
+
+async function poolFor(args, verb) {
+  const session = takeSession(args);
+  const all = await roster();
+  const pool = session ? all.filter(a => a.session === session) : all;
+  if (session && !pool.length) throw new Error(`no agent panes in herdr session '${session}'`);
+  return { pool, verb };
+}
+
+async function cmdHey(args) {
+  // --dry-run mirrors wake's: prompting a live agent is not free, so show the
+  // resolution and the exact herdr call before committing to it.
+  const dryRun = args.includes('--dry-run');
+  if (dryRun) args.splice(args.indexOf('--dry-run'), 1);
+  const { pool, verb } = await poolFor(args, 'hey');
+  const target = args.shift();
+  if (!target) throw new UsageError('hey needs a target and a message: maw herdr hey <target> <message>');
+  // Everything after the target is the message, unquoted included — `maw hey`
+  // behaves this way and retyping quotes for a sentence is friction nobody wants.
+  const message = args.join(' ').trim();
+  if (!message) throw new UsageError(`hey needs a message: maw herdr hey ${target} "<message>"`);
+
+  const hit = resolveAgent(pool, target, verb);
+  console.log(`  ${statusDot(hit.status)} ${C.cyan}${label(hit)}${C.off} ${C.dim}${hit.pane} · ${hit.agent} · ${hit.status} · ${hit.session}${C.off}`);
+  if (dryRun) {
+    console.log(`  ${C.dim}would run:${C.off} herdr --session ${hit.session} agent prompt ${hit.pane} ${JSON.stringify(message)}`);
+    console.log(`  ${C.dim}matched by ${hit.how} · nothing was sent${C.off}`);
+    return;
+  }
+  // `agent prompt` takes a PANE ID here, not a handle: herdr agents are almost
+  // always unnamed, so handle targeting would fail for nearly every pane.
+  herdr(['agent', 'prompt', hit.pane, message], hit.session, 30_000);
+  console.log(`  sent ${C.dim}(matched by ${hit.how})${C.off}`);
+  console.log(`  read it back: maw herdr peek ${hit.pane}`);
+}
+
+async function cmdPeek(args) {
+  const json = args.includes('--json');
+  const rest = args.filter(a => a !== '--json');
+  let lines = 40;
+  const at = rest.indexOf('--lines');
+  if (at !== -1) {
+    lines = Number(rest[at + 1]);
+    if (!Number.isInteger(lines) || lines < 1) throw new UsageError('--lines needs a positive integer');
+    rest.splice(at, 2);
+  }
+  const { pool, verb } = await poolFor(rest, 'peek');
+  const target = rest.shift();
+  if (!target) throw new UsageError('peek needs a target: maw herdr peek <target> [--lines N]');
+  if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+
+  const hit = resolveAgent(pool, target, verb);
+
+  // --source visible, ALWAYS. herdr's own default is `recent`, which asks for
+  // scrollback — and on an idle agent herdr gathers that by driving the pane's
+  // own mouse-scroll, so the operator watches their real terminal scroll up and
+  // snap back once per read. Measured: a 400-line `recent` text read took 13.8s
+  // against ~0.1s for `visible`. A read that moves the thing being read is not a
+  // read, so this flag is not configurable and there is no --scrollback.
+  // `pane read` answers with the terminal text itself, not JSON — unlike
+  // `pane list` and `session list --json`, which do. Do not hand it to JSON.parse.
+  const text = herdr(['pane', 'read', hit.pane, '--source', 'visible', '--lines', String(lines), '--format', 'text'], hit.session, 20_000);
+
+  if (json) {
+    console.log(JSON.stringify({ command: 'peek', pane: hit.pane, session: hit.session, workspace: hit.workspace, agent: hit.agent, status: hit.status, source: 'visible', lines, text }));
+    return;
+  }
+  console.log(`  ${statusDot(hit.status)} ${C.cyan}${label(hit)}${C.off} ${C.dim}${hit.pane} · ${hit.agent} · ${hit.status} · ${hit.session}${C.off}`);
+  console.log(`${C.dim}${'─'.repeat(60)}${C.off}`);
+  console.log(text.replace(/\n+$/, ''));
+  console.log(`${C.dim}${'─'.repeat(60)}${C.off}`);
+  console.log(`  ${C.dim}visible viewport, last ${lines} lines · talk back: maw herdr hey ${hit.pane} "…"${C.off}`);
 }
 
 // --- wake -------------------------------------------------------------------
@@ -314,6 +535,8 @@ try {
   else if (command === 'ls' || command === 'list') await cmdLs(args);
   else if (command === 'a' || command === 'attach') cmdAttach(args);
   else if (command === 'wake') cmdWake(args);
+  else if (command === 'hey') await cmdHey(args);
+  else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else throw new UsageError(`unknown command: ${command}`);
 } catch (err) {
   console.error(`maw herdr: ${err.message}`);
