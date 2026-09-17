@@ -23,13 +23,16 @@ maw herdr ls
 
 `owner/repo` expands to the GitHub URL; `owner/repo@ref` pins a branch or tag.
 
-From a clone, use the justfile rather than installing the checkout directly:
+From a clone, use the justfile rather than installing the checkout directly. It
+is split one module per place the plugin can live — `local` and `remote`:
 
 ```bash
-just install                      # here
-just remote god@white.local       # ship a clean tree and install it there
-just remote-smoke god@white.local # run smoke.sh against what is installed there
-just status god@white.local       # versions, here and there
+just                            # modules and top-level recipes
+just --list local               # one module's recipes
+just local install              # check, then install here from a clean tree
+just local smoke                # smoke suite against what is installed here
+just remote up god@white.local  # install there, then smoke it there
+just status god@white.local     # versions, here and there
 ```
 
 ### Never `maw plugin install .` from a checkout that has been through `/incubate`
@@ -288,8 +291,8 @@ different `prefix` in herdr's `config.toml` before nesting them.
 ## Smoke
 
 ```bash
-just smoke                        # here
-just remote-smoke god@white.local # there
+just local smoke                  # here
+just remote smoke god@white.local # there
 ```
 
 Runs against the *installed* plugin through `maw herdr …`, so it needs `maw`
