@@ -369,7 +369,7 @@ async function cmdLsFederation(json, agentsOnly) {
     return;
   }
   // this node first, then direct peers, then anything behind a hub
-  const order = [...new Set(rows.map(r => r.node))].sort((a, b) => {
+  const order = fleet.nodes.slice().sort((a, b) => {
     const rank = n => (n === fleet.node ? 0 : fleet.relayed[n] ? 2 : 1);
     return rank(a) - rank(b) || a.localeCompare(b);
   });
@@ -377,9 +377,18 @@ async function cmdLsFederation(json, agentsOnly) {
   for (const node of order) {
     const mine = rows.filter(r => r.node === node);
     const via = fleet.relayed[node]?.via;
+    const h = fleet.health[node];
+    const fails = h?.consecutive ?? 0;
     const tag = node === fleet.node ? `${C.dim}this node${C.off}` : via ? `${C.dim}via ${via}${C.off}` : `${C.dim}direct${C.off}`;
     const agents = mine.filter(isAgent).length;
-    console.log(`  ${via ? `${C.dim}◌${C.off}` : `${C.green}●${C.off}`} ${C.cyan}${node}${C.off}  ${tag} ${C.dim}· ${plural(agents, 'agent')} of ${plural(mine.length, 'pane')}${C.off}`);
+    // A link that is failing is why a node shows no panes; say so instead of
+    // leaving an empty node that looks idle.
+    const note = fails > 0
+      ? `${C.red}${fails} failed since ${ago(h?.lastOkAt)}${C.off}`
+      : `${C.dim}${plural(agents, 'agent')} of ${plural(mine.length, 'pane')}${C.off}`;
+    const dot = fails > 0 ? `${C.red}○${C.off}` : via ? `${C.dim}◌${C.off}` : `${C.green}●${C.off}`;
+    console.log(`  ${dot} ${C.cyan}${node}${C.off}  ${tag} ${C.dim}·${C.off} ${note}`);
+    if (!mine.length && fails === 0) console.log(`      ${C.dim}no panes${C.off}`);
     for (const r of mine) {
       const dot = isAgent(r) ? statusDot(r.status) : `${C.dim}·${C.off}`;
       const place = r.workspace ?? r.where ?? '';
@@ -579,7 +588,13 @@ async function fleetRoster() {
   for (const m of status.members ?? []) rows.push({ ...m, node: status.node, via: null, local: true });
   for (const [node, list] of Object.entries(status.peerMembers ?? {}))
     for (const m of list ?? []) rows.push({ ...m, node, via: relayed[node]?.via ?? null, local: false });
-  return { node: status.node, rows, relayed };
+  // Nodes come from `peers`, NOT from the rows: a node with zero panes has no
+  // rows, and deriving the list from rows made it vanish from the listing
+  // entirely — which reads as "that machine is gone" when it is federated and
+  // healthy and simply running no agents. Measured on black.
+  const nodes = [status.node, ...(status.peers ?? []).map(p => p.name)];
+  const health = Object.fromEntries((status.peers ?? []).map(p => [p.name, p]));
+  return { node: status.node, rows, relayed, nodes: [...new Set(nodes)], health };
 }
 
 /** A pane is something to talk to only if herdr found an agent in it. */
