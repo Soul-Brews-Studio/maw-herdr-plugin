@@ -29,26 +29,28 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 		methodNotAllowed(w, "GET")
 		return
 	}
-	if origin == "" || r.URL.RawQuery != "" || r.URL.ForceQuery {
+	if (!s.config.Engine && origin == "") || r.URL.RawQuery != "" || r.URL.ForceQuery {
 		fail(w, 400, "websocket_request_invalid")
 		return
 	}
-	// Exact spelling and exactly two offers. The second protocol is a single-use
-	// credential, never negotiated or reflected. No URL/query-token fallback.
-	values := r.Header.Values("Sec-WebSocket-Protocol")
-	if len(values) != 1 {
-		fail(w, 401, "websocket_ticket_required")
-		return
-	}
-	parts := strings.Split(values[0], ",")
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) != protocol {
-		fail(w, 401, "websocket_ticket_required")
-		return
-	}
-	value := strings.TrimSpace(parts[1])
-	if len(value) != 69 || !strings.HasPrefix(value, "mwt1_") || !s.consumeTicket(value, origin) {
-		fail(w, 401, "websocket_ticket_invalid")
-		return
+	if !s.config.Engine {
+		// Exact spelling and exactly two offers. The second protocol is a single-use
+		// credential, never negotiated or reflected. No URL/query-token fallback.
+		values := r.Header.Values("Sec-WebSocket-Protocol")
+		if len(values) != 1 {
+			fail(w, 401, "websocket_ticket_required")
+			return
+		}
+		parts := strings.Split(values[0], ",")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) != protocol {
+			fail(w, 401, "websocket_ticket_required")
+			return
+		}
+		value := strings.TrimSpace(parts[1])
+		if len(value) != 69 || !strings.HasPrefix(value, "mwt1_") || !s.consumeTicket(value, origin) {
+			fail(w, 401, "websocket_ticket_invalid")
+			return
+		}
 	}
 	select {
 	case s.sockets <- struct{}{}:

@@ -13,8 +13,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - { runner: ubuntu-24.04, os: linux, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, os: linux, arch: arm64 }
+          - { runner: macos-15-intel, os: darwin, arch: amd64 }
+          - { runner: macos-15, os: darwin, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -42,3 +46,17 @@ jobs:
           bun index.mjs help
           bun index.mjs serve --help
           node utils/smoke-serve-launcher.mjs
+      - name: Build source-independent native plugin package
+        run: |
+          node --check utils/package-serve.mjs
+          node --check utils/smoke-serve-package.mjs
+          node utils/package-serve.mjs --os '${{ matrix.os }}' --arch '${{ matrix.arch }}' --out "$RUNNER_TEMP/herdr-package"
+          node utils/smoke-serve-package.mjs "$RUNNER_TEMP/herdr-package"
+          tar -czf "$RUNNER_TEMP/maw-herdr-plugin-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" -C "$RUNNER_TEMP/herdr-package" .
+      - name: Upload verified native plugin package (not a release)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: maw-herdr-plugin-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/maw-herdr-plugin-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 14

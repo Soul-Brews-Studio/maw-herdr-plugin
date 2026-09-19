@@ -2,14 +2,21 @@
 
 ## Unreleased
 
+- Align serving with maw-rs `engine.serve` and checksum-pinned `bundledArtifacts`:
+  source-independent native packages for Linux/macOS amd64/arm64, no implicit Go
+  compilation, explicit developer `--build`, and host-managed namespaced mode.
+  Direct standalone authentication remains separate from the gateway trust model.
+- Verify actual `maw herdr serve` dispatch in an isolated installation. The
+  command is `herdr`, not `herder`; Git-only installs may omit companion files.
+
 - Add `maw herdr serve`: existing Bun plugin launcher with a Go-backed core
   dashboard API and live WebSocket captures. Requires a private operator token,
   loopback binding, and Herdr protocol 22. Agent prompts report acceptance, not
   delivery/completion. Full lifecycle, PTY, federation and queue parity remain
   out of scope.
 - Add isolated API, WebSocket, backend and launcher regression checks; no live
-  sessions are written during tests. Source installs retain the Go companion
-  module; JS-only build tarballs require an explicitly supplied server binary.
+  sessions are written during tests. Packaged installs include the pinned native
+  companion; source development requires explicit `--build` from a complete checkout.
 
 ## 0.4.0 — 2026-09-17
 

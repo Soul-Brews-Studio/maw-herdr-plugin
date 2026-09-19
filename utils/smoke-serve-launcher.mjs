@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Isolated process regressions: no real Go compiler, Herdr daemon, or network.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -46,11 +47,15 @@ try {
   mkdirSync(dirname(bundled));
   run(bun, ['build', entry, '--target=bun', '--outfile', bundled]);
   assert.match(run(bun, [bundled, 'serve', '--help'], { env: helpEnv }), /token-file/);
-  const prebuilt = join(dirname(bundled), 'server', 'bin', 'maw-herdr-serve');
+  const prebuilt = join(dirname(bundled), 'bin', 'maw-herdr-serve');
   mkdirSync(dirname(prebuilt), { recursive: true });
   copyFileSync(backend, prebuilt);
   chmodSync(prebuilt, 0o700);
+  writeFileSync(join(dirname(bundled), 'plugin.json'), JSON.stringify({bundledArtifacts:[{path:'bin/maw-herdr-serve',sha256:'sha256:'+createHash('sha256').update(readFileSync(prebuilt)).digest('hex')}]}));
   assert.deepEqual(JSON.parse(run(bun, [bundled, 'serve', ...args], {}, 23)), { args, cwd: temporary });
+
+  writeFileSync(prebuilt, 'tampered');
+  run(bun, [bundled, 'serve', ...args], {}, 1);
 
   // Build only a minimal copied fixture, never the actual server module.
   const fixture = join(temporary, 'fixture');
@@ -75,9 +80,13 @@ fs.writeFileSync(output, ${JSON.stringify(builtScript)});
 fs.chmodSync(output, 0o700);
 fs.appendFileSync(process.env.BUILD_COUNT, 'build\\n');`);
   const cacheEnv = { ...env, PATH: tools, XDG_CACHE_HOME: join(temporary, 'cache'), BUILD_COUNT: join(temporary, 'build-count') };
+  const noBuild = spawnSync(bun, [join(fixture, 'index.mjs'), 'serve'], {env:cacheEnv,encoding:'utf8'});
+  assert.equal(noBuild.status, 1);
+  assert.match(noBuild.stderr, /prebuilt package/i);
+  assert.equal(existsSync(cacheEnv.BUILD_COUNT), false, 'source launch must not silently compile');
   for (let i = 0; i < 3; i++) {
     if (i === 2) writeFileSync(join(fixture, 'server', 'main.go'), 'package main\nfunc main() { println("changed") }\n');
-    assert.equal(run(bun, [join(fixture, 'index.mjs'), 'serve'], { env: cacheEnv }), 'built\n');
+    assert.equal(run(bun, [join(fixture, 'index.mjs'), 'serve', '--build'], { env: cacheEnv }), 'built\n');
   }
   assert.equal(readFileSync(cacheEnv.BUILD_COUNT, 'utf8'), 'build\nbuild\n');
   assert.equal(existsSync(join(fixture, 'server', 'bin')), false);

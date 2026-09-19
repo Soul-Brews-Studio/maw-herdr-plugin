@@ -12,6 +12,8 @@ import (
 const protocol = "maw.ws.v1"
 
 type Config struct {
+	Engine       bool
+	Prefix       string
 	Token        string
 	Node         string
 	DataDir      string
@@ -40,6 +42,9 @@ func NewServer(config Config, backend Backend) (*Server, error) {
 	if len(config.Token) < 16 {
 		return nil, errors.New("operator token must contain at least 16 bytes")
 	}
+	if config.Engine && config.Prefix != enginePrefix {
+		return nil, errors.New("engine prefix must be /api/herdr")
+	}
 	if backend == nil {
 		return nil, errors.New("backend required")
 	}
@@ -61,6 +66,10 @@ func (s *Server) Close() { s.cancel() }
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if s.config.Engine {
+		s.serveEngine(w, r)
+		return
+	}
 	if !loopbackHost(r.Host) {
 		fail(w, 403, "host_not_allowed")
 		return

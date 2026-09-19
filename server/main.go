@@ -24,6 +24,7 @@ func main() {
 
 func run() error {
 	flags := flag.NewFlagSet("maw herdr serve", flag.ContinueOnError)
+	engine := flags.Bool("engine", false, "run as a loopback maw engine.serve child")
 	listen := flags.String("listen", "127.0.0.1:3457", "loopback address and port")
 	tokenFile := flags.String("token-file", "", "required operator token file (at least 16 bytes; mode 0600)")
 	binary := flags.String("herdr", "herdr", "Herdr executable")
@@ -37,23 +38,35 @@ func run() error {
 	if flags.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
-	host, _, err := net.SplitHostPort(*listen)
-	if err != nil || !loopbackHost(host) {
-		return errors.New("--listen must use a loopback IP or localhost and port")
-	}
-	if *tokenFile == "" {
-		return errors.New("--token-file is required; never pass operator tokens on the command line")
-	}
-	info, err := os.Stat(*tokenFile)
-	if err != nil {
-		return fmt.Errorf("token file: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Size() > 4096 || info.Mode().Perm()&0077 != 0 {
-		return errors.New("token file must be a regular file <=4096 bytes, readable only by its owner (chmod 600)")
-	}
-	secret, err := os.ReadFile(*tokenFile)
-	if err != nil {
-		return fmt.Errorf("token file: %w", err)
+	config := Config{}
+	if *engine {
+		explicit := map[string]bool{}
+		flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+		var err error
+		config, *listen, err = engineConfig(os.Getenv, explicit)
+		if err != nil {
+			return err
+		}
+	} else {
+		host, _, err := net.SplitHostPort(*listen)
+		if err != nil || !loopbackHost(host) {
+			return errors.New("--listen must use a loopback IP or localhost and port")
+		}
+		if *tokenFile == "" {
+			return errors.New("--token-file is required; never pass operator tokens on the command line")
+		}
+		info, err := os.Stat(*tokenFile)
+		if err != nil {
+			return fmt.Errorf("token file: %w", err)
+		}
+		if !info.Mode().IsRegular() || info.Size() > 4096 || info.Mode().Perm()&0077 != 0 {
+			return errors.New("token file must be a regular file <=4096 bytes, readable only by its owner (chmod 600)")
+		}
+		secret, err := os.ReadFile(*tokenFile)
+		if err != nil {
+			return fmt.Errorf("token file: %w", err)
+		}
+		config.Token = strings.TrimSpace(string(secret))
 	}
 	if *dataDir == "" {
 		dir, err := os.UserConfigDir()
@@ -62,7 +75,8 @@ func run() error {
 		}
 		*dataDir = filepath.Join(dir, "maw-herdr", "serve")
 	}
-	server, err := NewServer(Config{Token: strings.TrimSpace(string(secret)), DataDir: *dataDir}, NewHerdrBackend(*binary))
+	config.DataDir = *dataDir
+	server, err := NewServer(config, NewHerdrBackend(*binary))
 	if err != nil {
 		return err
 	}
@@ -81,7 +95,11 @@ func run() error {
 		defer cancel()
 		_ = httpServer.Shutdown(shutdown)
 	}()
-	fmt.Fprintf(os.Stderr, "maw herdr serve: http://%s (operator token required; core dashboard only)\n", listener.Addr())
+	if config.Engine {
+		fmt.Fprintf(os.Stderr, "maw herdr serve: http://%s%s (engine child; local processes trusted; gateway authenticates remote clients)\n", listener.Addr(), config.Prefix)
+	} else {
+		fmt.Fprintf(os.Stderr, "maw herdr serve: http://%s (operator token required; core dashboard only)\n", listener.Addr())
+	}
 	if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

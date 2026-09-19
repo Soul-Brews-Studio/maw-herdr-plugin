@@ -132,7 +132,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, map[string]any{"agents": agents, "count": len(agents), "node": s.config.Node})
 	case "/api/identity":
-		writeJSON(w, 200, map[string]any{"version": "herdr-core-dev", "node": s.config.Node, "host": "localhost", "agents": []string{}, "uptime": int(time.Since(s.started).Seconds()), "clockUtc": time.Now().UTC().Format(time.RFC3339), "endpoints": []string{"/api/sessions", "/api/capture", "/api/send", "/ws"}, "capabilities": []string{"sessions", "capture", "agent-prompt", "dashboard-ws"}})
+		endpoints := []string{"/api/sessions", "/api/capture", "/api/send", "/ws"}
+		if s.config.Engine {
+			endpoints = []string{s.config.Prefix + "/sessions", s.config.Prefix + "/capture", s.config.Prefix + "/send", s.config.Prefix + "/ws"}
+		}
+		writeJSON(w, 200, map[string]any{"version": "herdr-core-dev", "node": s.config.Node, "host": "localhost", "agents": []string{}, "uptime": int(time.Since(s.started).Seconds()), "clockUtc": time.Now().UTC().Format(time.RFC3339), "endpoints": endpoints, "capabilities": []string{"sessions", "capture", "agent-prompt", "dashboard-ws"}})
 	case "/api/config":
 		if r.URL.RawQuery != "" || r.URL.ForceQuery {
 			fail(w, 400, "config_query_not_supported")
