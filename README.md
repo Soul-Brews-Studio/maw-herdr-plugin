@@ -7,8 +7,10 @@ session listing, so the muscle memory is the same whichever multiplexer a
 session lives in.
 
 Dev-tier JS plugin (`runtime: "bun-dev"`, `target: "js"`; `maw plugin ls`
-files it under the `extra` tier). `plugin.json` declares one capability,
-`proc:exec:herdr` — no credentials, no filesystem access, no network. When you
+files it under the `extra` tier). The plugin executes Herdr and, for `serve`,
+its checksum-pinned native backend. Packaged installs do not need Go.
+Source developers can explicitly build with Go; installation never silently compiles.
+The dashboard reads its token file, stores UI state, and listens on loopback. When you
 install from a git URL, maw's JS build step repackages the plugin (the entry
 becomes `index.js` and capabilities are re-derived from the code), so
 `maw plugin info herdr` is the authority for what actually got installed.
@@ -22,6 +24,12 @@ maw herdr ls
 ```
 
 `owner/repo` expands to the GitHub URL; `owner/repo@ref` pins a branch or tag.
+The command is **`herdr`**, not `herder`. If `maw herdr help` is unknown, inspect
+`maw plugin ls -v`: the plugin must be installed and enabled.
+
+**Serving needs the native companion package below.** Some maw-rs Git installers
+retain only the JS entry and manifest; do not assume a Git install copied Go
+sources or a helper. Git installation remains useful for the existing commands.
 
 From a clone, use the justfile rather than installing the checkout directly. It
 is split one module per place the plugin can live — `local` and `remote`:
@@ -29,7 +37,8 @@ is split one module per place the plugin can live — `local` and `remote`:
 ```bash
 just                            # modules and top-level recipes
 just --list local               # one module's recipes
-just local install              # check, then install here from a clean tree
+just local install              # existing commands from a clean source tree
+just serve install              # build/install the complete native package here
 just local smoke                # smoke suite against what is installed here
 just remote up god@white.local  # install there, then smoke it there
 just status god@white.local     # versions, here and there
@@ -38,6 +47,139 @@ just fleet status               # what every machine has, and what it is missing
 just fleet install              # install onto every machine that can take it
 just fleet smoke                # smoke every machine that has it
 ```
+
+## Core dashboard: `maw herdr serve`
+
+Packaged installs require **Bun and Herdr 0.9.0 (protocol 22)**, not a Go compiler.
+The CI workflow builds packages for Linux/macOS on amd64/arm64. Each contains
+`index.js`, `plugin.json`, and `bin/maw-herdr-serve`. The manifest pins both the JS
+entry (`artifact`) and native helper (`bundledArtifacts`) with SHA-256; the CLI
+launcher verifies the helper before executing it.
+
+Download the appropriate tarball from a successful **Herdr serve** Actions run
+(first select a run containing the new package artifacts). For example, on Apple
+Silicon, replace `RUN_ID` with that run's ID:
+
+```bash
+stage=$(mktemp -d)
+gh run download RUN_ID --repo Soul-Brews-Studio/maw-herdr-plugin \
+  --name maw-herdr-plugin-darwin-arm64 --dir "$stage"
+mkdir "$stage/plugin"
+tar -xzf "$stage/maw-herdr-plugin-darwin-arm64.tar.gz" -C "$stage/plugin"
+maw plugin install "$stage/plugin" --root "$HOME/.maw/plugins" --force
+maw herdr serve --help
+```
+
+Other artifact suffixes: `darwin-amd64`, `linux-amd64`, `linux-arm64`. These are CI
+artifacts with limited retention, **not a published release or automatic download**.
+Keep the extracted package if you need to reinstall it later.
+
+Start the standalone dashboard backend:
+
+```bash
+# Create a private token once; never commit it or put it in a URL.
+(umask 077; openssl rand -hex 32 > "$HOME/.maw-herdr-token")
+maw herdr serve --token-file "$HOME/.maw-herdr-token"
+# Optional: --listen 127.0.0.1:3457 --herdr /absolute/path/to/herdr --data-dir /path/to/state
+```
+
+Open <https://god.buildwithoracle.com/>, select `http://127.0.0.1:3457`, then supply
+the operator token. Authentication is mandatory even on loopback. Browser local
+network policy may require permission. This is the standalone core dashboard
+contract, **not full `maw serve` parity**: no lifecycle controls, PTY, federation,
+configuration mutation, or queue/inbox delivery. Acceptance is not completion.
+Non-loopback binds are rejected; public deployment is not automated.
+
+For source development only, Go 1.23+ is required:
+
+```bash
+bun index.mjs serve --build --token-file "$HOME/.maw-herdr-token"
+just serve install  # build a native package and install into the local plugin root
+```
+
+`--build` explicitly compiles into the source/platform-keyed user cache. A source
+install without a helper fails clearly instead of invoking Go unexpectedly.
+`MAW_HERDR_SERVE_BIN=/absolute/path` remains an explicit developer override (not a
+checksum-verified packaged artifact). Arguments, streams, signals and exit codes
+are forwarded. Help needs neither Go nor a running Herdr daemon.
+
+### Host-managed mode: `maw serve` and `engine.serve`
+
+The package also declares:
+
+```json
+{"engine":{"serve":{"command":"./bin/maw-herdr-serve --engine","prefix":"/api/herdr","health":"/health"}}}
+```
+
+The host launches the **native helper directly**, so its child handle refers to
+the server rather than a Bun wrapper. No compilation/download occurs on this startup path.
+The helper consumes `MAW_ENGINE_SERVE_PORT`/`PORT` and the exact
+`MAW_ENGINE_SERVE_PREFIX=/api/herdr`, binds 127.0.0.1, and serves prefixed routes
+such as `/api/herdr/sessions`, `/api/herdr/capture`, `/api/herdr/send` and
+`/api/herdr/ws`. The namespace root returns identity. Ordinary `PORT` alone never
+switches the standalone server into engine mode.
+
+Start the host with a nonempty **`MAW_SERVE_TOKEN`** (at least 16 bytes), exported
+from a private source; the child refuses engine startup without it. This explicit
+mode delegates remote operator authentication to maw-rs's gateway because that
+proxy strips Authorization and Origin. The child accepts only actual loopback
+peers, loopback Host, and requests without Origin. **Local processes remain
+trusted**; the loopback child is not an authentication/isolation boundary. Do not
+expose a loopback-auth-exempt gateway through an unreviewed reverse proxy.
+
+**Host version matters.** The reviewed maw-rs source is `76f13084`; the older
+`66db92c` binary has no effective browser Origin gate and exempts loopback clients
+from token checks by default. A token alone does not make that older gateway safe
+for browser access. Prefer the standalone command above. Do not expose an old
+host's plugin routes without disabling its loopback exemption and verifying that
+tokenless HTTP **and WebSocket upgrades** fail before the helper is reached.
+The child cannot recover an Origin header that the gateway removed.
+
+The compatibility smoke used `{"serve":{"loopbackExempt":false}}` in the host's
+effective `maw.config.json`. Use `maw config sources --json` and
+`maw config show --json` to verify the location and merged value: on `66db92c`,
+`MAW_HOME` takes precedence over `MAW_CONFIG_DIR`. Preserve other configuration
+when setting this field. This is token enforcement, not an Origin-filter retrofit.
+
+This namespaced integration is **not stock God UI ticket compatibility**. The
+reviewed maw-rs proxy does not negotiate frontend WS subprotocols or preserve
+`Cache-Control`; use standalone mode for the browser ticket contract. Engine
+WebSocket clients can omit subprotocols. Engine ticket minting is unsupported.
+Host `/api/herdr/health` can be synthetic before startup; use identity/sessions
+and actual frame exchange to check the running helper.
+
+Core API compatibility:
+
+| Surface | Included |
+| --- | --- |
+| HTTP | `/api/sessions`, `/api/agents`, `/api/capture`, `/api/captures`, `/api/send`, `/api/identity`, `/api/config`, `/api/health` |
+| Browser auth | Bearer token; short-lived, one-use, exact-Origin-bound `/api/auth/ws-ticket` |
+| `/ws` | `sessions`, `recent`, `capture`, `previews`; `select`, `subscribe`, `subscribe-previews`, `send` |
+| Preferences | `/api/ui-state` object and `/api/asks` array persisted privately under `--data-dir` |
+| Not measured | Teams, costs and feed return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
+
+Workspace targets use opaque base64url session/workspace IDs and stable pane
+numbers, not list positions. Do not save them across daemon resets that reuse
+IDs. Capture reads only the visible screen. Sending is agent-only, reports
+`state: "accepted"`, and rejects force/inbox/attachments instead of pretending to
+implement maw's delivery queue. There are at most 16 live preview targets per
+connection and 64 captures per HTTP batch. A capture batch shares one roster and
+one 10-second deadline; a backend failure never becomes a fabricated empty roster.
+
+For development (no installation or live Herdr mutation):
+
+```bash
+just serve check                 # compile, Go API tests and vet
+just local check                 # parse plugin/launcher and manifest
+```
+
+Installed-runtime smoke (Linux, maw-rs `66db92c`, Bun 1.3.11): packaged
+`maw herdr serve` passed authenticated HTTP sessions/capture/send and real
+WebSocket ticket/capture/send. Host `maw serve` also passed namespaced HTTP and
+WebSocket exchange with the explicit configuration above; tokenless HTTP and an
+unauthenticated foreign-Origin WebSocket upgrade returned 401. All roots were
+isolated, Herdr/TMUX were stubbed, and only fake prompts were submitted. These
+checks do not establish real-daemon, hosted-browser, or public-deployment parity.
 
 ### A "machine" is a (host, user) pair, not a host
 
@@ -81,7 +223,7 @@ contexts over an incubated repo.
   still works and everything else exits non-zero.
 - `bun`, because maw runs dev-tier plugins with bun.
 
-Verified on macOS (m5, herdr 0.9.0, maw-rs v26.8.31-alpha) and Linux
+The pre-existing verbs were verified on macOS (m5, herdr 0.9.0, maw-rs v26.8.31-alpha) and Linux
 (white.local, herdr 0.9.0, maw-rs v26.9.12-alpha) — 13 smoke checks, rc=0 on
 both.
 
