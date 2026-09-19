@@ -7,8 +7,9 @@ session listing, so the muscle memory is the same whichever multiplexer a
 session lives in.
 
 Dev-tier JS plugin (`runtime: "bun-dev"`, `target: "js"`; `maw plugin ls`
-files it under the `extra` tier). `plugin.json` declares one capability,
-`proc:exec:herdr` — no credentials, no filesystem access, no network. When you
+files it under the `extra` tier). The plugin executes Herdr and, for `serve`,
+its Go backend; source installs also execute Go and write a user-local build cache.
+The dashboard reads its token file, stores UI state, and listens on loopback. When you
 install from a git URL, maw's JS build step repackages the plugin (the entry
 becomes `index.js` and capabilities are re-derived from the code), so
 `maw plugin info herdr` is the authority for what actually got installed.
@@ -37,6 +38,68 @@ just status god@white.local     # versions, here and there
 just fleet status               # what every machine has, and what it is missing
 just fleet install              # install onto every machine that can take it
 just fleet smoke                # smoke every machine that has it
+```
+
+## Core dashboard: `maw herdr serve`
+
+Source installs require **Bun, Go 1.23+ and Herdr 0.9.0 (protocol 22)** on PATH. Existing commands and
+`maw herdr serve --help` do not require Go. Start the core dashboard backend:
+
+```bash
+# Create a private token file once; do not commit it or paste it into URLs.
+(umask 077; openssl rand -hex 32 > "$HOME/.maw-herdr-token")
+maw herdr serve --token-file "$HOME/.maw-herdr-token"
+# Optional: --listen 127.0.0.1:3457 --herdr /absolute/path/to/herdr --data-dir /path/to/state
+```
+
+Open <https://god.buildwithoracle.com/>, select backend
+`http://127.0.0.1:3457`, then supply the operator token from the file. The token
+is mandatory even on loopback; keep it private. Browser local-network policies
+may require permission to reach the local backend.
+
+This first slice provides sessions, pane captures/live WebSocket output and
+prompt submission through Herdr. It is **not full `maw serve` parity**: no
+wake/stop lifecycle controls, PTY terminal emulation, federation, or configuration
+mutation. An accepted prompt is not proof the agent completed it. No public
+server or remote HTTP/WSS deployment is automated; non-loopback binds are rejected.
+Any tunnel or reverse proxy needs its own reviewed security configuration.
+
+The launcher uses `MAW_HERDR_SERVE_BIN=/absolute/path/to/maw-herdr-serve` when
+set, otherwise `server/bin/maw-herdr-serve` if supplied with the plugin. There is
+**no automatic prebuilt download or release** yet. Without a supplied binary,
+it builds bundled `server/` sources into `${XDG_CACHE_HOME:-~/.cache}/maw-herdr/serve`,
+keyed by source contents and host platform/architecture. Builds never write to
+the installed plugin directory; unchanged sources reuse the cached executable.
+The launcher forwards arguments, terminal streams, signals and exit status.
+
+Install from the **GitHub/source archive**, which retains `server/` alongside the
+Bun entry. Upstream `maw plugin build` emits a flat JS-only tarball and does not
+include these companion sources; that tarball is not a supported installation
+route unless a separate server binary is supplied with `MAW_HERDR_SERVE_BIN`.
+
+Core API compatibility:
+
+| Surface | Included |
+| --- | --- |
+| HTTP | `/api/sessions`, `/api/agents`, `/api/capture`, `/api/captures`, `/api/send`, `/api/identity`, `/api/config`, `/api/health` |
+| Browser auth | Bearer token; short-lived, one-use, exact-Origin-bound `/api/auth/ws-ticket` |
+| `/ws` | `sessions`, `recent`, `capture`, `previews`; `select`, `subscribe`, `subscribe-previews`, `send` |
+| Preferences | `/api/ui-state` object and `/api/asks` array persisted privately under `--data-dir` |
+| Not measured | Teams, costs and feed return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
+
+Workspace targets use opaque base64url session/workspace IDs and stable pane
+numbers, not list positions. Do not save them across daemon resets that reuse
+IDs. Capture reads only the visible screen. Sending is agent-only, reports
+`state: "accepted"`, and rejects force/inbox/attachments instead of pretending to
+implement maw's delivery queue. There are at most 16 live preview targets per
+connection and 64 captures per HTTP batch. A capture batch shares one roster and
+one 10-second deadline; a backend failure never becomes a fabricated empty roster.
+
+For development (no installation or live Herdr mutation):
+
+```bash
+just serve check                 # compile, Go API tests and vet
+just local check                 # parse plugin/launcher and manifest
 ```
 
 ### A "machine" is a (host, user) pair, not a host

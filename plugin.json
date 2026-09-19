@@ -5,13 +5,18 @@
   "runtime": "bun-dev",
   "target": "js",
   "entry": "index.mjs",
-  "description": "herdr workspaces, agents and the federation through maw's own verbs: ls, attach, wake, hey, peek, federation",
+  "description": "herdr workspaces, agents and the federation through maw's own verbs: ls, attach, wake, hey, peek, federation, serve",
   "capabilities": [
-    "proc:exec:herdr"
+    "proc:exec:herdr",
+    "proc:exec:go",
+    "proc:exec",
+    "fs:read",
+    "fs:write",
+    "net"
   ],
   "cli": {
     "command": "herdr",
-    "help": "maw herdr <ls|a|wake|hey|peek|federation> [--json] [--print]",
+    "help": "maw herdr <ls|a|wake|hey|peek|federation|serve> [--json] [--print]",
     "interactive": true
   }
 }

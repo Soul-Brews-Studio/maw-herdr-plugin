@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add `maw herdr serve`: existing Bun plugin launcher with a Go-backed core
+  dashboard API and live WebSocket captures. Requires a private operator token,
+  loopback binding, and Herdr protocol 22. Agent prompts report acceptance, not
+  delivery/completion. Full lifecycle, PTY, federation and queue parity remain
+  out of scope.
+- Add isolated API, WebSocket, backend and launcher regression checks; no live
+  sessions are written during tests. Source installs retain the Go companion
+  module; JS-only build tarballs require an explicitly supplied server binary.
+
 ## 0.4.0 — 2026-09-17
 
 - `maw herdr federation` (alias `fed`): draws the mesh — who federates with whom,

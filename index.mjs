@@ -4,10 +4,11 @@ import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { runServe } from './src/serve/mod.runServe.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
@@ -17,6 +18,9 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek> [args]
                                        running session (--own-session: its own server)
   hey <target> <message> [--dry-run]   submit a prompt to an agent (herdr's 'maw hey')
   peek <target> [--lines N] [--json]   read what an agent's pane is showing
+  serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
+        --token-file PATH             required operator token file
+        [--herdr PATH] [--data-dir PATH]
   federation [--json]                  the mesh: who federates with whom (alias: fed)
 
 Mirrors 'maw ls', 'maw a', 'maw wake' and 'maw hey' against the herdr multiplexer.
@@ -1064,6 +1068,7 @@ const args = process.argv.slice(2);
 const command = args.shift() || 'help';
 try {
   if (['help', '--help', '-h'].includes(command)) console.log(HELP);
+  else if (command === 'serve') process.exitCode = await runServe(args);
   else if (command === 'ls' || command === 'list') await cmdLs(args);
   else if (command === 'a' || command === 'attach') cmdAttach(args);
   else if (command === 'wake') cmdWake(args);

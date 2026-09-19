@@ -15,6 +15,7 @@ default:
 # parse everything that ships, before anything is installed
 check:
     @node --check index.mjs && echo "ok: index.mjs parses"
+    @node --check src/serve/mod.runServe.mjs && echo "ok: serve launcher parses"
     @bash -n smoke.sh && echo "ok: smoke.sh parses"
     @python3 -c "import json;d=json.load(open('plugin.json'));print('ok: plugin.json valid, version',d['version'])"
 
@@ -48,6 +49,27 @@ _stage:
     git archive --format=tar HEAD | tar -x -C "$stage"
     # uncommitted work should still be installable while iterating
     cp index.mjs plugin.json README.md CHANGELOG.md smoke.sh "$stage/"
+    # Overlay only regular source files. Never dereference source symlinks or
+    # copy generated server/bin artifacts, indexes, caches, or private files.
+    python3 - "$stage" <<'PY_STAGE'
+    from pathlib import Path
+    import shutil, sys
+    stage = Path(sys.argv[1])
+    for root, suffixes in [(Path('src/serve'), {'.mjs'}), (Path('server'), {'.go'})]:
+        if root.is_symlink():
+            raise SystemExit(f"refusing source symlink: {root}")
+        if not root.exists():
+            continue
+        for source in root.rglob('*'):
+            if source.is_symlink() or any(p.is_symlink() for p in source.parents):
+                raise SystemExit(f"refusing source symlink: {source}")
+            if 'bin' in source.parts or any(p.startswith('.') for p in source.parts):
+                continue
+            if source.is_file() and (source.suffix in suffixes or source.name in {'go.mod', 'go.sum'}):
+                target = stage / source
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+    PY_STAGE
     printf '%s' "$stage"
 
 # what the installed plugin sees here

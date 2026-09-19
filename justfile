@@ -16,6 +16,7 @@
 mod local  'just/01-local.just'
 mod remote 'just/02-remote.just'
 mod fleet  'just/03-fleet.just'
+mod serve  'just/04-serve.just'
 
 default:
     @just --list
