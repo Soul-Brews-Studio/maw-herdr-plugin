@@ -2,13 +2,13 @@
 // Isolated process regressions: no real Go compiler, Herdr daemon, or network.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const temporary = mkdtempSync(join(tmpdir(), 'maw-serve-launcher-'));
+const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'maw-serve-launcher-')));
 const env = { ...process.env };
 delete env.MAW_HERDR_SERVE_BIN;
 let signalChild;
