@@ -17,7 +17,7 @@ import { readRoster } from "./mod.readRoster.ts";
 import { openHerdrTerminal } from "./mod.openHerdrTerminal.ts";
 import { runHerdr } from "./mod.runHerdr.ts";
 
-export function createHerdrBackend(binary: string, wakeEngine = "claude", explicitWakeEngine?: string): Backend {
+export function createHerdrBackend(binary: string, wakeEngine = "codex", explicitWakeEngine?: string): Backend {
   const shutdown = new AbortController();
   const pending = new Set<Promise<unknown>>();
   const waiters: Array<() => void> = [];

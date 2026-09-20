@@ -93,11 +93,12 @@ with shell panes and preserves empty/whitespace text. HTTP `/api/send` remains
 agent-prompt submission; it is a different operation. Both require authentication.
 
 Wake an existing pane through the dashboard or `POST /api/wake` with its canonical
-`target`. The server uses `--wake-engine claude` by default, matching `herdr wake`;
-choose another supported kind at startup (for example `--wake-engine codex`).
-Already-detected agents are left running. A successful new launch means Herdr
-verified interactive readiness, not completion of a task. Browser-supplied command
-strings are never executed.
+`target`. The server uses `--wake-engine codex` by default, matching legacy `maw serve`;
+choose another supported kind at startup (for example `--wake-engine claude`).
+Already-detected agents are left running. The supported-agent path returns `ready`
+only after Herdr verifies interactive readiness, not task completion. Configured
+shell commands return the weaker `launched` state described below. Browser-supplied
+command strings are never executed.
 
 The server also accepts exact registered oracle names or `org/repo` targets from
 `MAW_ORACLES_JSON` (otherwise `~/.maw/oracles.json`). The registry uses
@@ -160,10 +161,11 @@ malformed process data, busy/wrong-cwd panes and
 trust prompts fail; the server never answers trust prompts automatically.
 
 Without launch configuration, the existing supported-agent path remains
-`--wake-engine claude` by default and returns `ready` only after Herdr's readiness
+`--wake-engine codex` by default and returns `ready` only after Herdr's readiness
 check. Configured command selection uses the legacy `codex` fallback unless an
-explicit startup engine or configuration selects otherwise. This default-path
-difference, fleet metadata and post-wake hooks remain parity work in issue #31.
+explicit startup engine or configuration selects otherwise. Both paths now share
+that default. Fleet registration and post-wake hooks run after a verified wake;
+their compatibility and safety boundaries are documented below.
 
 ### Explicit runtime selection
 

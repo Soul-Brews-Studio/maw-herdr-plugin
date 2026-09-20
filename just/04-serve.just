@@ -16,6 +16,7 @@ bun-check:
     node utils/smoke-config-serve.mjs
     bun utils/smoke-registry-wake.ts
     node utils/smoke-registry-serve.mjs
+    MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs
     bun utils/smoke-task-plan.ts
     node utils/smoke-task-serve.mjs
     bun utils/smoke-wake-launch.ts
@@ -25,6 +26,7 @@ bun-check:
     node utils/smoke-launch-serve.mjs
     node utils/smoke-wake-finalize.mjs
     MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
+    MAW_TEST_WAKE_ENGINE=claude MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
     MAW_TASK_ENTRY="$output/index.js" node utils/smoke-task-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-launch-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-wake-finalize.mjs
@@ -49,6 +51,7 @@ check:
     node utils/smoke-federation-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-config-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-registry-serve.mjs "$output/maw-herdr-serve"
+    MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-task-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-launch-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-wake-finalize.mjs "$output/maw-herdr-serve"
@@ -60,6 +63,7 @@ check:
     node utils/smoke-config-serve.mjs
     bun utils/smoke-registry-wake.ts
     node utils/smoke-registry-serve.mjs
+    MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs
     bun utils/smoke-task-plan.ts
     node utils/smoke-task-serve.mjs
     bun utils/smoke-wake-launch.ts
@@ -69,6 +73,7 @@ check:
     node utils/smoke-launch-serve.mjs
     node utils/smoke-wake-finalize.mjs
     MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
+    MAW_TEST_WAKE_ENGINE=claude MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
     MAW_TASK_ENTRY="$output/index.js" node utils/smoke-task-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-launch-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-wake-finalize.mjs

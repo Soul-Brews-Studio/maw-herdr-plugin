@@ -111,7 +111,7 @@ if (existsSync(${JSON.stringify(failure)})) { console.error('fixture unavailable
 if (JSON.stringify(args) === JSON.stringify(['session','list','--json'])) console.log(JSON.stringify({sessions:[{name:'main',running:true},{name:'stopped',running:false}]}));
 else if (args[2] === 'api') console.log(JSON.stringify({result:{snapshot:{protocol:22,workspaces:[{workspace_id:'wD',label:'demo'}],panes:[{pane_id:'wD:p4',workspace_id:'wD',agent:'codex',focused:true,agent_status:'idle',cwd:'/tmp'},{pane_id:'wD:p9',workspace_id:'wD',agent:null,focused:false,agent_status:'unknown',cwd:${JSON.stringify(join(temporary,'home'))}}]}}}));
 else if (args[2] === 'pane') process.stdout.write('visible output\\n');
-else if (args[2] === 'agent' && args[3] === 'start') console.log(JSON.stringify({result:{type:'agent_started',argv:['claude'],agent:{pane_id:'wD:p9',agent:'claude',interactive_ready:true}}}));
+else if (args[2] === 'agent' && args[3] === 'start') console.log(JSON.stringify({result:{type:'agent_started',argv:['codex'],agent:{pane_id:'wD:p9',agent:'codex',interactive_ready:true}}}));
 else if (args[2] === 'agent') console.log('{"ok":true}');
 else { console.error('unexpected args', args); process.exit(8); }
 `);

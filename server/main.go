@@ -27,7 +27,7 @@ func run() error {
 	engine := flags.Bool("engine", false, "run as a loopback maw engine.serve child")
 	listen := flags.String("listen", "127.0.0.1:3457", "loopback address and port")
 	tokenFile := flags.String("token-file", "", "required operator token file (at least 16 bytes; mode 0600)")
-	wakeEngine := flags.String("wake-engine", "claude", "Herdr agent kind for dashboard wake")
+	wakeEngine := flags.String("wake-engine", "codex", "Herdr agent kind for dashboard wake")
 	binary := flags.String("herdr", "herdr", "Herdr executable")
 	dataDir := flags.String("data-dir", "", "private UI-state directory (default: user config/maw-herdr/serve)")
 	if err := flags.Parse(os.Args[1:]); err != nil {
