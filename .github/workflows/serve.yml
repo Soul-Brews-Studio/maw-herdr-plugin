@@ -48,6 +48,10 @@ jobs:
           bun build index.mjs --target=bun --outfile "$RUNNER_TEMP/herdr-bun.js"
           node utils/smoke-serve-launcher.mjs
           bun utils/smoke-bun-serve.mjs
+          bun utils/smoke-federation-config.ts
+          node utils/smoke-federation-serve.mjs
+          MAW_FEDERATION_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-federation-serve.mjs
+          node utils/smoke-federation-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           bun utils/smoke-terminal-serve.mjs
           MAW_TERMINAL_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-terminal-serve.mjs
           bun utils/smoke-terminal-limits.ts

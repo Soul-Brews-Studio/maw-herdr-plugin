@@ -30,6 +30,7 @@ type ticket struct {
 }
 
 type Server struct {
+	federation         federationCache
 	worktreeRoot       string
 	worktreeSlots      chan struct{}
 	observedRosterGate chan struct{}

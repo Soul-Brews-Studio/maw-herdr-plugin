@@ -1,3 +1,4 @@
+import { createFederation } from './mod.createFederation.ts';
 import { readTeamInventory } from './mod.readTeamInventory.ts';
 import { createObservedFeed } from "./mod.createObservedFeed.ts";
 import { createHash } from "node:crypto";
@@ -54,6 +55,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
     try { return await task; } finally { pending.delete(task); }
   }
   const backend: Backend = {
+    federation: createFederation(shutdown.signal),
     teamInventory: () => readTeamInventory(),
     observedFeed: createObservedFeed(),
     async dashboardSessions(signal) {
@@ -147,7 +149,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
     },
     async close() {
       shutdown.abort();
-      await Promise.allSettled([...pending]);
+      await Promise.allSettled([...pending, backend.federation.close()]);
     },
   };
   return backend;
