@@ -7,9 +7,10 @@ session listing, so the muscle memory is the same whichever multiplexer a
 session lives in.
 
 Dev-tier JS plugin (`runtime: "bun-dev"`, `target: "js"`; `maw plugin ls`
-files it under the `extra` tier). The plugin executes Herdr and, for `serve`,
-its checksum-pinned native backend. Packaged installs do not need Go.
-Source developers can explicitly build with Go; installation never silently compiles.
+files it under the `extra` tier). The plugin executes Herdr and serves the core
+dashboard directly in **Bun/TypeScript** by default. No Go compiler or native
+helper is needed for normal serving. Native helpers remain an explicit option;
+installation never silently compiles.
 The dashboard reads its token file, stores UI state, and listens on loopback. When you
 install from a git URL, maw's JS build step repackages the plugin (the entry
 becomes `index.js` and capabilities are re-derived from the code), so
@@ -27,9 +28,10 @@ maw herdr ls
 The command is **`herdr`**, not `herder`. If `maw herdr help` is unknown, inspect
 `maw plugin ls -v`: the plugin must be installed and enabled.
 
-**Serving needs the native companion package below.** Some maw-rs Git installers
-retain only the JS entry and manifest; do not assume a Git install copied Go
-sources or a helper. Git installation remains useful for the existing commands.
+**Serving defaults to Bun/TypeScript**, including from a complete source install
+or bundled JS entry. The host language does not choose the server runtime.
+Some older maw-rs installers bundle only the JS entry; the Bun server is included
+in that bundle. Native helper/source files are needed only for native mode.
 
 From a clone, use the justfile rather than installing the checkout directly. It
 is split one module per place the plugin can live — `local` and `remote`:
@@ -50,38 +52,27 @@ just fleet smoke                # smoke every machine that has it
 
 ## Core dashboard: `maw herdr serve`
 
-Packaged installs require **Bun and Herdr 0.9.0 (protocol 22)**, not a Go compiler.
-The CI workflow builds packages for Linux/macOS on amd64/arm64. Each contains
-`index.js`, `plugin.json`, and `bin/maw-herdr-serve`. The manifest pins both the JS
-entry (`artifact`) and native helper (`bundledArtifacts`) with SHA-256; the CLI
-launcher verifies the helper before executing it.
+Requires **Bun 1.3.11+ and Herdr 0.9.0 (protocol 22)**. No Go compiler, native
+download, or `--build` flag is needed.
 
-Download the appropriate tarball from a successful **Herdr serve** Actions run
-(first select a run containing the new package artifacts). For example, on Apple
-Silicon, replace `RUN_ID` with that run's ID:
+For the new maw-cli hosts (`maw-js`, `maw-go`, `maw-rs`, `maw-zig`):
 
 ```bash
-stage=$(mktemp -d)
-gh run download RUN_ID --repo Soul-Brews-Studio/maw-herdr-plugin \
-  --name maw-herdr-plugin-darwin-arm64 --dir "$stage"
-mkdir "$stage/plugin"
-tar -xzf "$stage/maw-herdr-plugin-darwin-arm64.tar.gz" -C "$stage/plugin"
-maw plugin install "$stage/plugin" --root "$HOME/.maw/plugins" --force
-maw herdr serve --help
+# Fresh install from the plugin's main branch (the same plugin works with each host).
+maw-js plugin install Soul-Brews-Studio/maw-herdr-plugin --ref main
+# For an existing clean Git install, update instead:
+# maw-js plugin update herdr --ref main
+
+test -e "$HOME/.maw-herdr-token" || \
+  (umask 077; openssl rand -hex 32 > "$HOME/.maw-herdr-token")
+
+maw-js herdr serve --token-file "$HOME/.maw-herdr-token" --listen 127.0.0.1:3457
+# Directly from source: bun index.mjs serve --token-file "$HOME/.maw-herdr-token"
 ```
 
-Other artifact suffixes: `darwin-amd64`, `linux-amd64`, `linux-arm64`. These are CI
-artifacts with limited retention, **not a published release or automatic download**.
-Keep the extracted package if you need to reinstall it later.
-
-Start the standalone dashboard backend:
-
-```bash
-# Create a private token once; never commit it or put it in a URL.
-(umask 077; openssl rand -hex 32 > "$HOME/.maw-herdr-token")
-maw herdr serve --token-file "$HOME/.maw-herdr-token"
-# Optional: --listen 127.0.0.1:3457 --herdr /absolute/path/to/herdr --data-dir /path/to/state
-```
+The token file must be private (mode 0600), regular and 16..4096 bytes. It is not
+generated silently and is never printed. Existing non-Git/archive installs must
+be replaced using `maw-go plugin install HTTPS_TARBALL --backup`, not Git update.
 
 Open <https://god.buildwithoracle.com/>, select `http://127.0.0.1:3457`, then supply
 the operator token. Authentication is mandatory even on loopback. Browser local
@@ -90,29 +81,48 @@ contract, **not full `maw serve` parity**: no lifecycle controls, PTY, federatio
 configuration mutation, or queue/inbox delivery. Acceptance is not completion.
 Non-loopback binds are rejected; public deployment is not automated.
 
-For source development only, Go 1.23+ is required:
+### Explicit runtime selection
 
 ```bash
-bun index.mjs serve --build --token-file "$HOME/.maw-herdr-token"
-just serve install  # build a native package and install into the local plugin root
+maw-js herdr serve --runtime bun --token-file "$HOME/.maw-herdr-token"
+maw-js herdr serve --runtime native --token-file "$HOME/.maw-herdr-token"
+# Native Go source development only (Go 1.23+):
+maw-js herdr serve --build --token-file "$HOME/.maw-herdr-token"
 ```
 
-`--build` explicitly compiles into the source/platform-keyed user cache. A source
-install without a helper fails clearly instead of invoking Go unexpectedly.
-`MAW_HERDR_SERVE_BIN=/absolute/path` remains an explicit developer override (not a
-checksum-verified packaged artifact). Arguments, streams, signals and exit codes
-are forwarded. Help needs neither Go nor a running Herdr daemon.
+Plain `serve` defaults to Bun/TypeScript, even when a native helper is installed.
+`--runtime native` requires the packaged, checksum-pinned `bin/maw-herdr-serve`;
+it never builds implicitly. `--build` explicitly selects native mode and compiles
+the Go source into a source/platform-keyed cache. These flags belong to `serve`,
+not `plugin install`.
+
+`MAW_HERDR_SERVE_BIN=/absolute/path` explicitly selects another native helper
+or runtime wrapper; it is not a checksum-verified artifact. It cannot be combined
+with `--runtime bun`. Native arguments, streams, signals and status are forwarded.
+
+[Published native packages](https://github.com/Soul-Brews-Studio/maw-herdr-plugin/releases)
+support Linux/macOS amd64/arm64. Each contains the Bun bundle plus an optional
+native helper; both have manifest SHA-256 pins. Choose a package from a release
+containing this Bun implementation—older tags remain unchanged. GitHub-generated
+source archives are not native packages. Help needs neither Go nor a running daemon.
 
 ### Host-managed mode: `maw serve` and `engine.serve`
 
-The package also declares:
+Server selection belongs to the **plugin manifest**, not the host language.
+The source plugin declares the existing generic engine command contract:
 
 ```json
-{"engine":{"serve":{"command":"./bin/maw-herdr-serve --engine","prefix":"/api/herdr","health":"/health"}}}
+{"engine":{"serve":{"command":"bun index.mjs serve --engine","prefix":"/api/herdr","health":"/health"}}}
 ```
 
-The host launches the **native helper directly**, so its child handle refers to
-the server rather than a Bun wrapper. No compilation/download occurs on this startup path.
+Native package manifests instead select `./bin/maw-herdr-serve --engine`.
+The host starts either command as a child process; neither path downloads or
+compiles anything. CLI guest runtime and HTTP server runtime are separate:
+the older maw-rs host supports JS and WASM guests, but its WASM guest ABI has no
+persistent HTTP/WebSocket server. A WASM plugin can declare a separate server
+helper; this change does **not** add a WASM HTTP runtime or WASM installed dispatch
+to the new maw-cli hosts.
+
 The helper consumes `MAW_ENGINE_SERVE_PORT`/`PORT` and the exact
 `MAW_ENGINE_SERVE_PREFIX=/api/herdr`, binds 127.0.0.1, and serves prefixed routes
 such as `/api/herdr/sessions`, `/api/herdr/capture`, `/api/herdr/send` and
@@ -169,7 +179,7 @@ one 10-second deadline; a backend failure never becomes a fabricated empty roste
 For development (no installation or live Herdr mutation):
 
 ```bash
-just serve check                 # compile, Go API tests and vet
+just serve check                 # Go + Bun builds, API/process smokes and Go vet
 just local check                 # parse plugin/launcher and manifest
 ```
 

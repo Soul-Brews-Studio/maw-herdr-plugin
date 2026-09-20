@@ -42,13 +42,13 @@ try {
   const help = run(bun, [entry, 'serve', '--help'], env);
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /token-file/);
-  const forwarded = run(bun, [entry, 'serve', '--listen', 'invalid address with spaces'], env);
+  const forwarded = run(bun, [entry, 'serve', '--runtime', 'native', '--listen', 'invalid address with spaces'], env);
   assert.equal(forwarded.status, 1, forwarded.stderr);
   assert.match(forwarded.stderr, /--listen must use a loopback/);
   assert.equal(existsSync(env.XDG_CACHE_HOME), false, 'prebuilt launch must not build sources');
   // A copied package allows corruption checks without changing the build output.
   writeFileSync(binary, Buffer.concat([readFileSync(binary), Buffer.from('tampered')]));
-  const corrupted = run(bun, [entry, 'serve', '--listen', 'invalid'], env);
+  const corrupted = run(bun, [entry, 'serve', '--runtime', 'native', '--listen', 'invalid'], env);
   assert.notEqual(corrupted.status, 0);
   assert.match(corrupted.stderr, /sha256|checksum|integrity|digest|hash/i);
   assert.doesNotMatch(corrupted.stderr, /--listen must use a loopback/);

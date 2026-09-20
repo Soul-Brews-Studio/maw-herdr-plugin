@@ -52,10 +52,10 @@ try {
   copyFileSync(backend, prebuilt);
   chmodSync(prebuilt, 0o700);
   writeFileSync(join(dirname(bundled), 'plugin.json'), JSON.stringify({bundledArtifacts:[{path:'bin/maw-herdr-serve',sha256:'sha256:'+createHash('sha256').update(readFileSync(prebuilt)).digest('hex')}]}));
-  assert.deepEqual(JSON.parse(run(bun, [bundled, 'serve', ...args], {}, 23)), { args, cwd: temporary });
+  assert.deepEqual(JSON.parse(run(bun, [bundled, 'serve', '--runtime', 'native', ...args], {}, 23)), { args, cwd: temporary });
 
   writeFileSync(prebuilt, 'tampered');
-  run(bun, [bundled, 'serve', ...args], {}, 1);
+  run(bun, [bundled, 'serve', '--runtime', 'native', ...args], {}, 1);
 
   // Build only a minimal copied fixture, never the actual server module.
   const fixture = join(temporary, 'fixture');
@@ -80,7 +80,7 @@ fs.writeFileSync(output, ${JSON.stringify(builtScript)});
 fs.chmodSync(output, 0o700);
 fs.appendFileSync(process.env.BUILD_COUNT, 'build\\n');`);
   const cacheEnv = { ...env, PATH: tools, XDG_CACHE_HOME: join(temporary, 'cache'), BUILD_COUNT: join(temporary, 'build-count') };
-  const noBuild = spawnSync(bun, [join(fixture, 'index.mjs'), 'serve'], {env:cacheEnv,encoding:'utf8'});
+  const noBuild = spawnSync(bun, [join(fixture, 'index.mjs'), 'serve', '--runtime', 'native'], {env:cacheEnv,encoding:'utf8'});
   assert.equal(noBuild.status, 1);
   assert.match(noBuild.stderr, /prebuilt package/i);
   assert.equal(existsSync(cacheEnv.BUILD_COUNT), false, 'source launch must not silently compile');
