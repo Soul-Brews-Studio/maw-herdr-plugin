@@ -19,10 +19,15 @@ bun-check:
     bun utils/smoke-task-plan.ts
     node utils/smoke-task-serve.mjs
     bun utils/smoke-wake-launch.ts
+    bun utils/smoke-wake-hooks.ts
+    bun utils/smoke-wake-fleet.ts
+    bun utils/smoke-wake-identity.ts
     node utils/smoke-launch-serve.mjs
+    node utils/smoke-wake-finalize.mjs
     MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
     MAW_TASK_ENTRY="$output/index.js" node utils/smoke-task-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-launch-serve.mjs
+    MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-wake-finalize.mjs
     MAW_CONFIG_ENTRY="$output/index.js" node utils/smoke-config-serve.mjs
     MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
     bun utils/smoke-terminal-serve.mjs
@@ -46,6 +51,7 @@ check:
     node utils/smoke-registry-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-task-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-launch-serve.mjs "$output/maw-herdr-serve"
+    node utils/smoke-wake-finalize.mjs "$output/maw-herdr-serve"
     node utils/smoke-serve-launcher.mjs
     bun utils/smoke-bun-serve.mjs
     bun utils/smoke-federation-config.ts
@@ -57,10 +63,15 @@ check:
     bun utils/smoke-task-plan.ts
     node utils/smoke-task-serve.mjs
     bun utils/smoke-wake-launch.ts
+    bun utils/smoke-wake-hooks.ts
+    bun utils/smoke-wake-fleet.ts
+    bun utils/smoke-wake-identity.ts
     node utils/smoke-launch-serve.mjs
+    node utils/smoke-wake-finalize.mjs
     MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
     MAW_TASK_ENTRY="$output/index.js" node utils/smoke-task-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-launch-serve.mjs
+    MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-wake-finalize.mjs
     MAW_CONFIG_ENTRY="$output/index.js" node utils/smoke-config-serve.mjs
     MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
     bun utils/smoke-terminal-serve.mjs

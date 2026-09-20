@@ -56,14 +56,19 @@ func TestWakeBackendExactPaneAndReadiness(t *testing.T) {
 		return old(ctx, args...)
 	}
 	state, err := b.Wake(context.Background(), "bWFpbg/d0Q:4")
-	if err != nil || state != "already-awake" || len(*calls) != 2 {
+	if err != nil || state != "already-awake" || len(*calls) != 6 {
 		t.Fatal(state, err, *calls)
 	}
 	state, err = b.Wake(context.Background(), "bWFpbg/d0Q:9")
 	if err != nil || state != "ready" {
 		t.Fatal(state, err)
 	}
-	argv := (*calls)[len(*calls)-1]
+	var argv []string
+	for _, call := range *calls {
+		if len(call) > 3 && call[2] == "agent" && call[3] == "start" {
+			argv = call
+		}
+	}
 	if len(argv) != 11 || !strings.HasPrefix(argv[4], "maw-") || len(argv[4]) != 20 || !reflect.DeepEqual(argv[:4], []string{"--session", "main", "agent", "start"}) || !reflect.DeepEqual(argv[5:], []string{"--kind", "claude", "--pane", "wD:p9", "--timeout", "8000"}) {
 		t.Fatal(argv)
 	}

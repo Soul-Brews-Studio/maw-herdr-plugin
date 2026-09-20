@@ -34,41 +34,12 @@ func readWakeRegistry(target string) (wakeRegistryEntry, error) {
 		}
 	}
 
-	path := os.Getenv("MAW_ORACLES_JSON")
-	if path == "" {
-		home, e := os.UserHomeDir()
-		if e != nil {
-			return none, ErrTargetNotFound
-		}
-		path = filepath.Join(home, ".maw", "oracles.json")
-	}
-	raw, e := federationRead(path, 1<<20)
+	entries, e := readWakeRegistryEntries()
 	if e != nil {
-		return none, errRegistryUnavailable
-	}
-	if raw == nil {
-		return none, ErrTargetNotFound
-	}
-	var store struct {
-		Oracles *[]wakeRegistryEntry `json:"oracles"`
-	}
-	if json.Unmarshal(raw, &store) != nil || store.Oracles == nil || len(*store.Oracles) > 1024 {
-		return none, errRegistryUnavailable
-	}
-	var shape struct {
-		Oracles []json.RawMessage `json:"oracles"`
-	}
-	if json.Unmarshal(raw, &shape) != nil {
-		return none, errRegistryUnavailable
-	}
-	for _, item := range shape.Oracles {
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(item, &obj) != nil || obj == nil {
-			return none, errRegistryUnavailable
-		}
+		return none, e
 	}
 	matches := []wakeRegistryEntry{}
-	for _, entry := range *store.Oracles {
+	for _, entry := range entries {
 		if entry.Name == target || (entry.Org != "" && entry.Repo != "" && entry.Org+"/"+entry.Repo == target) {
 			matches = append(matches, entry)
 		}
@@ -76,21 +47,61 @@ func readWakeRegistry(target string) (wakeRegistryEntry, error) {
 	if len(matches) != 1 {
 		return none, ErrTargetNotFound
 	}
-	entry := matches[0]
+	return validateWakeRegistryEntry(matches[0])
+}
+
+func readWakeRegistryEntries() ([]wakeRegistryEntry, error) {
+	path := os.Getenv("MAW_ORACLES_JSON")
+	if path == "" {
+		home, e := os.UserHomeDir()
+		if e != nil {
+			return nil, nil
+		}
+		path = filepath.Join(home, ".maw", "oracles.json")
+	}
+	raw, e := federationRead(path, 1<<20)
+	if e != nil {
+		return nil, errRegistryUnavailable
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	var store struct {
+		Oracles *[]wakeRegistryEntry `json:"oracles"`
+	}
+	if json.Unmarshal(raw, &store) != nil || store.Oracles == nil || len(*store.Oracles) > 1024 {
+		return nil, errRegistryUnavailable
+	}
+	var shape struct {
+		Oracles []json.RawMessage `json:"oracles"`
+	}
+	if json.Unmarshal(raw, &shape) != nil {
+		return nil, errRegistryUnavailable
+	}
+	for _, item := range shape.Oracles {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(item, &obj) != nil || obj == nil {
+			return nil, errRegistryUnavailable
+		}
+	}
+	return *store.Oracles, nil
+}
+
+func validateWakeRegistryEntry(entry wakeRegistryEntry) (wakeRegistryEntry, error) {
 	if entry.Name == "" || len(entry.Name) > 1024 || registryControl(entry.Name) || strings.HasPrefix(entry.Name, "-") || !filepath.IsAbs(entry.Path) || registryControl(entry.Path) {
-		return none, errRegistryUnavailable
+		return wakeRegistryEntry{}, errRegistryUnavailable
 	}
 	canonical, e := filepath.EvalSymlinks(entry.Path)
 	if e != nil {
-		return none, errRegistryUnavailable
+		return wakeRegistryEntry{}, errRegistryUnavailable
 	}
 	st, e := os.Stat(canonical)
 	if e != nil || !st.IsDir() {
-		return none, errRegistryUnavailable
+		return wakeRegistryEntry{}, errRegistryUnavailable
 	}
 	git, e := os.Lstat(filepath.Join(canonical, ".git"))
 	if e != nil || (!git.IsDir() && !git.Mode().IsRegular()) {
-		return none, errRegistryUnavailable
+		return wakeRegistryEntry{}, errRegistryUnavailable
 	}
 	entry.Path = canonical
 	return entry, nil
@@ -111,6 +122,7 @@ func (b *HerdrBackend) resolveRegistryWakeTask(ctx context.Context, target strin
 	if e != nil {
 		return none, e
 	}
+	basePath, oracle := entry.Path, entry.Name
 	roster, e := b.roster(ctx)
 	if e != nil {
 		return none, e
@@ -195,6 +207,8 @@ func (b *HerdrBackend) resolveRegistryWakeTask(ctx context.Context, target strin
 	}
 	if len(matches) == 1 {
 		matches[0].effectiveWindow = entry.Name
+		matches[0].baseRepoPath = basePath
+		matches[0].wakeOracle = oracle
 		return matches[0], nil
 	}
 	raw, e := b.run(ctx, "--session", session, "workspace", "create", "--cwd", entry.Path, "--label", entry.Name, "--no-focus")
@@ -230,5 +244,7 @@ func (b *HerdrBackend) resolveRegistryWakeTask(ctx context.Context, target strin
 		return none, errRegistryUnavailable
 	}
 	matches[0].effectiveWindow = entry.Name
+	matches[0].baseRepoPath = basePath
+	matches[0].wakeOracle = oracle
 	return matches[0], nil
 }

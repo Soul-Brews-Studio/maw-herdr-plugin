@@ -1,3 +1,6 @@
+import { resolveWakeIdentity } from "./mod.resolveWakeIdentity.ts";
+import { registerWakeFleet } from "./mod.registerWakeFleet.ts";
+import { runWakeHooks } from "./mod.runWakeHooks.ts";
 import { readMawConfig } from './mod.readMawConfig.ts';
 import { resolveWakeLaunch } from './mod.resolveWakeLaunch.ts';
 import { launchConfiguredWake } from './mod.launchConfiguredWake.ts';
@@ -125,9 +128,12 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude", explic
           let roster = await readRoster(run,s);
           let pane = roster.targets.get(target);
           let launchWindow = pane?.pane.workspaceLabel || pane?.pane.label || pane?.pane.title || pane?.pane.id || "";
+          let basePath = "";
+          let oracle = launchWindow;
           if(pane && task!==undefined) throw new BackendError("backend_error","task requires a registered repository");
           if (!pane) {
             const repo = resolveRegistryWake(target);
+            basePath=repo.path; oracle=repo.name;
             const session = roster.runningSessions.includes("default") ? "default" : roster.runningSessions.length===1 ? roster.runningSessions[0] : undefined;
             if(!session) throw new BackendError("backend_error","running session is ambiguous or missing");
             if(task!==undefined) {
@@ -167,13 +173,30 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude", explic
               if(sameRepo.length!==1) throw new BackendError("backend_error","repository pane is ambiguous");
             }
           }
-        if (pane.pane.agent.trim()) return "already-awake";
+
         if(!isAbsolute(pane.pane.cwd)) throw new BackendError("backend_error","pane cwd unavailable");
         let finalCwd;try{finalCwd=realpathSync(pane.pane.cwd);}catch{throw new BackendError("backend_error","pane cwd unavailable");}
+        if(!basePath){const identity=await resolveWakeIdentity(finalCwd,launchWindow,s);basePath=identity.basePath;oracle=identity.oracle;}
         const merged=readMawConfig(finalCwd);
+        const resolvedPane=pane;
+        const finish=async(state:"ready"|"launched"|"already-awake")=>{
+          if(s.aborted) throw new BackendError("backend_error","herdr operation aborted");
+          const fresh=await readRoster(run,s);
+          const stillResolved=[...fresh.targets.values()].some(p=>{
+            if(p.session!==resolvedPane.session||p.pane.id!==resolvedPane.pane.id||p.pane.workspace!==resolvedPane.pane.workspace||!isAbsolute(p.pane.cwd))return false;
+            try{return realpathSync(p.pane.cwd)===finalCwd;}catch{return false;}
+          });
+          if(!stillResolved)throw new BackendError("backend_error","wake pane identity changed");
+          const live=[...fresh.targets.values()].filter(p=>p.session===resolvedPane.session).map(p=>({name:p.pane.workspaceLabel||p.pane.label||p.pane.title||p.pane.id,cwd:p.pane.cwd}));
+          if(s.aborted)throw new BackendError("backend_error","herdr operation aborted");
+          registerWakeFleet(resolvedPane.session,live,basePath,launchWindow);
+          await runWakeHooks(merged,oracle,resolvedPane.session,launchWindow,s);
+          return state;
+        };
+        if(pane.pane.agent.trim()) return await finish("already-awake");
         if(["commands","wake","defaultEngine","zaiPool"].some(key=>Object.hasOwn(merged,key))){
           let launch;try{launch=resolveWakeLaunch(merged,launchWindow,explicitWakeEngine);}catch{throw new BackendError("backend_error","configured launch unavailable");}
-          return await launchConfiguredWake(run,pane,launch.line,s);
+          return await finish(await launchConfiguredWake(run,pane,launch.line,s));
         }
         const name = "maw-" + createHash("sha256").update(pane.pane.id).digest("hex").slice(0, 16);
         const raw = await run(["--session", pane.session, "agent", "start", name, "--kind", wakeEngine, "--pane", pane.pane.id, "--timeout", "8000"], s);
@@ -181,7 +204,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude", explic
         try { response = JSON.parse(raw); } catch { throw new BackendError("backend_error", "invalid agent start response"); }
         const result = response?.result, agent = result?.agent;
         if (!response || typeof response !== "object" || Array.isArray(response) || response.error != null || result?.error != null || result?.type !== "agent_started" || !Array.isArray(result.argv) || !result.argv.every((arg: unknown) => typeof arg === "string") || !agent || agent.pane_id !== pane.pane.id || agent.agent !== wakeEngine || agent.interactive_ready !== true || (agent.launch_pending !== undefined && agent.launch_pending !== false) || s.aborted) throw new BackendError("backend_error", "agent readiness not verified");
-        return "ready";
+        return await finish("ready");
         } finally { previous.then(release); }
       }, signal); } finally { waking--; }
     },

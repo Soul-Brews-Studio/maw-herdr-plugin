@@ -83,6 +83,8 @@ type backendPane struct {
 	Status    string `json:"agent_status"`
 }
 type backendTarget struct {
+	baseRepoPath    string
+	wakeOracle      string
 	effectiveWindow string
 	workspaceLabel  string
 	session         string
