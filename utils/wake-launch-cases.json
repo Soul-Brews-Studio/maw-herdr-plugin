@@ -283,7 +283,7 @@
     "name": "unknown family warnings no secrets",
     "config": {
       "commands": {
-        "neo": "secret-runner --token supersecret"
+        "neo": "secret-runner --token ${WAKE_TEST_TOKEN}"
       },
       "wake": {
         "resume": true,
@@ -293,7 +293,7 @@
     "window": "neo",
     "expected": {
       "selectedKey": "neo",
-      "line": "MAW_SESSION_WINDOW=neo secret-runner --token supersecret resume",
+      "line": "MAW_SESSION_WINDOW=neo secret-runner --token ${WAKE_TEST_TOKEN} resume",
       "family": "secret-runner",
       "warnings": [
         "unknown_resume_form",
