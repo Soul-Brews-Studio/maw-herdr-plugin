@@ -50,6 +50,10 @@ try{
  assert.equal(receipts.filter(r=>r.deduped===true).length,1);assert.equal(files().length,countBeforeRetry+1);assert.deepEqual(receipts.find(r=>r.deduped).receipt,['duplicate_dropped']);
  for(let i=0;i<2;i++){const r=await request(retryBody);assert.equal(r.status,200,await r.clone().text());}
  assert.equal(files().length,countBeforeRetry+3);
+ const historyResponse=await fetch(url+'/api/feed',{headers:{Authorization:'Bearer '+token}});assert.equal(historyResponse.status,200);
+ const history=await historyResponse.json();const retryEvents=history.events.filter(e=>e.text==='timestamp retry');
+ assert.deepEqual(retryEvents.map(e=>e.state).sort(),['deduped','queued','queued','queued']);assert.ok(retryEvents.every(e=>e.route==='inbox'&&e.target===target));
+ assert.equal((await fetch(url+'/api/feed')).status,401);
  const another=await request(retryBody,true,'sender:remote','fixture-2');assert.equal(another.status,200);assert.equal(files().length,countBeforeRetry+4);
  response=await request({target,text:'configured sender',inbox:true});assert.equal(response.status,200,await response.clone().text());content=readFileSync((await response.json()).inbox,'utf8');assert.match(content,/from: fixture-node:server-oracle\n/);
  response=await request({target,inbox:true});assert.equal(response.status,200,await response.clone().text());result=await response.json();assert.equal(result.text,'');assert.ok(readFileSync(result.inbox,'utf8').endsWith('read: false\n---\n\n\n'));
@@ -58,6 +62,7 @@ try{
  save(stateFile,{...initial,renameAfterFirst:true});response=await request({target,text:'renamed during resolution',inbox:true});assert.notEqual(response.status,200);assert.equal(files().length,before);save(stateFile,initial);
  save(configFile,{node:'fixture-node',oracle:'fixture',psiPath:'other/ψ'});response=await request({target,text:'configured root',inbox:true});assert.equal(response.status,200,await response.clone().text());result=await response.json();assert.ok(result.inbox.startsWith(join(other,'ψ','inbox')+'/'));assert.equal(files(other).length,1);
  const corrupt=join(home,'not-a-directory');writeFileSync(corrupt,'not a repo');save(configFile,{node:'fixture-node',oracle:'fixture',psiPath:corrupt});response=await request({target,text:'do not reroute',inbox:true},true,'sender:remote','retry-after-failure');assert.notEqual(response.status,200);assert.equal(files().length,before);assert.equal(files(other).length,1);
+ const failedHistory=await (await fetch(url+'/api/feed',{headers:{Authorization:'Bearer '+token}})).json();assert.ok(failedHistory.events.some(e=>e.text==='do not reroute'&&e.state==='failed'&&e.route==='inbox'));
  save(configFile,{node:'fixture-node',oracle:'server-oracle'});response=await request({target,text:'do not reroute',inbox:true},true,'sender:remote','retry-after-failure');assert.equal(response.status,200,await response.clone().text());assert.equal((await response.json()).deduped,undefined);assert.equal(files().length,before+1);
  rmSync(join(repo,'ψ'),{recursive:true});const outside=join(home,'outside');mkdirSync(outside);symlinkSync(outside,join(repo,'ψ'));response=await request({target,text:'do not escape',inbox:true});assert.notEqual(response.status,200);assert.deepEqual(readdirSync(outside),[]);
  await stop();await start('off');response=await request({target,text:'explicit off',inbox:true});assert.notEqual(response.status,200);await stop();
