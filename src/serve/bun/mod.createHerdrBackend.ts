@@ -1,5 +1,6 @@
+import { createObservedFeed } from "./mod.createObservedFeed.ts";
 import { createHash } from "node:crypto";
-import { BackendError, type Backend, type RunHerdr } from "./types.ts";
+import { BackendError, type Backend, type RunHerdr, type Session } from "./types.ts";
 import { readRoster } from "./mod.readRoster.ts";
 import { openHerdrTerminal } from "./mod.openHerdrTerminal.ts";
 import { runHerdr } from "./mod.runHerdr.ts";
@@ -8,6 +9,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
   const shutdown = new AbortController();
   const pending = new Set<Promise<unknown>>();
   const waiters: Array<() => void> = [];
+  let dashboardSnapshot: Promise<Session[]> | undefined;
   let active = 0, terminals = 0;
   const run: RunHerdr = (args, signal) => runHerdr(binary || "herdr", args, signal);
   async function operation<T>(fn: (signal: AbortSignal) => Promise<T>, caller?: AbortSignal): Promise<T> {
@@ -51,6 +53,20 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
     try { return await task; } finally { pending.delete(task); }
   }
   const backend: Backend = {
+    observedFeed: createObservedFeed(),
+    async dashboardSessions(signal) {
+      if (signal?.aborted) throw new BackendError("backend_error", "herdr operation aborted");
+      // Share one acquisition + observation among dashboard clients. A slower
+      // old roster can never publish after a newer status observation.
+      dashboardSnapshot ??= operation(async (s) => {
+        const sessions = (await readRoster(run, s)).sessions;
+        backend.observedFeed.observe(sessions);
+        return sessions;
+      }).finally(() => { dashboardSnapshot = undefined; });
+      const sessions = await dashboardSnapshot;
+      if (signal?.aborted) throw new BackendError("backend_error", "herdr operation aborted");
+      return sessions;
+    },
     sessions: (signal) => operation(async (s) => (await readRoster(run, s)).sessions, signal),
     async capture(target, lines, signal) {
       const captures = await backend.captureBatch({ [target]: lines }, signal);

@@ -119,14 +119,48 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 		return conn.Write(writeCtx, websocket.MessageText, data) == nil
 	}
 	errorFrame := func(reason string) bool { return write(map[string]any{"type": "error", "error": reason}) }
+	_, feedCursor := s.observed.read(0, time.Now())
+	initialSessions, initialErr := s.observeSessions(ctx)
+	historyPending := true
+	flushFeed := func(snapshot observedSnapshot) bool {
+
+		if historyPending {
+			replay := snapshot.events
+			history := []observedEvent{}
+			for _, event := range replay {
+				if event.sequence <= feedCursor {
+					history = append(history, event)
+				}
+			}
+			if !write(map[string]any{"type": "feed-history", "events": history}) {
+				return false
+			}
+			historyPending = false
+		}
+		for _, event := range snapshot.events {
+			if event.sequence <= feedCursor {
+				continue
+			}
+			if !write(map[string]any{"type": "feed", "event": event}) {
+				return false
+			}
+		}
+		feedCursor = snapshot.cursor
+		return true
+	}
 	lastSessions := ""
+	lastIdentity := ""
 	available := map[string]bool{}
 	roster := func(force bool) bool {
-		sessions, err := s.backend.Sessions(ctx)
+		snapshot, err := initialSessions, initialErr
+		if !force {
+			snapshot, err = s.observeSessions(ctx)
+		}
 		if err != nil {
 			errorFrame("herdr_unavailable")
 			return false
 		}
+		sessions := snapshot.sessions
 		available = map[string]bool{}
 		for _, session := range sessions {
 			for _, window := range session.Windows {
@@ -135,8 +169,11 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 		}
 		data, _ := json.Marshal(sessions)
 		if !force && string(data) == lastSessions {
-			return true
+			return flushFeed(snapshot)
 		}
+		identity := observedIdentity(sessions)
+		identityChanged := identity != lastIdentity
+		lastIdentity = identity
 		lastSessions = string(data)
 		if !write(map[string]any{"type": "sessions", "sessions": sessions}) {
 			return false
@@ -150,9 +187,15 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 				recent = append(recent, map[string]string{"target": session.Name + ":" + strconv.Itoa(window.Index), "name": window.Name, "session": session.Name})
 			}
 		}
-		return write(map[string]any{"type": "recent", "agents": recent})
+		if !write(map[string]any{"type": "recent", "agents": recent}) {
+			return false
+		}
+		if force || identityChanged {
+			return true
+		}
+		return flushFeed(snapshot)
 	}
-	if !write(map[string]any{"type": "feed-history", "events": []any{}}) || !roster(true) {
+	if !roster(true) {
 		return
 	}
 	selected, lastContent := "", ""

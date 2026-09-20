@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 // Actual source/bundled processes, isolated fake Herdr, no PATH tools or Go.
 import assert from 'node:assert/strict';
+import { createSocketSession } from '../src/serve/bun/mod.createSocketSession.ts';
+import { createHerdrBackend } from '../src/serve/bun/mod.createHerdrBackend.ts';
+import { createObservedFeed } from '../src/serve/bun/mod.createObservedFeed.ts';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,6 +11,71 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
+
+// Deterministic bounded-ring checks supplement the real source/bundle sockets below.
+{
+  const feed = createObservedFeed(), now = 1700000000000;
+  const roster = (status = 'working', extra = []) => [{name:'bWFpbg/d0Q', source:'local', windows:[{index:4,name:'codex',agent:'codex',active:true,status}, ...extra]}];
+  feed.observe(roster(), now);
+  const first = feed.read(0, now);
+  assert.equal(first.events.length, 1); assert.equal(first.events[0].event, 'PreToolUse');
+  assert.equal(first.events[0].timestamp, new Date(now).toISOString());
+  assert.equal(first.events[0].host, 'local'); assert.equal(first.events[0].sessionId, '');
+  feed.observe(roster(), now + 1); // Second client observing same roster emits no duplicate.
+  assert.equal(feed.read(first.cursor, now + 1).events.length, 0);
+  assert.equal(feed.read(0, now + 1).events.length, 1); // Independent replay cursor.
+  feed.observe(roster(), now + 10000);
+  assert.equal(feed.read(first.cursor, now + 10000).events.length, 1);
+  for (const [index, status] of ['idle','blocked','done'].entries()) {
+    const before = feed.read(0, now + 11000 + index).cursor;
+    feed.observe(roster(status), now + 11000 + index);
+    const event = feed.read(before, now + 11000 + index).events[0];
+    assert.equal(event.event, 'Stop'); assert.equal(event.observedState, status);
+  }
+  feed.observe(roster('unknown'), now + 12000); assert.equal(feed.read(0, now + 12000).events.length, 0);
+  const shell = {index:9,name:'codex',active:false,status:'working'};
+  feed.observe(roster('working',[shell]), now + 13000); assert.equal(feed.read(0, now + 13000).events.length, 0);
+  feed.observe(roster('working',[{...shell,name:'codex-oracle'}]), now + 14000); assert.equal(feed.read(0, now + 14000).events.length, 0);
+  feed.observe([{...roster()[0],name:'project-wt-other'}], now + 15000); assert.equal(feed.read(0, now + 15000).events.length, 0);
+  for (let index = 0; index < 105; index++) feed.observe(roster(index % 2 ? 'idle' : 'working'), now + 16000 + index);
+  assert.equal(feed.read(0, now + 16105).events.length, 100);
+  assert.equal(feed.read(0, now + 76105).events.length, 0);
+  feed.observe([], now + 77000); feed.observe(roster(), now + 77001);
+  assert.equal(feed.read(0, now + 77001).events.length, 1);
+  console.log('PASS observed feed: transitions, heartbeat, replay cursors, expiry, ring cap, shell/unknown/collision guards');
+}
+
+// Identity swaps must settle in the UI before matching any new live feed.
+{
+  const feed = createObservedFeed(), frames = [];
+  let names = ['alpha','beta'], statuses = ['working','idle'];
+  const roster = () => [{name:'bWFpbg/d0Q',source:'local',windows:names.map((name,index)=>({index:index+1,name,agent:'codex',active:false,status:statuses[index]}))}];
+  const backend = {observedFeed:feed, async dashboardSessions(){const sessions=roster();feed.observe(sessions);return sessions;}, async captureBatch(){return {};}};
+  const ws = {data:{controller:new AbortController()},send(value){frames.push({time:Date.now(),...JSON.parse(value)});return 1;},close(){}};
+  const session = createSocketSession(ws,backend);
+  const waitFor = predicate => deadline((async()=>{while(!predicate()) await Bun.sleep(5);})(),'identity feed projection');
+  try {
+    await waitFor(()=>frames.some(frame=>frame.type==='feed-history'));
+    for (const replacement of [['beta','alpha'],['gamma','alpha']]) {
+      const start=frames.length;
+      names=replacement;
+      await waitFor(()=>frames.slice(start).some(frame=>frame.type==='sessions'));
+      const changed=frames.slice(start).find(frame=>frame.type==='sessions');
+      await waitFor(()=>frames.slice(start).some(frame=>frame.type==='feed'));
+      const projected=frames.slice(start).filter(frame=>frame.type==='feed');
+      assert.ok(projected[0].time-changed.time >= 900,'changed identities need a complete normal poll before feed projection');
+      for(const frame of projected) {
+        const expected=names[Number(frame.event.target.split(':').at(-1))-1];
+        assert.equal(frame.event.oracle,expected,'feed identity must match the accepted changed roster');
+      }
+    }
+    const start = frames.length; statuses = ['idle','working'];
+    await waitFor(()=>frames.slice(start).some(frame=>frame.type==='feed'));
+    const statusFrames = frames.slice(start);
+    assert.ok(statusFrames.find(frame=>frame.type==='feed').time - statusFrames.find(frame=>frame.type==='sessions').time < 500, 'status-only changes do not wait an extra poll');
+    console.log('PASS observed feed: swapped/renamed identities defer events; status-only transitions remain immediate');
+  } finally { session.close(); }
+}
 
 assert.ok(process.versions.bun, 'run with Bun');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,6 +111,46 @@ else if (args[2] === 'agent') console.log('{"ok":true}');
 else { console.error('unexpected args', args); process.exit(8); }
 `);
 chmodSync(fake, 0o700);
+
+// Force the old working read to finish after a potential newer blocked read.
+// Shared acquisition prevents that newer read from overtaking it altogether.
+{
+  const laneBinary = join(temporary, 'lane-herdr'), laneState = join(temporary, 'lane-state');
+  const laneStarted = join(temporary, 'lane-started'), laneRelease = join(temporary, 'lane-release');
+  const laneCalls = join(temporary, 'lane-calls');
+  writeFileSync(laneState, 'working');
+  writeFileSync(laneBinary, `#!${bun}
+import {appendFileSync,existsSync,readFileSync,writeFileSync} from 'node:fs';
+const args=process.argv.slice(2);
+if(args[0]==='session') console.log(JSON.stringify({sessions:[{name:'main',running:true}]}));
+else {
+ const status=readFileSync(${JSON.stringify(laneState)},'utf8');
+ appendFileSync(${JSON.stringify(laneCalls)},status+'\\n');
+ if(status==='working') {
+  writeFileSync(${JSON.stringify(laneStarted)},'1');
+  while(!existsSync(${JSON.stringify(laneRelease)})) await Bun.sleep(5);
+ }
+ console.log(JSON.stringify({protocol:22,workspaces:[{workspace_id:'wD'}],panes:[{pane_id:'wD:p4',workspace_id:'wD',agent:'codex',focused:true,agent_status:status}]}));
+}
+`);
+  chmodSync(laneBinary, 0o700);
+  const backend = createHerdrBackend(laneBinary);
+  try {
+    const older = backend.dashboardSessions();
+    await deadline((async()=>{while(!existsSync(laneStarted)) await Bun.sleep(5);})(), 'older snapshot start');
+    writeFileSync(laneState, 'blocked');
+    const newer = backend.dashboardSessions();
+    await Bun.sleep(50);
+    assert.equal(readFileSync(laneCalls,'utf8'), 'working\n', 'a newer roster cannot overtake the pending observation');
+    writeFileSync(laneRelease,'1');
+    const results = await Promise.all([older,newer]);
+    assert.equal(results[0][0].windows[0].status,'working');
+    assert.equal(results[1][0].windows[0].status,'working');
+    assert.equal((await backend.dashboardSessions())[0].windows[0].status,'blocked');
+    assert.deepEqual(backend.observedFeed.read().events.map(event=>event.observedState), ['working','blocked']);
+    console.log('PASS observed feed: overlapping old/new snapshot acquisitions cannot regress status');
+  } finally { writeFileSync(laneRelease,'1'); await backend.close(); }
+}
 
 function deadline(promise, label, ms = 10000) {
   let timer;
@@ -159,9 +267,21 @@ async function exercise(entry, label) {
   await http(url,'/ws',{auth:false,headers:{...origin,'Sec-WebSocket-Protocol':`other.protocol, ${ticket.ticket}`},status:401});
   await http(url,'/ws',{auth:false,headers:{Origin:'http://localhost:9999','Sec-WebSocket-Protocol':`maw.ws.v1, ${ticket.ticket}`},status:401});
   const ws = await socket(url,ticket.ticket);
-  assert.deepEqual(await ws.next(),{type:'feed-history',events:[]});
   assert.deepEqual(await ws.next(),{type:'sessions',sessions});
   assert.deepEqual(await ws.next(), {type:'recent', agents:[{target, name:'codex', session:'bWFpbg/d0Q'}]}, 'recent must include the detected agent but never the shell pane');
+  const history = await ws.next();
+  assert.equal(history.type, 'feed-history'); assert.equal(history.events.length, 1);
+  const observed = {event:history.events[0]};
+  assert.equal(observed.event.target, target);
+  assert.equal(observed.event.event, 'Stop'); assert.equal(observed.event.source, 'herdr-agent-status');
+  assert.equal(observed.event.observedState, 'idle'); assert.equal(observed.event.oracle, 'codex');
+  assert.match(observed.event.message, /status projection, not a tool hook/);
+  const replayTicket = (await http(url,'/api/auth/ws-ticket',{method:'POST',headers:origin,body:{path:'/ws'}})).json;
+  const second = await socket(url,replayTicket.ticket);
+  assert.deepEqual(await second.next(), {type:'sessions',sessions});
+  assert.equal((await second.next()).type, 'recent');
+  assert.deepEqual(await second.next(), {type:'feed-history', events:[observed.event]}, 'a second client replays once after its roster render, not another fabricated transition');
+  second.close(); await second.closed;
   await http(url,'/ws',{auth:false,headers:{...origin,'Sec-WebSocket-Protocol':`maw.ws.v1, ${ticket.ticket}`},status:401});
   ws.send(JSON.stringify({type:'wake',target:shell,command:''}));
   assert.deepEqual(await ws.next(),{type:'action-ok',action:'wake',target:shell});
@@ -228,9 +348,15 @@ async function exerciseEngine(entry, label) {
     await http(url,'/api/herdr/sessions',{auth:false,headers:{Origin},status:403});
   }
   const ws = await socket(url,undefined,'/api/herdr/ws');
-  assert.deepEqual(await ws.next(),{type:'feed-history',events:[]});
   assert.deepEqual(await ws.next(),{type:'sessions',sessions});
   assert.deepEqual(await ws.next(), {type:'recent', agents:[{target, name:'codex', session:'bWFpbg/d0Q'}]}, 'recent must include the detected agent but never the shell pane');
+  const history = await ws.next();
+  assert.equal(history.type, 'feed-history'); assert.equal(history.events.length, 1);
+  const observed = {event:history.events[0]};
+  assert.equal(observed.event.target, target);
+  assert.equal(observed.event.event, 'Stop'); assert.equal(observed.event.source, 'herdr-agent-status');
+  assert.equal(observed.event.observedState, 'idle'); assert.equal(observed.event.oracle, 'codex');
+  assert.match(observed.event.message, /status projection, not a tool hook/);
   ws.send(JSON.stringify({type:'select',target}));
   assert.deepEqual(await ws.next(),{type:'capture',target,content:'visible output\n'});
   child.kill('SIGTERM');

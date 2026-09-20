@@ -23,6 +23,9 @@ type wsFixture struct {
 
 func newWSFixture(t *testing.T, backend Backend, interval time.Duration) *wsFixture {
 	t.Helper()
+	if interval == time.Hour {
+		interval = 20 * time.Millisecond
+	}
 	s, err := NewServer(Config{Token: testToken, DataDir: t.TempDir(), PollInterval: interval}, backend)
 	if err != nil {
 		t.Fatal(err)
@@ -115,9 +118,6 @@ func sendWS(t *testing.T, conn *websocket.Conn, value any) {
 
 func initialWS(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
-	if frame := readWS(t, conn); frame["type"] != "feed-history" || len(frame["events"].([]any)) != 0 {
-		t.Fatalf("feed: %v", frame)
-	}
 	frame := readWS(t, conn)
 	if frame["type"] != "sessions" {
 		t.Fatalf("sessions: %v", frame)
@@ -138,6 +138,15 @@ func initialWS(t *testing.T, conn *websocket.Conn) {
 	if len(agents) < 1 || agents[0].(map[string]any)["target"] != "default/w1:1" {
 		t.Fatalf("recent target: %v", frame)
 	}
+	if frame := readWS(t, conn); frame["type"] != "feed-history" {
+		t.Fatal(frame)
+	}
+	if window["status"] == "working" {
+		if frame := readWS(t, conn); frame["type"] != "feed" || frame["event"].(map[string]any)["source"] != "herdr-agent-status" {
+			t.Fatal(frame)
+		}
+	}
+
 }
 
 func TestWSInitialFramesAndSelectedCapture(t *testing.T) {
@@ -356,9 +365,6 @@ func TestWSUnchangedPreviewsAreNotResentAndUnsubscribeClearsThem(t *testing.T) {
 func TestWSInitialBackendFailureReportsErrorThenCloses(t *testing.T) {
 	f := newWSFixture(t, &fakeBackend{failure: true}, time.Hour)
 	conn := f.connect(t)
-	if frame := readWS(t, conn); frame["type"] != "feed-history" {
-		t.Fatal(frame)
-	}
 	if frame := readWS(t, conn); frame["type"] != "error" || frame["error"] != "herdr_unavailable" {
 		t.Fatalf("failure must not look like empty sessions: %v", frame)
 	}
@@ -516,9 +522,6 @@ func TestWSRecentKeepsOnlyDetectedAgentsWithoutDroppingShellWindows(t *testing.T
 	backend, _, _ := testBackend(t)
 	f := newWSFixture(t, backend, time.Hour)
 	conn := f.connect(t)
-	if frame := readWS(t, conn); frame["type"] != "feed-history" {
-		t.Fatal(frame)
-	}
 	frame := readWS(t, conn)
 	sessions := frame["sessions"].([]any)
 	windows := sessions[0].(map[string]any)["windows"].([]any)

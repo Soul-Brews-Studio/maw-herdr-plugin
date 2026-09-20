@@ -187,19 +187,32 @@ Core API compatibility:
 | --- | --- |
 | HTTP | `/api/sessions`, `/api/agents`, `/api/capture`, `/api/captures`, `/api/send`, `/api/identity`, `/api/config`, `/api/health` |
 | Browser auth | Bearer token; short-lived, one-use, exact-Origin-bound `/api/auth/ws-ticket` |
-| `/ws` | `sessions`, `recent`, `capture`, `previews`; `select`, `subscribe`, `subscribe-previews`, `send` |
+| `/ws` | `sessions`, `recent`, `capture`, `previews`, observed `feed`/`feed-history`; `select`, `subscribe`, `subscribe-previews`, `send` |
 | Preferences | `/api/ui-state` object and `/api/asks` array persisted privately under `--data-dir` |
-| Not measured | Teams, costs and feed return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
+| Not measured | Teams, costs and HTTP `/api/feed` return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
 
 `recent` includes only panes with a detected Herdr agent, not ordinary shell panes.
 All panes remain available in `sessions` and the terminal. Agent detection is not
-proof of task completion; full activity-feed history is not implemented yet.
+proof of task completion.
+
+WebSocket activity is a bounded projection of observed Herdr agent status, not
+actual tool-hook or conversation history. `working` projects to the legacy
+`PreToolUse` event; `blocked`, `done`, and `idle` project to `Stop`. Every event
+labels its source and observed state, including a visible explanation. The server
+retains at most 100 events for 60 seconds and refreshes working observations every
+10 seconds. Unknown states and names that the dashboard cannot uniquely resolve
+are not projected. The existing dashboard renders these as busy/ready; it does
+not faithfully distinguish blocked, unknown, or immediate idle. In particular,
+a transition from working to unknown can leave its previous busy badge visible;
+unknown is not projected as a fictitious stop or completion. Full-fidelity
+status display and conversation history remain incomplete.
 
 Workspace targets use opaque base64url session/workspace IDs and stable pane
 numbers, not list positions. Do not save them across daemon resets that reuse
-IDs. Capture reads only the visible screen. Sending is agent-only, reports
+IDs. Capture reads only the visible screen. HTTP sending is agent-only, reports
 `state: "accepted"`, and rejects force/inbox/attachments instead of pretending to
-implement maw's delivery queue. There are at most 16 live preview targets per
+implement maw's delivery queue. WebSocket `send` instead types literal text into
+any pane, adding Enter only for `force: true`. There are at most 16 live preview targets per
 connection and 64 captures per HTTP batch. A capture batch shares one roster and
 one 10-second deadline; a backend failure never becomes a fabricated empty roster.
 

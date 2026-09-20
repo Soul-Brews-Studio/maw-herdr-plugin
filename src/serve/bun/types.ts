@@ -1,6 +1,9 @@
+import type { createObservedFeed } from "./mod.createObservedFeed.ts";
 export interface Window { index: number; name: string; active: boolean; cwd?: string; status?: string; agent?: string }
 export interface Session { name: string; windows: Window[]; source: string }
 export interface Backend {
+  observedFeed: ReturnType<typeof createObservedFeed>;
+  dashboardSessions(signal?: AbortSignal): Promise<Session[]>;
   sessions(signal?: AbortSignal): Promise<Session[]>;
   capture(target: string, lines: number, signal?: AbortSignal): Promise<string>;
   captureBatch(targets: Record<string, number>, signal?: AbortSignal): Promise<Record<string, string>>;

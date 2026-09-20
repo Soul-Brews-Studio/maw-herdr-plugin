@@ -28,16 +28,18 @@ type ticket struct {
 }
 
 type Server struct {
-	backend   Backend
-	config    Config
-	tokenHash [32]byte
-	started   time.Time
-	mu        sync.Mutex
-	tickets   map[string]ticket
-	stateMu   sync.Mutex
-	context   context.Context
-	cancel    context.CancelFunc
-	sockets   chan struct{}
+	observedRosterGate chan struct{}
+	observed           observedFeed
+	backend            Backend
+	config             Config
+	tokenHash          [32]byte
+	started            time.Time
+	mu                 sync.Mutex
+	tickets            map[string]ticket
+	stateMu            sync.Mutex
+	context            context.Context
+	cancel             context.CancelFunc
+	sockets            chan struct{}
 }
 
 func NewServer(config Config, backend Backend) (*Server, error) {
@@ -66,6 +68,7 @@ func NewServer(config Config, backend Backend) (*Server, error) {
 		config.PollInterval = time.Second
 	}
 	s := &Server{backend: backend, config: config, tokenHash: sha256.Sum256([]byte(config.Token)), started: time.Now(), tickets: make(map[string]ticket)}
+	s.observedRosterGate = make(chan struct{}, 1)
 	s.context, s.cancel = context.WithCancel(context.Background())
 	s.sockets = make(chan struct{}, 32)
 	s.config.Token = "" // Never retain credentials in the display/config structure.
