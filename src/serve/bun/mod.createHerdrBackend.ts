@@ -1,3 +1,4 @@
+import { readTeamInventory } from './mod.readTeamInventory.ts';
 import { createObservedFeed } from "./mod.createObservedFeed.ts";
 import { createHash } from "node:crypto";
 import { BackendError, type Backend, type RunHerdr, type Session } from "./types.ts";
@@ -53,6 +54,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
     try { return await task; } finally { pending.delete(task); }
   }
   const backend: Backend = {
+    teamInventory: () => readTeamInventory(),
     observedFeed: createObservedFeed(),
     async dashboardSessions(signal) {
       if (signal?.aborted) throw new BackendError("backend_error", "herdr operation aborted");

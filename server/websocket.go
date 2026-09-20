@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -198,6 +199,19 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 	if !roster(true) {
 		return
 	}
+	home, err := os.UserHomeDir()
+	var teams []map[string]any
+	if err == nil {
+		teams, err = readTeams(home, time.Now())
+	}
+	if err != nil {
+		if !errorFrame("teams_unavailable") {
+			return
+		}
+	} else if !write(map[string]any{"type": "teams", "teams": teams}) {
+		return
+	}
+
 	selected, lastContent := "", ""
 	haveContent := false
 	previews := map[string]string{}

@@ -2,6 +2,7 @@ import type { createObservedFeed } from "./mod.createObservedFeed.ts";
 export interface Window { index: number; name: string; active: boolean; cwd?: string; status?: string; agent?: string }
 export interface Session { name: string; windows: Window[]; source: string }
 export interface Backend {
+  teamInventory(): { teams: Array<Record<string, unknown>>; total: number };
   observedFeed: ReturnType<typeof createObservedFeed>;
   dashboardSessions(signal?: AbortSignal): Promise<Session[]>;
   sessions(signal?: AbortSignal): Promise<Session[]>;

@@ -189,7 +189,7 @@ Core API compatibility:
 | Browser auth | Bearer token; short-lived, one-use, exact-Origin-bound `/api/auth/ws-ticket` |
 | `/ws` | `sessions`, `recent`, `capture`, `previews`, observed `feed`/`feed-history`; `select`, `subscribe`, `subscribe-previews`, `send` |
 | Preferences | `/api/ui-state` object and `/api/asks` array persisted privately under `--data-dir` |
-| Not measured | Teams, costs and HTTP `/api/feed` return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
+| Not measured | Costs and HTTP `/api/feed` return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
 
 `recent` includes only panes with a detected Herdr agent, not ordinary shell panes.
 All panes remain available in `sessions` and the terminal. Agent detection is not
@@ -206,6 +206,24 @@ not faithfully distinguish blocked, unknown, or immediate idle. In particular,
 a transition from working to unknown can leave its previous busy badge visible;
 unknown is not projected as a fictitious stop or completion. Full-fidelity
 status display and conversation history remain incomplete.
+
+`GET /api/teams` reads Claude team configs from `~/.claude/teams/*/config.json`
+and task files from the matching `~/.claude/tasks/*/` directory. An authenticated
+WebSocket also sends an initial `teams` snapshot: the existing dashboard does not
+retry its pre-authentication REST fetch. Reconnect to refresh that snapshot.
+It is read-only;
+Herdr workspaces are not manufactured into teams. Only documented display fields
+are returned, not arbitrary config metadata. Reads reject symlinks/nonregular
+files at inspection/open and enforce bounded counts, file sizes, aggregate reads,
+and response size. Inventory directories must be controlled by trusted local
+writers: these checks are not a race-proof sandbox against concurrent directory
+replacement by another local process.
+Missing data yields an empty inventory; unsafe or oversized data and an unavailable
+backend yield an error instead of a falsely empty or dead-team result.
+
+The legacy `alive` flag includes a two-hour recent-local-member heuristic, **not
+proof that a process is running**. Existing tmux pane IDs are not translated into
+Herdr pane IDs. Exact Herdr-to-team runtime association remains unimplemented.
 
 Workspace targets use opaque base64url session/workspace IDs and stable pane
 numbers, not list positions. Do not save them across daemon resets that reuse

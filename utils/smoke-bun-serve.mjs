@@ -5,7 +5,7 @@ import { createSocketSession } from '../src/serve/bun/mod.createSocketSession.ts
 import { createHerdrBackend } from '../src/serve/bun/mod.createHerdrBackend.ts';
 import { createObservedFeed } from '../src/serve/bun/mod.createObservedFeed.ts';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +50,7 @@ import { createServer } from 'node:net';
   const feed = createObservedFeed(), frames = [];
   let names = ['alpha','beta'], statuses = ['working','idle'];
   const roster = () => [{name:'bWFpbg/d0Q',source:'local',windows:names.map((name,index)=>({index:index+1,name,agent:'codex',active:false,status:statuses[index]}))}];
-  const backend = {observedFeed:feed, async dashboardSessions(){const sessions=roster();feed.observe(sessions);return sessions;}, async captureBatch(){return {};}};
+  const backend = {observedFeed:feed, teamInventory:()=>({teams:[],total:0}), async dashboardSessions(){const sessions=roster();feed.observe(sessions);return sessions;}, async captureBatch(){return {};}};
   const ws = {data:{controller:new AbortController()},send(value){frames.push({time:Date.now(),...JSON.parse(value)});return 1;},close(){}};
   const session = createSocketSession(ws,backend);
   const waitFor = predicate => deadline((async()=>{while(!predicate()) await Bun.sleep(5);})(),'identity feed projection');
@@ -200,10 +200,69 @@ async function socket(url, ticket, path = '/ws') {
   assert.equal(ws.protocol, ticket ? 'maw.ws.v1' : '');
   return ws;
 }
+async function exerciseTeams(url) {
+  const claude = join(env.HOME,'.claude'), teams = join(claude,'teams'), tasks = join(claude,'tasks');
+  const reset = () => { rmSync(claude,{recursive:true,force:true}); mkdirSync(join(teams,'alpha'),{recursive:true}); mkdirSync(join(tasks,'alpha'),{recursive:true}); };
+  const config = value => writeFileSync(join(teams,'alpha','config.json'),JSON.stringify(value));
+  try {
+    rmSync(claude,{recursive:true,force:true});
+    assert.deepEqual((await http(url,'/api/teams')).json,{teams:[],total:0});
+    await http(url,'/api/teams',{auth:false,status:401});
+    writeFileSync(failure,'fail'); await http(url,'/api/teams',{status:503}); rmSync(failure);
+    reset();
+    writeFileSync(join(teams,'README'),'ignored'); writeFileSync(join(teams,'.DS_Store'),'ignored');
+    const now=Date.now();
+    config({name:'alpha',createdAt:now,leadRepo:join(env.HOME,'project'),password:'TEAM_SECRET',members:[{name:'team-lead',secret:'MEMBER_SECRET',subscriptions:['ok',17]},{name:'remote',backendType:'tmux',tmuxPaneId:'%4'}]});
+    writeFileSync(join(tasks,'alpha','00.json'),JSON.stringify({id:1,subject:'numeric id'}));
+    writeFileSync(join(tasks,'alpha','10.json'),JSON.stringify({id:'10',subject:'later',status:'pending',secret:'TASK_SECRET',blocks:['2',17]}));
+    writeFileSync(join(tasks,'alpha','2.json'),JSON.stringify({id:'2',subject:'second',blockedBy:['10']}));
+    writeFileSync(join(tasks,'alpha','bad.json'),'{'); writeFileSync(join(tasks,'alpha','array.json'),'[]');
+    const inventory=(await http(url,'/api/teams')).json;
+    assert.equal(inventory.total,1); const team=inventory.teams[0];
+    assert.equal(team.alive,true); assert.equal(team.leadAgentId,'team-lead@alpha');
+    assert.equal(team.description,''); assert.equal(team.leadSessionId,'');
+    assert.equal(team.members[0].agentId,'team-lead@alpha'); assert.equal(team.members[0].agentType,'lead');
+    assert.equal(team.members[0].joinedAt,now); assert.equal(team.members[0].cwd,join(env.HOME,'project'));
+    assert.deepEqual(team.members[0].subscriptions,['ok']); assert.equal(team.members[0].backendType,'in-process');
+    assert.deepEqual(team.tasks.map(task=>task.id),[1,'10','2']); assert.deepEqual(team.tasks[1].blocks,['2']);
+    assert.ok(!JSON.stringify(inventory).includes('_SECRET'));
+    const teamTicket = (await http(url,'/api/auth/ws-ticket',{method:'POST',headers:{Origin:url},body:{path:'/ws'}})).json;
+    const teamWS = await socket(url,teamTicket.ticket);
+    assert.equal((await teamWS.next()).type,'sessions'); assert.equal((await teamWS.next()).type,'recent');
+    assert.deepEqual(await teamWS.next(),{type:'teams',teams:inventory.teams},'authenticated WS supplies inventory after browser pre-auth REST misses it');
+    teamWS.close(); await teamWS.closed;
+
+    for(const member of [{cwd:env.HOME+'-other',joinedAt:now},{cwd:join(env.HOME,'..','outside'),joinedAt:now},{cwd:env.HOME,joinedAt:now-7200001},{backendType:'tmux',tmuxPaneId:'%4',cwd:env.HOME,joinedAt:now}]) {
+      config({members:[member]}); assert.equal((await http(url,'/api/teams')).json.teams[0].alive,false);
+    }
+    config({name:'../../outside',members:[]});
+    assert.deepEqual((await http(url,'/api/teams')).json.teams[0].tasks.map(task=>task.id),[1,'10','2'],'task paths use directory names, never config name');
+    writeFileSync(join(teams,'alpha','config.json'),'{'); assert.equal((await http(url,'/api/teams')).json.total,0);
+    for(const unsafe of [claude,teams,join(teams,'alpha'),join(teams,'alpha','config.json'),tasks,join(tasks,'alpha'),join(tasks,'alpha','1.json')]) {
+      reset(); config({members:[]}); rmSync(unsafe,{recursive:true,force:true}); symlinkSync(temporary,unsafe); await http(url,'/api/teams',{status:503});
+    }
+    reset(); mkdirSync(join(teams,'alpha','config.json')); await http(url,'/api/teams',{status:503});
+    const badTicket = (await http(url,'/api/auth/ws-ticket',{method:'POST',headers:{Origin:url},body:{path:'/ws'}})).json;
+    const badWS = await socket(url,badTicket.ticket);
+    assert.equal((await badWS.next()).type,'sessions'); assert.equal((await badWS.next()).type,'recent');
+    assert.deepEqual(await badWS.next(),{type:'error',error:'teams_unavailable'},'unsafe inventory is never reported as an empty team list');
+    badWS.close(); await badWS.closed;
+
+    reset(); writeFileSync(join(teams,'alpha','config.json'),Buffer.alloc(1048577,32)); await http(url,'/api/teams',{status:503});
+    reset(); config({members:Array.from({length:1001},()=>({}))}); await http(url,'/api/teams',{status:503});
+    reset(); config({leadRepo:'x'.repeat(10000),members:Array.from({length:500},()=>({}))}); await http(url,'/api/teams',{status:503});
+    reset(); for(let index=0;index<100;index++) mkdirSync(join(teams,'extra'+index)); await http(url,'/api/teams',{status:503});
+    reset(); config({}); for(let index=0;index<1001;index++) writeFileSync(join(tasks,'alpha',index+'.json'),'{}'); await http(url,'/api/teams',{status:503});
+    reset(); for(let index=0;index<5;index++) {const dir=join(teams,'large'+index);mkdirSync(dir);writeFileSync(join(dir,'config.json'),Buffer.alloc(900000,32));} await http(url,'/api/teams',{status:503});
+    console.log('PASS teams: real inventory, normalization, secret filtering, heuristic bounds, malformed/missing, symlinks, file/count/aggregate/amplification limits');
+  } finally { rmSync(claude,{recursive:true,force:true}); rmSync(failure,{force:true}); }
+}
+
 async function exercise(entry, label) {
   const dataDir = join(temporary, label);
   const {child, url} = await start(entry, dataDir);
   const origin = { Origin: url };
+  await exerciseTeams(url);
   assert.equal((await http(url,'/api/wake',{method:'POST',body:{target}})).json.state,'already-awake');
   assert.equal((await http(url,'/api/wake',{method:'POST',body:{target:shell}})).json.state,'ready');
   await http(url,'/api/wake',{method:'POST',body:{target:shell,task:'new-worktree'},status:501});
@@ -269,6 +328,7 @@ async function exercise(entry, label) {
   const ws = await socket(url,ticket.ticket);
   assert.deepEqual(await ws.next(),{type:'sessions',sessions});
   assert.deepEqual(await ws.next(), {type:'recent', agents:[{target, name:'codex', session:'bWFpbg/d0Q'}]}, 'recent must include the detected agent but never the shell pane');
+  assert.deepEqual(await ws.next(), {type:'teams',teams:[]});
   const history = await ws.next();
   assert.equal(history.type, 'feed-history'); assert.equal(history.events.length, 1);
   const observed = {event:history.events[0]};
@@ -280,6 +340,7 @@ async function exercise(entry, label) {
   const second = await socket(url,replayTicket.ticket);
   assert.deepEqual(await second.next(), {type:'sessions',sessions});
   assert.equal((await second.next()).type, 'recent');
+  assert.deepEqual(await second.next(), {type:'teams',teams:[]});
   assert.deepEqual(await second.next(), {type:'feed-history', events:[observed.event]}, 'a second client replays once after its roster render, not another fabricated transition');
   second.close(); await second.closed;
   await http(url,'/ws',{auth:false,headers:{...origin,'Sec-WebSocket-Protocol':`maw.ws.v1, ${ticket.ticket}`},status:401});
@@ -350,6 +411,7 @@ async function exerciseEngine(entry, label) {
   const ws = await socket(url,undefined,'/api/herdr/ws');
   assert.deepEqual(await ws.next(),{type:'sessions',sessions});
   assert.deepEqual(await ws.next(), {type:'recent', agents:[{target, name:'codex', session:'bWFpbg/d0Q'}]}, 'recent must include the detected agent but never the shell pane');
+  assert.deepEqual(await ws.next(), {type:'teams',teams:[]});
   const history = await ws.next();
   assert.equal(history.type, 'feed-history'); assert.equal(history.events.length, 1);
   const observed = {event:history.events[0]};

@@ -22,6 +22,7 @@ type wsFixture struct {
 }
 
 func newWSFixture(t *testing.T, backend Backend, interval time.Duration) *wsFixture {
+	t.Setenv("HOME", t.TempDir())
 	t.Helper()
 	if interval == time.Hour {
 		interval = 20 * time.Millisecond
@@ -137,6 +138,9 @@ func initialWS(t *testing.T, conn *websocket.Conn) {
 	agents := frame["agents"].([]any)
 	if len(agents) < 1 || agents[0].(map[string]any)["target"] != "default/w1:1" {
 		t.Fatalf("recent target: %v", frame)
+	}
+	if frame := readWS(t, conn); frame["type"] != "teams" {
+		t.Fatal(frame)
 	}
 	if frame := readWS(t, conn); frame["type"] != "feed-history" {
 		t.Fatal(frame)
