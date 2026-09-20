@@ -124,6 +124,7 @@ func TestAPICoreContracts(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"accepted"`) || b.sends != 1 {
 		t.Fatalf("send: %d %s", w.Code, w.Body)
 	}
+	t.Setenv("MAW_HEY_INBOX_AUTOWRITE", "1")
 	for _, body := range []string{`{"target":"default/w1:1","text":"x","force":true}`, `{"target":"default/w1:1","text":"x","inbox":true}`} {
 		if w := request(s, "POST", "/api/send", body, nil); w.Code != 501 {
 			t.Fatal(w.Code, w.Body)

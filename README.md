@@ -394,9 +394,28 @@ pairing and discovery remain unfinished; this is not full federation parity.
 
 Workspace targets use opaque base64url session/workspace IDs and stable pane
 numbers, not list positions. Do not save them across daemon resets that reuse
-IDs. Capture reads only the visible screen. HTTP sending is agent-only, reports
-`state: "accepted"`, joins attachment strings before message text (without reading files), and rejects force/inbox instead of pretending to
-implement maw's delivery queue. WebSocket `send` instead types literal text into
+IDs. Capture reads only the visible screen. Ordinary HTTP sending is agent-only,
+reports `state: "accepted"`, joins attachment strings before message text (without
+reading files), and rejects force. Acceptance is not proof of consumption.
+
+HTTP `/api/send` with `inbox: true` instead writes an unread legacy Markdown
+message beneath the receiver repository's `ψ/inbox` and returns `state: "queued"`.
+It requires a live Herdr pane (a shell is allowed), but never injects text, wakes
+an agent, or runs hooks. Registered Git worktrees resolve to their proven base
+repository; unregistered panes use their canonical cwd. Matching private server
+`oracle`/`psiPath` configuration can override the destination. The receiver is
+rechecked before writing. Attachment strings are included in the stored message;
+the response `text` remains the original text. Inbox delivery ignores `force`.
+
+`MAW_HEY_INBOX_AUTOWRITE` accepts `1/true/yes/on` or `0/false/no/off`; otherwise it
+is enabled except under `MAW_TEST_MODE=1`. New messages use UTC filenames and
+exclusive atomic publication, never replacing an existing message. Child
+`ψ/inbox` symlinks are rejected. Repository directories are operator-trusted,
+not a sandbox against concurrent hostile directory replacement. Sender attribution
+is display metadata, not a verified signature. Queued does not mean consumed;
+legacy signed-request deduplication and lifecycle-feed integration remain pending.
+
+WebSocket `send` instead types literal text into
 any pane, adding Enter only for `force: true`. There are at most 16 live preview targets per
 connection and 64 captures per HTTP batch. A capture batch shares one roster and
 one 10-second deadline; a backend failure never becomes a fabricated empty roster.

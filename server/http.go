@@ -229,6 +229,7 @@ func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body, 64<<10) {
 		return
 	}
+	originalText := body.Text
 	if len(body.Attachments) != 0 {
 		parts := make([]string, 0, len(body.Attachments)+1)
 		for _, attachment := range body.Attachments {
@@ -240,11 +241,15 @@ func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
 		}
 		body.Text = strings.Join(append(parts, body.Text), "\n")
 	}
-	if body.Target == "" || body.Text == "" {
+	if body.Target == "" || (!body.Inbox && body.Text == "") {
 		fail(w, 400, "target_and_text_required")
 		return
 	}
-	if body.Force || body.Inbox {
+	if body.Inbox {
+		s.serveInbox(w, r, body, originalText)
+		return
+	}
+	if body.Force {
 		fail(w, 501, "send_options_not_supported")
 		return
 	}
@@ -252,5 +257,5 @@ func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
 		backendFailure(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "target": body.Target, "text": body.Text, "source": "local", "lastLine": "", "state": "accepted", "receipt": []string{"herdr agent prompt accepted"}, "warning": "Acceptance is not proof the agent consumed or completed this prompt; queue/inbox delivery is not implemented."})
+	writeJSON(w, 200, map[string]any{"ok": true, "target": body.Target, "text": body.Text, "source": "local", "lastLine": "", "state": "accepted", "receipt": []string{"herdr agent prompt accepted"}, "warning": "Prompt acceptance does not imply consumption or completion; this path does not queue an inbox message."})
 }
