@@ -96,6 +96,8 @@ const children = new Set(), sockets = new Set();
 let checks = 0;
 const env = { ...process.env, PATH: '/nonexistent', HOME: join(temporary, 'home'), XDG_CACHE_HOME: join(temporary, 'cache') };
 delete env.MAW_HERDR_SERVE_BIN;
+// Federation inventory must not inherit a live fleet override.
+env.PEERS_FILE = join(temporary, 'absent-peers.json');
 mkdirSync(env.HOME);
 writeFileSync(tokenFile, token + '\n', { mode: 0o600 });
 writeFileSync(fake, `#!${bun}

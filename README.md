@@ -236,6 +236,52 @@ Herdr panes. Removal uses ordinary `git worktree remove` without force, branch
 deletion, or a recursive-delete fallback; dirty and locked worktrees stay protected
 by Git. Missing worktree registrations are not pruned by this endpoint.
 
+### Federation status
+
+Authenticated `GET /api/federation/status` and `GET /fed.json` read the
+existing version-1 `peers.json` inventory and fetch each configured peer's
+`/api/sessions`. `/api/config` exposes the inventory as `namedPeers`; reading
+config does not probe peers. There is no network discovery or inventory write.
+
+Set `PEERS_FILE` to an explicit inventory path, or use the state directory:
+`MAW_HOME`, then `MAW_STATE_DIR`, then XDG state when `MAW_XDG` is enabled,
+otherwise `~/.maw`. If that selected inventory is missing and neither
+`PEERS_FILE` nor `MAW_HOME` is explicit, the legacy `~/.maw/peers.json`
+is also checked. A minimal inventory is:
+
+```json
+{"version":1,"peers":{"local":{"url":"http://127.0.0.1:3456","node":"local"}}}
+```
+
+Only configure destinations you trust to receive federation authentication.
+Peer URLs may use HTTP(S) and a base path, but not userinfo, query or fragment.
+Probes do not follow redirects. DNS is resolved and pinned while preserving
+HTTP Host and TLS certificate validation; loopback is allowed only for an
+explicit loopback address or `localhost`, not an arbitrary hostname resolving
+to loopback. Link-local, unspecified and multicast addresses are refused.
+
+The inventory is limited to 32 peers and 1 MiB; probes use four concurrent
+requests, 2.5-second per-peer deadlines, a 10-second sweep deadline and 1 MiB
+response limits. Concurrent callers share a sweep; outcomes are cached for
+15 seconds and invalidated when inventory or signing credentials change.
+A missing inventory is empty; malformed or unsafe inventory returns an error.
+Local configuration directories must have trusted writers; symlink checks are
+not a race-proof sandbox against concurrent local directory replacement.
+A timed-out DNS lookup may finish later internally, but cannot start a late request.
+
+`reachable` means an HTTP response was received—even HTTP 401 or invalid JSON.
+It does **not** prove authentication or usable sessions. `auth_ok` is the stored
+probe result, not a fresh authentication claim. `agents` contains session names,
+matching the legacy contract. Errors are sanitized; credentials are never returned.
+
+Optional legacy HMAC signing reads `MAW_SENDER=node:oracle`,
+`MAW_FEDERATION_TOKEN`, and `MAW_PEER_KEY` (or an existing state-directory
+`peer-key` file). It never creates a key or forwards the browser's operator
+token. Without all signing prerequisites, probes are unsigned. The signature
+uses the legacy fixed `/api/sessions` pathname, including for base-path URLs.
+Layered maw-config identity/token fallback, inbound peer-signature authentication,
+pairing and discovery remain unfinished; this is not full federation parity.
+
 Workspace targets use opaque base64url session/workspace IDs and stable pane
 numbers, not list positions. Do not save them across daemon resets that reuse
 IDs. Capture reads only the visible screen. HTTP sending is agent-only, reports

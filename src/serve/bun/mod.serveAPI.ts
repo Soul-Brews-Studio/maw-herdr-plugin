@@ -49,9 +49,10 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
       uptime: Math.floor((Date.now() - started) / 1000), clockUtc: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
       endpoints: config.engine ? ['/api/herdr/sessions', '/api/herdr/capture', '/api/herdr/send', '/api/herdr/wake', '/api/herdr/ws', '/api/herdr/ws/pty'] : ['/api/sessions', '/api/capture', '/api/send', '/api/wake', '/ws', '/ws/pty'],
       capabilities: ['sessions', 'capture', 'agent-prompt', 'dashboard-ws', 'terminal-stream', 'existing-pane-wake'] };
+    case '/api/federation/status': case '/fed.json': return backend.federation.status(signal);
     case '/api/config':
       if (request.url.includes('?')) throw new HTTPError(400, 'config_query_not_supported');
-      return { node: config.node, agents: {}, namedPeers: [] };
+      return { node: config.node, agents: {}, namedPeers: backend.federation.namedPeers() };
     case '/api/teams':
       await backend.sessions(signal);
       return backend.teamInventory();

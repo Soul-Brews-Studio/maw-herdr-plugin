@@ -65,6 +65,7 @@ func (b *fakeBackend) Send(_ context.Context, target, _ string) error {
 
 func testServer(t *testing.T) (*Server, *fakeBackend) {
 	t.Helper()
+	t.Setenv("PEERS_FILE", federationTempDir(t)+"/peers.json")
 	b := &fakeBackend{content: "visible terminal"}
 	s, err := NewServer(Config{Token: testToken, DataDir: t.TempDir()}, b)
 	if err != nil {
