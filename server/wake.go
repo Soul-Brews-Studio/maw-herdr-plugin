@@ -94,9 +94,6 @@ func (b *HerdrBackend) wake(ctx context.Context, target string, task *string) (s
 	if found && task != nil {
 		return "", errRegistryUnavailable
 	}
-	if found && strings.TrimSpace(pane.pane.Agent) != "" {
-		return "already-awake", nil
-	}
 	select {
 	case b.registryWakeGate <- struct{}{}:
 		defer func() { <-b.registryWakeGate }()
@@ -112,12 +109,16 @@ func (b *HerdrBackend) wake(ctx context.Context, target string, task *string) (s
 		return "", err
 	}
 	if strings.TrimSpace(pane.pane.Agent) != "" {
-		return "already-awake", nil
+		return b.finalizeWake(ctx, pane, "already-awake")
 	}
 	if launch, configured, err := b.configuredWakeLaunch(pane); err != nil {
 		return "", err
 	} else if configured {
-		return b.launchConfigured(ctx, pane, launch)
+		state, err := b.launchConfigured(ctx, pane, launch)
+		if err != nil {
+			return "", err
+		}
+		return b.finalizeWake(ctx, pane, state)
 	}
 	kind := b.wakeEngine
 	if kind == "" {
@@ -149,5 +150,5 @@ func (b *HerdrBackend) wake(ctx context.Context, target string, task *string) (s
 	if json.Unmarshal(raw, &response) != nil || response.Type != "agent_started" || response.Agent.Pane != pane.pane.ID || response.Agent.Kind != kind || !response.Agent.Ready || response.Agent.Pending || response.Argv == nil {
 		return "", errors.New("invalid agent readiness response")
 	}
-	return "ready", nil
+	return b.finalizeWake(ctx, pane, "ready")
 }

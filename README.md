@@ -742,3 +742,24 @@ session, both attach error paths, that `wake --dry-run` plans a workspace and
 only `--own-session` plans a server, and that `hey --dry-run` and an unknown
 `peek` target resolve without sending or reading anything. When `maw` or
 `herdr` is absent it prints a `SKIP:` line and exits 0, so it is safe in CI.
+
+### Wake fleet registration and post-wake hooks
+
+After a verified wake (including an already-running target), the server registers
+observed session windows in the local fleet registry, then runs trusted local
+`hooks.postWake` commands sequentially. Task windows retain their base repository
+identity. Registration failure prevents hooks but does not undo running agents or
+created workspaces/worktrees. Unknown fleet root metadata is preserved.
+
+Hooks receive `MAW_ORACLE`, `MAW_SESSION`, and `MAW_WINDOW`; configuration comes
+from the final repository cwd, while hook execution inherits the server process
+cwd. Browser requests cannot supply hooks. Individual hook failures are ignored,
+as in the legacy CLI. Hook output is discarded and stdin is closed. Execution is
+bounded by the remaining wake-operation budget (at most ten seconds); cancellation
+stops remaining hooks and kills descendants in the hook process group. A successful
+wake state does not certify hook completion. Detached processes escaping that group
+are not sandboxed; local configuration remains trusted.
+
+Fleet files are bounded and unsafe/symlinked or malformed files fail closed rather
+than being overwritten. Writes use atomic replacement; these are deliberate safety
+differences from legacy behavior. No legacy squad migration is performed.
