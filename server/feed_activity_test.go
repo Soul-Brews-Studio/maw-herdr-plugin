@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -30,4 +31,38 @@ func TestHTTPFeedActivity(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 	s.observed.observe(observedRoster("working"), time.Now())
+}
+
+func TestHTTPActivitySuppressesWebsocketProjection(t *testing.T) {
+	f := newWSFixture(t, &observedWSBackend{}, time.Hour)
+	req, err := http.NewRequest("POST", f.http.URL+"/api/feed", strings.NewReader(`{"oracle":"alpha","event":"not-injected"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	res, err := f.http.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatal(res.StatusCode)
+	}
+	conn := f.connect(t)
+	for _, kind := range []string{"sessions", "recent", "teams"} {
+		if frame := readWS(t, conn); frame["type"] != kind {
+			t.Fatal(frame)
+		}
+	}
+	history := readWS(t, conn)
+	if history["type"] != "feed-history" || len(history["events"].([]any)) != 0 {
+		t.Fatal(history)
+	}
+	sendWS(t, conn, map[string]any{"type": "unsupported"})
+	if frame := readWS(t, conn); frame["type"] != "error" {
+		t.Fatal("unexpected synthetic or injected event", frame)
+	}
+	if f.server.deliveryHistory.snapshot(-1).Total != 0 {
+		t.Fatal("injected delivery history")
+	}
 }
