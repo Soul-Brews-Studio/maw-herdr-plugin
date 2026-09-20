@@ -1,0 +1,405 @@
+[
+  {
+    "name": "builtin",
+    "config": {},
+    "window": "neo",
+    "expected": {
+      "selectedKey": "codex",
+      "line": "MAW_SESSION_WINDOW=neo codex",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "fallback mapped",
+    "config": {
+      "commands": {
+        "claude": "claude --model sonnet"
+      }
+    },
+    "window": "neo",
+    "fallback": "claude",
+    "expected": {
+      "selectedKey": "claude",
+      "line": "MAW_SESSION_WINDOW=neo claude --model sonnet",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "explicit configured first",
+    "config": {
+      "commands": {
+        "neo": "claude",
+        "fast": "codex --fast"
+      }
+    },
+    "window": "neo",
+    "explicitEngine": "fast",
+    "expected": {
+      "selectedKey": "fast",
+      "line": "MAW_SESSION_WINDOW=neo codex --fast",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "window beats explicit literal",
+    "config": {
+      "commands": {
+        "neo": "claude --model sonnet"
+      }
+    },
+    "window": "neo",
+    "explicitEngine": "unknown",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo claude --model sonnet",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "oracle alias actual key resume",
+    "config": {
+      "commands": {
+        "Colophon-Oracle": "codex",
+        "Colophon-Oracle-resume": "claude --continue --model sonnet"
+      },
+      "wake": {
+        "resume": true
+      }
+    },
+    "window": "colophon",
+    "expected": {
+      "selectedKey": "Colophon-Oracle",
+      "line": "MAW_SESSION_WINDOW=colophon claude --continue --model sonnet",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "oracle suffix removed",
+    "config": {
+      "commands": {
+        "neo": "codex --fast"
+      }
+    },
+    "window": "Neo-Oracle",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=Neo-Oracle codex --fast",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "glob sorted UTF8",
+    "config": {
+      "commands": {
+        "neo*": "claude",
+        "*oracle": "codex --first"
+      }
+    },
+    "window": "neo-oracle",
+    "expected": {
+      "selectedKey": "*oracle",
+      "line": "MAW_SESSION_WINDOW=neo-oracle codex --first",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "star is edge not wildcard parser",
+    "config": {
+      "commands": {
+        "*neo*": "claude",
+        "default": "codex"
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "default",
+      "line": "MAW_SESSION_WINDOW=neo codex",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "literal explicit",
+    "config": {
+      "wake": {
+        "engine": "claude"
+      }
+    },
+    "window": "neo",
+    "explicitEngine": "omx",
+    "expected": {
+      "selectedKey": "omx",
+      "line": "MAW_SESSION_WINDOW=neo omx",
+      "family": "omx",
+      "warnings": []
+    }
+  },
+  {
+    "name": "wake configured engine",
+    "config": {
+      "wake": {
+        "engine": " fast "
+      },
+      "commands": {
+        "fast": "codex --fast"
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "fast",
+      "line": "MAW_SESSION_WINDOW=neo codex --fast",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "defaultEngine alias",
+    "config": {
+      "defaultEngine": " claude "
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "claude",
+      "line": "MAW_SESSION_WINDOW=neo claude",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "commands default",
+    "config": {
+      "commands": {
+        "default": "claude",
+        "codex": "codex --fast"
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "default",
+      "line": "MAW_SESSION_WINDOW=neo claude",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "task window no base alias",
+    "config": {
+      "commands": {
+        "neo": "claude",
+        "codex": "codex --fast"
+      }
+    },
+    "window": "neo-issue90",
+    "expected": {
+      "selectedKey": "codex",
+      "line": "MAW_SESSION_WINDOW=neo-issue90 codex --fast",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "resume injection env builtin",
+    "config": {
+      "commands": {
+        "neo": "TOKEN=secret command /usr/bin/codex --model x"
+      },
+      "wake": {
+        "resume": true
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo TOKEN=secret command /usr/bin/codex resume --model x",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "claude resume and channels",
+    "config": {
+      "commands": {
+        "neo": "claude --model sonnet",
+        "neo-channels": "ignored"
+      },
+      "wake": {
+        "resume": true,
+        "channels": true
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo claude --model sonnet --continue --channels plugin:discord@claude-plugins-official",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "channels full replacement",
+    "config": {
+      "commands": {
+        "neo": "codex",
+        "neo-channels": "claude --channels custom --"
+      },
+      "wake": {
+        "channels": true,
+        "prompt": " hello "
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo claude --channels custom -- hello",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "prompt apostrophe unicode",
+    "config": {
+      "wake": {
+        "engine": "claude",
+        "channels": true,
+        "prompt": "  it's ไทย  "
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "claude",
+      "line": "MAW_SESSION_WINDOW=neo claude --channels plugin:discord@claude-plugins-official -- 'it'\\''s ไทย'",
+      "family": "claude",
+      "warnings": []
+    }
+  },
+  {
+    "name": "unknown family warnings no secrets",
+    "config": {
+      "commands": {
+        "neo": "secret-runner --token ${WAKE_TEST_TOKEN}"
+      },
+      "wake": {
+        "resume": true,
+        "channels": true
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo secret-runner --token ${WAKE_TEST_TOKEN} resume",
+      "family": "secret-runner",
+      "warnings": [
+        "unknown_resume_form",
+        "channels_not_claude"
+      ]
+    }
+  },
+  {
+    "name": "pool prefix",
+    "config": {
+      "zaiPool": "fleet_1",
+      "wake": {
+        "resume": true
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "codex",
+      "line": "MAW_SESSION_WINDOW=neo MAW_ZAI_POOL=fleet_1 codex resume",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "existing pool preserved",
+    "config": {
+      "zaiPool": "new",
+      "commands": {
+        "neo": "MAW_ZAI_POOL=old codex"
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo MAW_ZAI_POOL=old codex",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "unsafe pool ignored",
+    "config": {
+      "zaiPool": "bad; command"
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "codex",
+      "line": "MAW_SESSION_WINDOW=neo codex",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "trusted multiline shell preserved",
+    "config": {
+      "commands": {
+        "neo": "TOKEN=value codex >out\nother-command; echo done"
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo TOKEN=value codex >out\nother-command; echo done",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "window shell quote",
+    "config": {},
+    "window": "neo's window",
+    "expected": {
+      "selectedKey": "codex",
+      "line": "MAW_SESSION_WINDOW='neo'\\''s window' codex",
+      "family": "codex",
+      "warnings": []
+    }
+  },
+  {
+    "name": "wrapped env unknown legacy heuristic",
+    "config": {
+      "commands": {
+        "neo": "env TOKEN=secret codex"
+      },
+      "wake": {
+        "resume": true
+      }
+    },
+    "window": "neo",
+    "expected": {
+      "selectedKey": "neo",
+      "line": "MAW_SESSION_WINDOW=neo env TOKEN=secret codex resume",
+      "family": "env",
+      "warnings": [
+        "unknown_resume_form"
+      ]
+    }
+  },
+  {
+    "name": "NUL selected line rejected",
+    "config": {
+      "commands": {
+        "neo": "codex\u0000evil"
+      }
+    },
+    "window": "neo",
+    "error": "wake launch unavailable"
+  }
+]

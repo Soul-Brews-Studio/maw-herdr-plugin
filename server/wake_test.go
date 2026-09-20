@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -42,7 +43,9 @@ func TestWakeHTTPAndSocket(t *testing.T) {
 }
 
 func TestWakeBackendExactPaneAndReadiness(t *testing.T) {
-	b, calls, _ := testBackend(t)
+	b, calls, snapshot := testBackend(t)
+	cwd, _ := json.Marshal(federationTempDir(t))
+	*snapshot = strings.Replace(*snapshot, `"agent":null`, `"agent":null,"cwd":`+string(cwd), 1)
 	old := b.run
 	response := `{"result":{"type":"agent_started","agent":{"pane_id":"wD:p9","agent":"claude","interactive_ready":true},"argv":[]}}`
 	b.run = func(ctx context.Context, args ...string) ([]byte, error) {

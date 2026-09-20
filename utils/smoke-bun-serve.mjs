@@ -90,7 +90,7 @@ const target = 'bWFpbg/d0Q:4', shell = 'bWFpbg/d0Q:9';
 // Same protocol-22 roster and envelopes as server/backend_test.go.
 const sessions = [{ name: 'bWFpbg/d0Q', source: 'local', windows: [
   { index: 4, name: 'codex', active: true, cwd: '/tmp', status: 'idle', agent: 'codex' },
-  { index: 9, name: 'wD:p9', active: false, status: 'unknown' },
+  { index: 9, name: 'wD:p9', active: false, cwd: join(temporary,'home'), status: 'unknown' },
 ] }];
 const children = new Set(), sockets = new Set();
 let checks = 0;
@@ -109,7 +109,7 @@ const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 if (existsSync(${JSON.stringify(failure)})) { console.error('fixture unavailable'); process.exit(7); }
 if (JSON.stringify(args) === JSON.stringify(['session','list','--json'])) console.log(JSON.stringify({sessions:[{name:'main',running:true},{name:'stopped',running:false}]}));
-else if (args[2] === 'api') console.log(JSON.stringify({result:{snapshot:{protocol:22,workspaces:[{workspace_id:'wD',label:'demo'}],panes:[{pane_id:'wD:p4',workspace_id:'wD',agent:'codex',focused:true,agent_status:'idle',cwd:'/tmp'},{pane_id:'wD:p9',workspace_id:'wD',agent:null,focused:false,agent_status:'unknown'}]}}}));
+else if (args[2] === 'api') console.log(JSON.stringify({result:{snapshot:{protocol:22,workspaces:[{workspace_id:'wD',label:'demo'}],panes:[{pane_id:'wD:p4',workspace_id:'wD',agent:'codex',focused:true,agent_status:'idle',cwd:'/tmp'},{pane_id:'wD:p9',workspace_id:'wD',agent:null,focused:false,agent_status:'unknown',cwd:${JSON.stringify(join(temporary,'home'))}}]}}}));
 else if (args[2] === 'pane') process.stdout.write('visible output\\n');
 else if (args[2] === 'agent' && args[3] === 'start') console.log(JSON.stringify({result:{type:'agent_started',argv:['claude'],agent:{pane_id:'wD:p9',agent:'claude',interactive_ready:true}}}));
 else if (args[2] === 'agent') console.log('{"ok":true}');

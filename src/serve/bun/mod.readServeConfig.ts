@@ -49,6 +49,6 @@ export function readServeConfig(args: string[]): ServeConfig {
     throw new Error('--listen must use a loopback IP or localhost and port');
   }
   const configHome = process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support') : process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, engine, wakeEngine, ...projectMawConfig(readMawConfig()),
+  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, engine, wakeEngine, explicitWakeEngine: flags.get('--wake-engine'), ...projectMawConfig(readMawConfig()),
     binary: flags.get('--herdr') || 'herdr', dataDir: flags.get('--data-dir') || join(configHome, 'maw-herdr', 'serve') };
 }

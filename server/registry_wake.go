@@ -194,6 +194,7 @@ func (b *HerdrBackend) resolveRegistryWakeTask(ctx context.Context, target strin
 		return none, errRegistryUnavailable
 	}
 	if len(matches) == 1 {
+		matches[0].effectiveWindow = entry.Name
 		return matches[0], nil
 	}
 	raw, e := b.run(ctx, "--session", session, "workspace", "create", "--cwd", entry.Path, "--label", entry.Name, "--no-focus")
@@ -228,5 +229,6 @@ func (b *HerdrBackend) resolveRegistryWakeTask(ctx context.Context, target strin
 	if len(matches) != 1 || matches[0].pane.ID != response.Pane.ID || matches[0].pane.Workspace != response.Workspace.ID {
 		return none, errRegistryUnavailable
 	}
+	matches[0].effectiveWindow = entry.Name
 	return matches[0], nil
 }

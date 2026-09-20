@@ -80,6 +80,11 @@ func run() error {
 		return errors.New("--wake-engine must be a supported Herdr agent kind")
 	}
 	config.WakeEngine = *wakeEngine
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "wake-engine" {
+			config.WakeEngineExplicit = true
+		}
+	})
 	config.DataDir = *dataDir
 	server, err := NewServer(config, NewHerdrBackend(*binary))
 	if err != nil {
