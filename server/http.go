@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 )
@@ -152,7 +153,21 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, map[string]any{"node": s.config.Node, "agents": map[string]any{}, "namedPeers": []any{}})
 	case "/api/teams":
-		writeJSON(w, 200, map[string]any{"teams": []any{}, "total": 0, "supported": false})
+		if _, err := s.backend.Sessions(r.Context()); err != nil {
+			backendFailure(w, err)
+			return
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fail(w, 503, "teams_unavailable")
+			return
+		}
+		teams, err := readTeams(home, time.Now())
+		if err != nil {
+			fail(w, 503, "teams_unavailable")
+			return
+		}
+		writeJSON(w, 200, map[string]any{"teams": teams, "total": len(teams)})
 	case "/api/costs":
 		writeJSON(w, 200, map[string]any{"agents": []any{}, "total": map[string]any{"tokens": 0, "cost": 0, "sessions": 0, "agents": 0}, "supported": false})
 	case "/api/feed":

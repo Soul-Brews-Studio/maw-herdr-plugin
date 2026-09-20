@@ -50,7 +50,9 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
     case '/api/config':
       if (request.url.includes('?')) throw new HTTPError(400, 'config_query_not_supported');
       return { node: config.node, agents: {}, namedPeers: [] };
-    case '/api/teams': return { teams: [], total: 0, supported: false };
+    case '/api/teams':
+      await backend.sessions(signal);
+      return backend.teamInventory();
     case '/api/costs': return { agents: [], total: { tokens: 0, cost: 0, sessions: 0, agents: 0 }, supported: false };
     case '/api/feed': return { events: [], total: 0, active_oracles: [], supported: false };
     case '/api/health': case '/health':

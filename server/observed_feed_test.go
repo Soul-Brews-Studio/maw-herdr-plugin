@@ -104,13 +104,13 @@ func (*observedWSBackend) Sessions(context.Context) ([]Session, error) {
 func TestObservedFeedSharedWebsocketReplay(t *testing.T) {
 	f := newWSFixture(t, &observedWSBackend{}, time.Hour)
 	first := f.connect(t)
-	for _, kind := range []string{"sessions", "recent", "feed-history", "feed"} {
+	for _, kind := range []string{"sessions", "recent", "teams", "feed-history", "feed"} {
 		if frame := readWS(t, first); frame["type"] != kind {
 			t.Fatal(frame)
 		}
 	}
 	second := f.connect(t)
-	for _, kind := range []string{"sessions", "recent"} {
+	for _, kind := range []string{"sessions", "recent", "teams"} {
 		if frame := readWS(t, second); frame["type"] != kind {
 			t.Fatal(frame)
 		}

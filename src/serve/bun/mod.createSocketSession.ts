@@ -37,6 +37,10 @@ export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Ba
     }
     // The live UI resolves feed names through its rendered roster. Replaying on
     // the next normal poll gives every changed identity roster a render turn.
+    if (force) {
+      try { if (!write({ type: 'teams', teams: backend.teamInventory().teams })) return false; }
+      catch { if (!error('teams_unavailable')) return false; }
+    }
     if (force || identityChanged) return true;
     if (!feedInitialized) {
       const history = backend.observedFeed.read();

@@ -91,6 +91,7 @@ func request(s *Server, method, path, body string, headers map[string]string) *h
 }
 
 func TestAPICoreContracts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	s, b := testServer(t)
 	for _, path := range []string{"/api/sessions", "/api/agents", "/api/agent", "/api/identity", "/api/config", "/api/teams", "/api/costs", "/api/feed", "/api/captures", "/api/health"} {
 		w := request(s, "GET", path, "", nil)

@@ -27,7 +27,7 @@ else if(a[2]==='terminal') {
 `, { mode: 0o700 });
 const native = process.argv[2];
 const argv = ['--token-file',tokenFile,'--listen','127.0.0.1:0','--herdr',fake,'--data-dir',join(root,'state')];
-const child = spawn(native ? resolve(native) : process.execPath, native ? argv : [resolve(process.env.MAW_TERMINAL_ENTRY || 'index.mjs'),'serve',...argv], {env:{...process.env,MAW_HERDR_SERVE_BIN:''},stdio:['ignore','pipe','pipe']});
+const child = spawn(native ? resolve(native) : process.execPath, native ? argv : [resolve(process.env.MAW_TERMINAL_ENTRY || 'index.mjs'),'serve',...argv], {env:{...process.env,HOME:root,MAW_HERDR_SERVE_BIN:''},stdio:['ignore','pipe','pipe']});
 let log='';const sockets=[];
 const exited=new Promise(resolve=>child.once('exit',(code,signal)=>resolve({code,signal})));
 const timeout=(p,label)=>{let t;return Promise.race([p,new Promise((_,r)=>t=setTimeout(()=>r(Error(label+' timed out')),10000))]).finally(()=>clearTimeout(t));};

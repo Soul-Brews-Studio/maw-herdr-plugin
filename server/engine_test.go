@@ -48,6 +48,7 @@ func TestEngineConfig(t *testing.T) {
 }
 
 func newEngineServer(t *testing.T) (*Server, *fakeBackend) {
+	t.Setenv("HOME", t.TempDir())
 	t.Helper()
 	b := &fakeBackend{content: "engine pane"}
 	s, err := NewServer(Config{Engine: true, Prefix: enginePrefix, Token: testToken, DataDir: t.TempDir()}, b)
@@ -126,7 +127,7 @@ func TestEngineWebSocket(t *testing.T) {
 	if conn.Subprotocol() != "" {
 		t.Fatal("unexpected negotiated protocol")
 	}
-	for _, want := range []string{"sessions", "recent", "feed-history", "feed"} {
+	for _, want := range []string{"sessions", "recent", "teams", "feed-history", "feed"} {
 		if frame := readWS(t, conn); frame["type"] != want {
 			t.Fatalf("%v", frame)
 		}
