@@ -114,6 +114,11 @@ func (b *HerdrBackend) wake(ctx context.Context, target string, task *string) (s
 	if strings.TrimSpace(pane.pane.Agent) != "" {
 		return "already-awake", nil
 	}
+	if launch, configured, err := b.configuredWakeLaunch(pane); err != nil {
+		return "", err
+	} else if configured {
+		return b.launchConfigured(ctx, pane, launch)
+	}
 	kind := b.wakeEngine
 	if kind == "" {
 		kind = "claude"

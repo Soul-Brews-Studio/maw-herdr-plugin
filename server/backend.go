@@ -20,11 +20,12 @@ var ErrNotAgent = errors.New("target is not an agent pane")
 
 // HerdrBackend never invokes a shell. Each operation resolves the current roster.
 type HerdrBackend struct {
-	wakeSlots        chan struct{}
-	registryWakeGate chan struct{}
-	wakeEngine       string
-	binary           string
-	run              func(context.Context, ...string) ([]byte, error)
+	wakeSlots          chan struct{}
+	registryWakeGate   chan struct{}
+	wakeEngine         string
+	wakeEngineExplicit *string
+	binary             string
+	run                func(context.Context, ...string) ([]byte, error)
 }
 
 func NewHerdrBackend(binary string) *HerdrBackend {
@@ -82,9 +83,10 @@ type backendPane struct {
 	Status    string `json:"agent_status"`
 }
 type backendTarget struct {
-	workspaceLabel string
-	session        string
-	pane           backendPane
+	effectiveWindow string
+	workspaceLabel  string
+	session         string
+	pane            backendPane
 }
 type backendRoster struct {
 	running  []string

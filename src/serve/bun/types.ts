@@ -10,7 +10,7 @@ export interface Backend {
   sessions(signal?: AbortSignal): Promise<Session[]>;
   capture(target: string, lines: number, signal?: AbortSignal): Promise<string>;
   captureBatch(targets: Record<string, number>, signal?: AbortSignal): Promise<Record<string, string>>;
-  wake(target: string, signal?: AbortSignal, task?: string): Promise<"ready" | "already-awake">;
+  wake(target: string, signal?: AbortSignal, task?: string): Promise<"ready" | "already-awake" | "launched">;
   sendLiteral(target: string, text: string, enter: boolean, signal?: AbortSignal): Promise<void>;
   send(target: string, text: string, signal?: AbortSignal): Promise<void>;
   openTerminal(target: string, cols: number, rows: number, output: (bytes: Buffer) => void, signal: AbortSignal): Promise<Terminal>;

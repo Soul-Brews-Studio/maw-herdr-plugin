@@ -1,3 +1,6 @@
+import { readMawConfig } from './mod.readMawConfig.ts';
+import { resolveWakeLaunch } from './mod.resolveWakeLaunch.ts';
+import { launchConfiguredWake } from './mod.launchConfiguredWake.ts';
 import { planTaskWorktree } from './mod.planTaskWorktree.ts';
 import { realpathSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -11,7 +14,7 @@ import { readRoster } from "./mod.readRoster.ts";
 import { openHerdrTerminal } from "./mod.openHerdrTerminal.ts";
 import { runHerdr } from "./mod.runHerdr.ts";
 
-export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backend {
+export function createHerdrBackend(binary: string, wakeEngine = "claude", explicitWakeEngine?: string): Backend {
   const shutdown = new AbortController();
   const pending = new Set<Promise<unknown>>();
   const waiters: Array<() => void> = [];
@@ -121,6 +124,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
           if(s.aborted) throw new BackendError("backend_error","herdr operation aborted");
           let roster = await readRoster(run,s);
           let pane = roster.targets.get(target);
+          let launchWindow = pane?.pane.workspaceLabel || pane?.pane.label || pane?.pane.title || pane?.pane.id || "";
           if(pane && task!==undefined) throw new BackendError("backend_error","task requires a registered repository");
           if (!pane) {
             const repo = resolveRegistryWake(target);
@@ -138,6 +142,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
               await plan.materialize();repo.path=plan.path;repo.name=label;
               roster=await readRoster(run,s);
             }
+            launchWindow=repo.name;
             const matches = [...roster.targets.values()].filter(item => {
               if(item.session!==session || !isAbsolute(item.pane.cwd)) return false;
               try { return realpathSync(item.pane.cwd)===repo.path; } catch { return false; }
@@ -163,6 +168,13 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
             }
           }
         if (pane.pane.agent.trim()) return "already-awake";
+        if(!isAbsolute(pane.pane.cwd)) throw new BackendError("backend_error","pane cwd unavailable");
+        let finalCwd;try{finalCwd=realpathSync(pane.pane.cwd);}catch{throw new BackendError("backend_error","pane cwd unavailable");}
+        const merged=readMawConfig(finalCwd);
+        if(["commands","wake","defaultEngine","zaiPool"].some(key=>Object.hasOwn(merged,key))){
+          let launch;try{launch=resolveWakeLaunch(merged,launchWindow,explicitWakeEngine);}catch{throw new BackendError("backend_error","configured launch unavailable");}
+          return await launchConfiguredWake(run,pane,launch.line,s);
+        }
         const name = "maw-" + createHash("sha256").update(pane.pane.id).digest("hex").slice(0, 16);
         const raw = await run(["--session", pane.session, "agent", "start", name, "--kind", wakeEngine, "--pane", pane.pane.id, "--timeout", "8000"], s);
         let response;
