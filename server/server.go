@@ -30,6 +30,8 @@ type ticket struct {
 }
 
 type Server struct {
+	publicConfig       publicConfig
+	configRoot         string
 	federation         federationCache
 	worktreeRoot       string
 	worktreeSlots      chan struct{}
@@ -81,6 +83,13 @@ func NewServer(config Config, backend Backend) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.configRoot = s.worktreeRoot
+	merged, err := loadMergedConfig(s.configRoot)
+	if err != nil {
+		return nil, err
+	}
+	s.publicConfig = projectPublicConfig(merged)
+	s.config.Node = s.publicConfig.Node
 	s.worktreeSlots = make(chan struct{}, 8)
 	s.observedRosterGate = make(chan struct{}, 1)
 	s.context, s.cancel = context.WithCancel(context.Background())

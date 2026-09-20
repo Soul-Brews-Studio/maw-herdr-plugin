@@ -35,12 +35,12 @@ const record = (path, extra = {}) => ({ url: peerURL + path, node: 'fixture-node
 store({ alpha: record('/ok'), beta: record('/denied'), broken: record('/broken'), redirect: record('/redirect'), huge: record('/huge'), slow: record('/slow') });
 const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: home, XDG_STATE_HOME: home, XDG_CACHE_HOME: home };
 for (const name of Object.keys(env)) if (/^(MAW_|HERDR_|PEERS_FILE$)/.test(name)) delete env[name];
-Object.assign(env, { PEERS_FILE: peersFile, MAW_SENDER: 'fixture-node:fixture-oracle', MAW_FEDERATION_TOKEN: fleet, MAW_PEER_KEY: key });
+Object.assign(env, { MAW_CONFIG_DIR:join(home,'config'), MAW_TEST_MODE:'1', PEERS_FILE: peersFile, MAW_SENDER: 'fixture-node:fixture-oracle', MAW_FEDERATION_TOKEN: fleet, MAW_PEER_KEY: key });
 const args = ['--token-file', tokenFile, '--listen', '127.0.0.1:0', '--herdr', join(home, 'must-not-run'), '--data-dir', join(home, 'ui')];
 const native = process.argv[2];
 const child = spawn(native ? resolve(native) : (process.versions.bun ? process.execPath : 'bun'),
   native ? args : [resolve(process.env.MAW_FEDERATION_ENTRY || 'index.mjs'), 'serve', ...args],
-  { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  { env, cwd:home, stdio: ['ignore', 'pipe', 'pipe'] });
 let log = '';
 const exited = new Promise(done => child.once('exit', (code, signal) => done({ code, signal })));
 const deadline = async (promise, label, ms = 10000) => {

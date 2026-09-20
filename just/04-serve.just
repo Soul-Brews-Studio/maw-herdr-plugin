@@ -12,6 +12,9 @@ bun-check:
     bun utils/smoke-bun-serve.mjs
     bun utils/smoke-federation-config.ts
     node utils/smoke-federation-serve.mjs
+    bun utils/smoke-maw-config.ts
+    node utils/smoke-config-serve.mjs
+    MAW_CONFIG_ENTRY="$output/index.js" node utils/smoke-config-serve.mjs
     MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
@@ -30,10 +33,14 @@ check:
     bun build index.mjs --target=bun --outfile "$output/index.js"
     bun utils/smoke-terminal-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-federation-serve.mjs "$output/maw-herdr-serve"
+    node utils/smoke-config-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-serve-launcher.mjs
     bun utils/smoke-bun-serve.mjs
     bun utils/smoke-federation-config.ts
     node utils/smoke-federation-serve.mjs
+    bun utils/smoke-maw-config.ts
+    node utils/smoke-config-serve.mjs
+    MAW_CONFIG_ENTRY="$output/index.js" node utils/smoke-config-serve.mjs
     MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs

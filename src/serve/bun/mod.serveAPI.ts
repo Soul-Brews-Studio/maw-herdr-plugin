@@ -52,7 +52,7 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
     case '/api/federation/status': case '/fed.json': return backend.federation.status(signal);
     case '/api/config':
       if (request.url.includes('?')) throw new HTTPError(400, 'config_query_not_supported');
-      return { node: config.node, agents: {}, namedPeers: backend.federation.namedPeers() };
+      return { node: config.node, agents: config.agents, namedPeers: config.namedPeers ?? backend.federation.namedPeers() };
     case '/api/teams':
       await backend.sessions(signal);
       return backend.teamInventory();

@@ -159,6 +159,13 @@ func federationURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 func readFederationConfig(signing bool) (federationConfig, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return federationConfig{}, errConfig
+	}
+	return readFederationConfigAt(signing, cwd)
+}
+func readFederationConfigAt(signing bool, cwd string) (federationConfig, error) {
 	c := federationConfig{peers: []federationPeer{}}
 	path := os.Getenv("PEERS_FILE")
 	if path == "" {
@@ -204,8 +211,24 @@ func readFederationConfig(signing bool) (federationConfig, error) {
 		sort.Slice(c.peers, func(i, j int) bool { return c.peers[i].Name < c.peers[j].Name })
 	}
 	if signing {
+		merged, e := loadMergedConfig(cwd)
+		if e != nil {
+			return c, e
+		}
 		c.sender = os.Getenv("MAW_SENDER")
+		if _, present := os.LookupEnv("MAW_SENDER"); !present {
+			node, nok := merged["node"].(string)
+			oracle, ook := merged["oracle"].(string)
+			if nok && ook {
+				c.sender = node + ":" + strings.TrimSpace(oracle)
+			}
+		}
 		c.fleet = strings.TrimSpace(os.Getenv("MAW_FEDERATION_TOKEN"))
+		if c.fleet == "" {
+			if token, ok := merged["federationToken"].(string); ok {
+				c.fleet = strings.TrimSpace(token)
+			}
+		}
 		c.key = os.Getenv("MAW_PEER_KEY")
 		if c.key == "" {
 			b, e := federationRead(filepath.Join(federationState(), "peer-key"), 4096)

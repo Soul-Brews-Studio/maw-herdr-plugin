@@ -8,6 +8,8 @@ export interface ServeConfig {
   wakeEngine: string;
   engine: boolean;
   node: string;
+  agents: Record<string,string>;
+  namedPeers?: {name:string;url:string}[];
 }
 
 export class HTTPError extends Error {
