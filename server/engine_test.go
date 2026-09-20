@@ -126,7 +126,7 @@ func TestEngineWebSocket(t *testing.T) {
 	if conn.Subprotocol() != "" {
 		t.Fatal("unexpected negotiated protocol")
 	}
-	for _, want := range []string{"feed-history", "sessions", "recent"} {
+	for _, want := range []string{"sessions", "recent", "feed-history", "feed"} {
 		if frame := readWS(t, conn); frame["type"] != want {
 			t.Fatalf("%v", frame)
 		}

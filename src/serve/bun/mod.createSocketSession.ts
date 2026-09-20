@@ -7,6 +7,7 @@ export interface SocketData { controller: AbortController; path?: string; sessio
 export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Backend) {
   const signal = ws.data.controller.signal;
   let stopped = false, pending = 0, lastSessions = '', selected = '', lastContent = '', haveContent = false;
+  let feedCursor = 0, feedInitialized = false, lastIdentity = '';
   let available = new Set<string>();
   let previews = new Map<string, string>();
   const previewSent = new Set<string>();
@@ -21,15 +22,32 @@ export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Ba
   const error = (reason: string) => write({ type: 'error', error: reason });
   const roster = async (force: boolean) => {
     let sessions;
-    try { sessions = await backend.sessions(signal); }
+    try { sessions = await backend.dashboardSessions(signal); }
     catch { error('herdr_unavailable'); return false; }
     if (stopped) return false;
     available = new Set(sessions.flatMap(session => session.windows.map(window => `${session.name}:${window.index}`)));
+    const identity = JSON.stringify(sessions.flatMap(session => session.windows.map(window => [session.name, window.index, window.name, window.agent || ''])));
+    const identityChanged = identity !== lastIdentity;
+    lastIdentity = identity;
     const data = JSON.stringify(sessions);
-    if (!force && data === lastSessions) return true;
-    lastSessions = data;
-    if (!write({ type: 'sessions', sessions })) return false;
-    return write({ type: 'recent', agents: sessions.flatMap(session => session.windows.filter(window => window.agent?.trim()).map(window => ({ target: `${session.name}:${window.index}`, name: window.name, session: session.name }))) });
+    if (force || data !== lastSessions) {
+      lastSessions = data;
+      if (!write({ type: 'sessions', sessions })) return false;
+      if (!write({ type: 'recent', agents: sessions.flatMap(session => session.windows.filter(window => window.agent?.trim()).map(window => ({ target: `${session.name}:${window.index}`, name: window.name, session: session.name }))) })) return false;
+    }
+    // The live UI resolves feed names through its rendered roster. Replaying on
+    // the next normal poll gives every changed identity roster a render turn.
+    if (force || identityChanged) return true;
+    if (!feedInitialized) {
+      const history = backend.observedFeed.read();
+      feedCursor = history.cursor;
+      feedInitialized = true;
+      return write({ type: 'feed-history', events: history.events });
+    }
+    const feed = backend.observedFeed.read(feedCursor);
+    feedCursor = feed.cursor;
+    for (const event of feed.events) if (!write({ type: 'feed', event })) return false;
+    return true;
   };
   const capture = async () => {
     let departed = false;
@@ -99,7 +117,6 @@ export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Ba
     void chain.then(() => { if (!stopped) timer = setTimeout(poll, 1000); });
   };
   enqueue(async () => {
-    write({ type: 'feed-history', events: [] });
     if (!await roster(true)) { ws.close(1011, 'herdr unavailable'); close(); }
   });
   void chain.then(() => { if (!stopped) timer = setTimeout(poll, 1000); });
