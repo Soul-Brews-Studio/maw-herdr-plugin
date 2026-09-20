@@ -395,7 +395,7 @@ pairing and discovery remain unfinished; this is not full federation parity.
 Workspace targets use opaque base64url session/workspace IDs and stable pane
 numbers, not list positions. Do not save them across daemon resets that reuse
 IDs. Capture reads only the visible screen. HTTP sending is agent-only, reports
-`state: "accepted"`, and rejects force/inbox/attachments instead of pretending to
+`state: "accepted"`, joins attachment strings before message text (without reading files), and rejects force/inbox instead of pretending to
 implement maw's delivery queue. WebSocket `send` instead types literal text into
 any pane, adding Enter only for `force: true`. There are at most 16 live preview targets per
 connection and 64 captures per HTTP batch. A capture batch shares one roster and

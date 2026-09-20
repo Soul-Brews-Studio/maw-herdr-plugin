@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -216,11 +217,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 type sendRequest struct {
-	Target      string   `json:"target"`
-	Text        string   `json:"text"`
-	Force       bool     `json:"force"`
-	Inbox       bool     `json:"inbox"`
-	Attachments []string `json:"attachments"`
+	Target      string    `json:"target"`
+	Text        string    `json:"text"`
+	Force       bool      `json:"force"`
+	Inbox       bool      `json:"inbox"`
+	Attachments []*string `json:"attachments"`
 }
 
 func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
@@ -228,11 +229,22 @@ func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body, 64<<10) {
 		return
 	}
+	if len(body.Attachments) != 0 {
+		parts := make([]string, 0, len(body.Attachments)+1)
+		for _, attachment := range body.Attachments {
+			if attachment == nil {
+				fail(w, 400, "invalid_json")
+				return
+			}
+			parts = append(parts, *attachment)
+		}
+		body.Text = strings.Join(append(parts, body.Text), "\n")
+	}
 	if body.Target == "" || body.Text == "" {
 		fail(w, 400, "target_and_text_required")
 		return
 	}
-	if body.Force || body.Inbox || len(body.Attachments) != 0 {
+	if body.Force || body.Inbox {
 		fail(w, 501, "send_options_not_supported")
 		return
 	}

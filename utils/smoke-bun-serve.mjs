@@ -345,7 +345,16 @@ async function exercise(entry, label) {
   assert.equal(sent.state,'accepted'); assert.equal(sent.text,text); assert.equal(sent.ok,true);
   assert.ok(readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).some(args => JSON.stringify(args) === JSON.stringify(['--session','main','agent','prompt','wD:p4',text])));
   assert.equal(existsSync(join(temporary,'never')),false);
-  for (const [body,status,error] of [[{target:shell,text:'x'},409,'target_not_agent'],[{target:'missing',text:'x'},404,'target_not_found'],[{target,text:'x',force:true},501,'send_options_not_supported'],[{target,text:''},400,'target_and_text_required'],[{target,text:'x',unknown:1},400,'invalid_json']]) {
+  const attachments = [join(temporary,'literal path that does not exist'), 'https://example.invalid/literal-url?value=$(touch never)'];
+  for (const body of [{target,attachments,text}, {target,attachments}]) {
+    const combinedText = attachments.join('\n') + '\n' + (body.text ?? '');
+    const attached = (await http(url,'/api/send',{method:'POST',body})).json;
+    assert.equal(attached.state,'accepted'); assert.equal(attached.text,combinedText); assert.equal(attached.ok,true);
+    const prompts = readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent' && args[3] === 'prompt');
+    assert.deepEqual(prompts.at(-1), ['--session','main','agent','prompt','wD:p4',combinedText], 'attachments are literal prompt lines, not files to read or URLs to fetch');
+  }
+  assert.equal(existsSync(join(temporary,'never')),false);
+  for (const [body,status,error] of [[{target:shell,text:'x'},409,'target_not_agent'],[{target:'missing',text:'x'},404,'target_not_found'],[{target,text:'x',force:true},501,'send_options_not_supported'],[{target,text:'x',inbox:true},501,'send_options_not_supported'],[{target,text:''},400,'target_and_text_required'],[{target,text:'x',unknown:1},400,'invalid_json']]) {
     assert.equal((await http(url,'/api/send',{method:'POST',body,status})).json.error,error);
   }
   await http(url,'/api/send',{method:'POST',body:'x',headers:{'Content-Type':'text/plain'},status:415});

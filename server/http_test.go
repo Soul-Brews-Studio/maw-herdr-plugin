@@ -14,10 +14,11 @@ import (
 const testToken = "0123456789abcdef-test-token"
 
 type fakeBackend struct {
-	mu      sync.Mutex
-	failure bool
-	sends   int
-	content string
+	mu       sync.Mutex
+	failure  bool
+	sends    int
+	content  string
+	lastSend string
 }
 
 func (b *fakeBackend) Sessions(context.Context) ([]Session, error) {
@@ -50,7 +51,7 @@ func (b *fakeBackend) CaptureBatch(ctx context.Context, targets map[string]int) 
 	}
 	return result, nil
 }
-func (b *fakeBackend) Send(_ context.Context, target, _ string) error {
+func (b *fakeBackend) Send(_ context.Context, target, text string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.failure {
@@ -60,6 +61,7 @@ func (b *fakeBackend) Send(_ context.Context, target, _ string) error {
 		return ErrTargetNotFound
 	}
 	b.sends++
+	b.lastSend = text
 	return nil
 }
 
@@ -122,7 +124,7 @@ func TestAPICoreContracts(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"accepted"`) || b.sends != 1 {
 		t.Fatalf("send: %d %s", w.Code, w.Body)
 	}
-	for _, body := range []string{`{"target":"default/w1:1","text":"x","force":true}`, `{"target":"default/w1:1","text":"x","inbox":true}`, `{"target":"default/w1:1","text":"x","attachments":["secret"]}`} {
+	for _, body := range []string{`{"target":"default/w1:1","text":"x","force":true}`, `{"target":"default/w1:1","text":"x","inbox":true}`} {
 		if w := request(s, "POST", "/api/send", body, nil); w.Code != 501 {
 			t.Fatal(w.Code, w.Body)
 		}
@@ -306,4 +308,31 @@ func TestCaptureContract(t *testing.T) {
 
 func (b *fakeBackend) Input(ctx context.Context, target, text string, _ bool) error {
 	return b.Send(ctx, target, text)
+}
+
+func TestSendAttachmentStrings(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`{"target":"default/w1:1","text":"review","attachments":["/not/a/file","https://example.invalid/a"]}`, "/not/a/file\nhttps://example.invalid/a\nreview"},
+		{`{"target":"default/w1:1","attachments":["/not/a/file"]}`, "/not/a/file\n"},
+	} {
+		s, b := testServer(t)
+		w := request(s, "POST", "/api/send", tc.body, nil)
+		if w.Code != 200 || b.lastSend != tc.want {
+			t.Fatalf("send: %d %s text=%q", w.Code, w.Body, b.lastSend)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || result["text"] != tc.want {
+			t.Fatalf("response: %s", w.Body)
+		}
+	}
+}
+
+func TestSendRejectsMalformedAttachments(t *testing.T) {
+	for _, attachments := range []string{`[null]`, `[1]`, `[{}]`, `"path"`} {
+		s, b := testServer(t)
+		w := request(s, "POST", "/api/send", `{"target":"default/w1:1","text":"valid","attachments":`+attachments+`}`, nil)
+		if w.Code != 400 || b.sends != 0 {
+			t.Fatalf("%s: %d %s sends=%d", attachments, w.Code, w.Body, b.sends)
+		}
+	}
 }
