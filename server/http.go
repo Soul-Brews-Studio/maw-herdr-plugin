@@ -82,7 +82,15 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.serveSend(w, r)
 		return
 	}
+	if r.URL.Path == "/api/feed" && r.Method == "POST" {
+		s.serveFeedActivity(w, r)
+		return
+	}
 	if r.Method != "GET" {
+		if r.URL.Path == "/api/feed" {
+			methodNotAllowed(w, "GET, POST")
+			return
+		}
 		methodNotAllowed(w, "GET")
 		return
 	}

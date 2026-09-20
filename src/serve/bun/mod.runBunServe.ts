@@ -64,7 +64,7 @@ export async function runBunServe(args: string[]): Promise<number> {
             return new Response(null, { status: 204, headers });
           }
         }
-        const allowed = path === '/api/auth/ws-ticket' || path === '/api/send' || path === '/api/wake' || path === '/api/worktrees/cleanup' ? ['POST'] : ['/api/asks', '/api/ui-state'].includes(path) ? ['GET', 'POST'] : ['GET'];
+        const allowed = path === '/api/auth/ws-ticket' || path === '/api/send' || path === '/api/wake' || path === '/api/worktrees/cleanup' ? ['POST'] : ['/api/asks', '/api/ui-state', '/api/feed'].includes(path) ? ['GET', 'POST'] : ['GET'];
         const methodError = () => { headers.set('Allow', allowed.join(', ')); return failure(405, 'method_not_allowed'); };
         if (path === '/ws' || path === '/ws/pty') {
           if (request.method !== 'GET') return methodError();
