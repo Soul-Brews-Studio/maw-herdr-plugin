@@ -96,7 +96,7 @@ async function exercise(entry, label) {
   const {child, url} = await start(entry, dataDir);
   const origin = { Origin: url };
   assert.deepEqual((await http(url, '/api/sessions')).json, sessions);
-  assert.deepEqual((await http(url, '/api/capture?target=' + encodeURIComponent(target))).json, {content:'visible output\n'});
+  assert.deepEqual((await http(url, '/api/capture?target=' + encodeURIComponent(target))).json, {content:'visible output\n',target,resolvedTarget:target});
   assert.deepEqual((await http(url, '/api/captures')).json, {captures:{[target]:'visible output\n',[shell]:'visible output\n'}});
   assert.deepEqual((await http(url, '/api/agents')).json,{node:'herdr',count:2,agents:[
     {node:'herdr',session:'bWFpbg/d0Q',window:'4',oracle:'codex',state:'idle',pid:null},
@@ -105,8 +105,8 @@ async function exercise(entry, label) {
   assert.deepEqual((await http(url, '/api/agent')).json, (await http(url, '/api/agents')).json);
   assert.deepEqual((await http(url, '/api/config')).json, {node:'herdr',agents:{},namedPeers:[]});
   const identity = (await http(url, '/api/identity')).json;
-  assert.deepEqual(identity.endpoints, ['/api/sessions','/api/capture','/api/send','/ws']);
-  assert.ok(identity.capabilities.includes('dashboard-ws'));
+  assert.deepEqual(identity.endpoints, ['/api/sessions','/api/capture','/api/send','/ws','/ws/pty']);
+  assert.ok(identity.capabilities.includes('dashboard-ws') && identity.capabilities.includes('terminal-stream'));
   for (const [path, empty, value, invalid] of [['/api/ui-state',{}, {selected:target}, []], ['/api/asks',[],[{text:'hello'}],{}]]) {
     assert.deepEqual((await http(url,path)).json,empty);
     assert.deepEqual((await http(url,path,{method:'POST',body:value})).json,{ok:true});
@@ -130,7 +130,7 @@ async function exercise(entry, label) {
   await http(url,'/api/sessions',{headers:{Origin:'https://evil.example'},status:403});
   await http(url,'/api/config?remote=1',{status:400});
   await http(url,'/api/capture',{status:400});
-  assert.equal((await http(url,'/api/capture?target=missing')).json.error,'capture_unavailable');
+  assert.deepEqual((await http(url,'/api/capture?target=missing',{status:400})).json,{content:'',target:'missing',resolvedTarget:'missing',error:'capture_unavailable'});
   const cors = await http(url,'/api/sessions',{headers:origin});
   assert.equal(cors.headers['access-control-allow-origin'],url);
   const preflight = await http(url,'/api/send',{auth:false,method:'OPTIONS',headers:{...origin,'Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'Authorization, Content-Type','Access-Control-Request-Private-Network':'true'},status:204});
@@ -193,7 +193,7 @@ async function exerciseEngine(entry, label) {
   await new Promise((done, fail) => reservation.close(error => error ? fail(error) : done()));
   const {child,url} = await start(entry,join(temporary,label+'-engine'),port);
   assert.deepEqual((await http(url,'/api/herdr/sessions',{auth:false})).json,sessions);
-  assert.deepEqual((await http(url,'/api/herdr',{auth:false})).json.endpoints,['/api/herdr/sessions','/api/herdr/capture','/api/herdr/send','/api/herdr/ws']);
+  assert.deepEqual((await http(url,'/api/herdr',{auth:false})).json.endpoints,['/api/herdr/sessions','/api/herdr/capture','/api/herdr/send','/api/herdr/ws','/api/herdr/ws/pty']);
   await http(url,'/api/sessions',{auth:false,status:404});
   await http(url,'/api/herdrish/sessions',{auth:false,status:404});
   await http(url,'/api/herdr/auth/ws-ticket',{auth:false,status:501});

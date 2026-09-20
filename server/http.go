@@ -88,10 +88,10 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		content, err := s.backend.Capture(r.Context(), target, 200)
 		if err != nil {
-			writeJSON(w, 200, map[string]string{"content": "", "error": "capture_unavailable"})
+			fail(w, 400, "capture_unavailable")
 			return
 		}
-		writeJSON(w, 200, map[string]string{"content": content})
+		writeJSON(w, 200, map[string]string{"content": content, "target": target, "resolvedTarget": target})
 	case "/api/captures":
 		sessions, err := s.backend.Sessions(r.Context())
 		if err != nil {
@@ -132,11 +132,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, map[string]any{"agents": agents, "count": len(agents), "node": s.config.Node})
 	case "/api/identity":
-		endpoints := []string{"/api/sessions", "/api/capture", "/api/send", "/ws"}
+		endpoints := []string{"/api/sessions", "/api/capture", "/api/send", "/ws", "/ws/pty"}
 		if s.config.Engine {
-			endpoints = []string{s.config.Prefix + "/sessions", s.config.Prefix + "/capture", s.config.Prefix + "/send", s.config.Prefix + "/ws"}
+			endpoints = []string{s.config.Prefix + "/sessions", s.config.Prefix + "/capture", s.config.Prefix + "/send", s.config.Prefix + "/ws", s.config.Prefix + "/ws/pty"}
 		}
-		writeJSON(w, 200, map[string]any{"version": "herdr-core-dev", "node": s.config.Node, "host": "localhost", "agents": []string{}, "uptime": int(time.Since(s.started).Seconds()), "clockUtc": time.Now().UTC().Format(time.RFC3339), "endpoints": endpoints, "capabilities": []string{"sessions", "capture", "agent-prompt", "dashboard-ws"}})
+		writeJSON(w, 200, map[string]any{"version": "herdr-core-dev", "node": s.config.Node, "host": "localhost", "agents": []string{}, "uptime": int(time.Since(s.started).Seconds()), "clockUtc": time.Now().UTC().Format(time.RFC3339), "endpoints": endpoints, "capabilities": []string{"sessions", "capture", "agent-prompt", "dashboard-ws", "terminal-stream"}})
 	case "/api/config":
 		if r.URL.RawQuery != "" || r.URL.ForceQuery {
 			fail(w, 400, "config_query_not_supported")

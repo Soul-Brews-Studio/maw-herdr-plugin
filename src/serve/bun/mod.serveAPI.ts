@@ -21,8 +21,8 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
     case '/api/capture': {
       const target = new URL(request.url).searchParams.get('target');
       if (!target) throw new HTTPError(400, 'target_required');
-      try { return { content: await backend.capture(target, 200, signal) }; }
-      catch { return { content: '', error: 'capture_unavailable' }; }
+      try { return { content: await backend.capture(target, 200, signal), target, resolvedTarget: target }; }
+      catch { throw new HTTPError(400, 'capture_unavailable', { content: '', target, resolvedTarget: target, error: 'capture_unavailable' }); }
     }
     case '/api/captures': {
       const targets: Record<string, number> = Object.create(null);
@@ -37,8 +37,8 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
     }
     case '/api/identity': return { version: 'herdr-core-dev', runtime: 'bun', node: config.node, host: 'localhost', agents: [],
       uptime: Math.floor((Date.now() - started) / 1000), clockUtc: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
-      endpoints: config.engine ? ['/api/herdr/sessions', '/api/herdr/capture', '/api/herdr/send', '/api/herdr/ws'] : ['/api/sessions', '/api/capture', '/api/send', '/ws'],
-      capabilities: ['sessions', 'capture', 'agent-prompt', 'dashboard-ws'] };
+      endpoints: config.engine ? ['/api/herdr/sessions', '/api/herdr/capture', '/api/herdr/send', '/api/herdr/ws', '/api/herdr/ws/pty'] : ['/api/sessions', '/api/capture', '/api/send', '/ws', '/ws/pty'],
+      capabilities: ['sessions', 'capture', 'agent-prompt', 'dashboard-ws', 'terminal-stream'] };
     case '/api/config':
       if (request.url.includes('?')) throw new HTTPError(400, 'config_query_not_supported');
       return { node: config.node, agents: {}, namedPeers: [] };

@@ -96,7 +96,7 @@ export async function runBunServe(args: string[]): Promise<number> {
         }
         return json(await serveAPI(request, path, config, backend, started, signal));
       } catch (error) {
-        if (error instanceof HTTPError) return failure(error.status, error.message);
+        if (error instanceof HTTPError) return json(error.body ?? { error: error.message }, error.status);
         if (error instanceof BackendError && error.code === 'target_not_found') return failure(404, 'target_not_found');
         if (error instanceof BackendError && error.code === 'target_not_agent') return failure(409, 'target_not_agent');
         if (path === '/api/health' || path === '/health') return json({ ok: false, error: 'herdr_unavailable' }, 503);
