@@ -2,7 +2,7 @@ import type { ServerWebSocket } from 'bun';
 import type { Backend } from './types.ts';
 import { validateCommand, type Command } from './mod.validateCommand.ts';
 
-export interface SocketData { controller: AbortController; session?: ReturnType<typeof createSocketSession> }
+export interface SocketData { controller: AbortController; path?: string; session?: { close(): void; message(value: string | Buffer): void } }
 
 export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Backend) {
   const signal = ws.data.controller.signal;

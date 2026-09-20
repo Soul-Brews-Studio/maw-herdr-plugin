@@ -1,12 +1,13 @@
 import { BackendError, type Backend, type RunHerdr } from "./types.ts";
 import { readRoster } from "./mod.readRoster.ts";
+import { openHerdrTerminal } from "./mod.openHerdrTerminal.ts";
 import { runHerdr } from "./mod.runHerdr.ts";
 
 export function createHerdrBackend(binary: string): Backend {
   const shutdown = new AbortController();
   const pending = new Set<Promise<unknown>>();
   const waiters: Array<() => void> = [];
-  let active = 0;
+  let active = 0, terminals = 0;
   const run: RunHerdr = (args, signal) => runHerdr(binary || "herdr", args, signal);
   async function operation<T>(fn: (signal: AbortSignal) => Promise<T>, caller?: AbortSignal): Promise<T> {
     if (shutdown.signal.aborted || caller?.aborted) throw new BackendError("backend_error", "herdr operation aborted");
@@ -84,6 +85,21 @@ export function createHerdrBackend(binary: string): Backend {
         if (!pane.pane.agent.trim()) throw new BackendError("target_not_agent", "target is not an agent pane");
         await run(["--session", pane.session, "agent", "prompt", pane.pane.id, text], s);
       }, signal);
+    },
+    async openTerminal(target, cols, rows, output, signal) {
+      if (terminals >= 16) throw new BackendError("backend_error", "terminal capacity reached");
+      terminals++;
+      try {
+        const pane = await operation(async (s) => {
+          const found = (await readRoster(run, s)).targets.get(target);
+          if (!found) throw new BackendError("target_not_found", "unknown or stale target");
+          return found;
+        }, signal);
+        const terminal = openHerdrTerminal(binary || "herdr", pane, cols, rows, output, AbortSignal.any([signal, shutdown.signal]));
+        pending.add(terminal.done);
+        void terminal.done.finally(() => { terminals--; pending.delete(terminal.done); });
+        return terminal;
+      } catch (error) { terminals--; throw error; }
     },
     async close() {
       shutdown.abort();

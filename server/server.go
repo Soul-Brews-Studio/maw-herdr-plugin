@@ -22,6 +22,7 @@ type Config struct {
 
 type ticket struct {
 	origin  string
+	path    string
 	expires time.Time
 }
 
@@ -87,7 +88,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		preflight(w, r, origin)
 		return
 	}
-	if r.URL.Path == "/ws" {
+	if r.URL.Path == "/ws" || r.URL.Path == "/ws/pty" {
 		s.serveWS(w, r, origin)
 		return
 	}

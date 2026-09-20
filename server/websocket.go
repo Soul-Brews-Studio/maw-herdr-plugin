@@ -47,7 +47,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 			return
 		}
 		value := strings.TrimSpace(parts[1])
-		if len(value) != 69 || !strings.HasPrefix(value, "mwt1_") || !s.consumeTicket(value, origin) {
+		if len(value) != 69 || !strings.HasPrefix(value, "mwt1_") || !s.consumeTicket(value, origin, r.URL.Path) {
 			fail(w, 401, "websocket_ticket_invalid")
 			return
 		}
@@ -66,6 +66,10 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 	}
 	defer conn.CloseNow()
 	conn.SetReadLimit(64 << 10)
+	if r.URL.Path == "/ws/pty" {
+		s.servePTY(conn)
+		return
+	}
 	ctx, cancel := context.WithCancel(s.context)
 	defer cancel()
 	commands := make(chan socketCommand, 8)

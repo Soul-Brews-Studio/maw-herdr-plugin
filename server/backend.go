@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -35,6 +36,12 @@ func NewHerdrBackend(binary string) *HerdrBackend {
 type limitedOutput struct {
 	bytes.Buffer
 	limit int
+}
+
+// Override bytes.Buffer.ReadFrom: os/exec uses io.Copy, whose fast path
+// otherwise bypasses Write and its output limit.
+func (b *limitedOutput) ReadFrom(r io.Reader) (int64, error) {
+	return io.Copy(struct{ io.Writer }{b}, r)
 }
 
 func (b *limitedOutput) Write(p []byte) (int, error) {

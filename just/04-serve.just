@@ -10,6 +10,9 @@ bun-check:
     trap 'rm -rf "$output"' EXIT
     bun build index.mjs --target=bun --outfile "$output/index.js"
     bun utils/smoke-bun-serve.mjs
+    bun utils/smoke-terminal-serve.mjs
+    MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
+    bun utils/smoke-terminal-limits.ts
 
 # Compile first, then run API tests and static checks.
 check:
@@ -22,8 +25,12 @@ check:
     GOWORK=off go vet ./...
     cd ..
     bun build index.mjs --target=bun --outfile "$output/index.js"
+    bun utils/smoke-terminal-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-serve-launcher.mjs
     bun utils/smoke-bun-serve.mjs
+    bun utils/smoke-terminal-serve.mjs
+    MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
+    bun utils/smoke-terminal-limits.ts
 
 # Build an installable native package; normal installed use does not need Go.
 install:

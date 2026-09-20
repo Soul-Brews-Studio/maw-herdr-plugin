@@ -66,8 +66,8 @@ func (s *Server) serveEngine(w http.ResponseWriter, r *http.Request) {
 	switch suffix {
 	case "", "/":
 		clone.URL.Path = "/api/identity"
-	case "/ws":
-		clone.URL.Path = "/ws"
+	case "/ws", "/ws/pty":
+		clone.URL.Path = suffix
 		s.serveWS(w, clone, "")
 		return
 	case "/health":

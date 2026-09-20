@@ -8,6 +8,7 @@ import { loopbackHost } from './mod.loopbackHost.ts';
 import { requestOrigin } from './mod.requestOrigin.ts';
 import { readJSON } from './mod.readJSON.ts';
 import { serveAPI } from './mod.serveAPI.ts';
+import { createPtySession } from './mod.createPtySession.ts';
 import { createSocketSession, type SocketData } from './mod.createSocketSession.ts';
 
 export async function runBunServe(args: string[]): Promise<number> {
@@ -17,7 +18,7 @@ export async function runBunServe(args: string[]): Promise<number> {
   const backend = createHerdrBackend(config.binary);
   const shutdown = new AbortController();
   const started = Date.now();
-  const tickets = new Map<string, { origin: string; expires: number }>();
+  const tickets = new Map<string, { origin: string; path: string; expires: number }>();
   const sockets = new Set<ServerWebSocket<SocketData>>();
   let connections = 0, requests = 0;
   const server = Bun.serve<SocketData>({
@@ -41,7 +42,7 @@ export async function runBunServe(args: string[]): Promise<number> {
           if (path !== '/api/herdr' && !path.startsWith('/api/herdr/')) return failure(404, 'not_found');
           const suffix = path.slice('/api/herdr'.length);
           if (suffix === '/auth/ws-ticket') return failure(501, 'engine_ws_ticket_not_supported');
-          path = !suffix || suffix === '/' ? '/api/identity' : suffix === '/ws' || suffix === '/health' ? suffix : '/api' + suffix;
+          path = !suffix || suffix === '/' ? '/api/identity' : suffix === '/ws' || suffix === '/ws/pty' || suffix === '/health' ? suffix : '/api' + suffix;
         } else {
           if (!loopbackHost(request.headers.get('host') || '')) return failure(403, 'host_not_allowed');
           origin = requestOrigin(request);
@@ -61,19 +62,19 @@ export async function runBunServe(args: string[]): Promise<number> {
         }
         const allowed = path === '/api/auth/ws-ticket' || path === '/api/send' ? ['POST'] : ['/api/asks', '/api/ui-state'].includes(path) ? ['GET', 'POST'] : ['GET'];
         const methodError = () => { headers.set('Allow', allowed.join(', ')); return failure(405, 'method_not_allowed'); };
-        if (path === '/ws') {
+        if (path === '/ws' || path === '/ws/pty') {
           if (request.method !== 'GET') return methodError();
           if ((!config.engine && !origin) || request.url.includes('?')) return failure(400, 'websocket_request_invalid');
           const offers = (request.headers.get('Sec-WebSocket-Protocol') || '').split(',').map(value => value.trim());
           if (!config.engine) {
             if (offers.length !== 2 || offers[0] !== 'maw.ws.v1') return failure(401, 'websocket_ticket_required');
             const ticket = tickets.get(offers[1]);
-            if (!/^mwt1_[0-9a-f]{64}$/.test(offers[1]) || !ticket || ticket.origin !== origin || ticket.expires <= Date.now()) return failure(401, 'websocket_ticket_invalid');
+            if (!/^mwt1_[0-9a-f]{64}$/.test(offers[1]) || !ticket || ticket.origin !== origin || ticket.path !== path || ticket.expires <= Date.now()) return failure(401, 'websocket_ticket_invalid');
             tickets.delete(offers[1]); // Single-use, before upgrade, with no intervening await.
           }
           if (connections >= 32) return failure(503, 'websocket_capacity_reached');
           if (offers.includes('maw.ws.v1')) headers.set('Sec-WebSocket-Protocol', 'maw.ws.v1');
-          if (instance.upgrade(request, { headers, data: { controller: new AbortController() } })) { connections++; return; }
+          if (instance.upgrade(request, { headers, data: { controller: new AbortController(), path } })) { connections++; return; }
           return failure(400, 'websocket_request_invalid');
         }
         if (!config.engine) {
@@ -85,12 +86,12 @@ export async function runBunServe(args: string[]): Promise<number> {
           if (!origin || request.url.includes('?')) return failure(400, 'ticket_request_invalid');
           const body = await readJSON(request, 128, signal);
           if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'path') || ('path' in body && typeof body.path !== 'string')) return failure(400, 'invalid_json');
-          if (!('path' in body) || body.path !== '/ws') return failure(400, 'ticket_path_invalid');
+          if (!('path' in body) || (body.path !== '/ws' && body.path !== '/ws/pty')) return failure(400, 'ticket_path_invalid');
           const now = Date.now();
           for (const [key, ticket] of tickets) if (ticket.expires <= now) tickets.delete(key);
           if (tickets.size >= 256) return failure(429, 'too_many_tickets');
           const value = 'mwt1_' + randomBytes(32).toString('hex');
-          tickets.set(value, { origin, expires: now + 30_000 });
+          tickets.set(value, { origin, path: body.path, expires: now + 30_000 });
           return json({ protocol: 'maw.ws.v1', ticket: value });
         }
         return json(await serveAPI(request, path, config, backend, started, signal));
@@ -105,7 +106,7 @@ export async function runBunServe(args: string[]): Promise<number> {
     websocket: {
       maxPayloadLength: 64 << 10, backpressureLimit: 8 << 20, closeOnBackpressureLimit: true,
       perMessageDeflate: false, idleTimeout: 60,
-      open(ws) { sockets.add(ws); ws.data.session = createSocketSession(ws, backend); },
+      open(ws) { sockets.add(ws); ws.data.session = ws.data.path === '/ws/pty' ? createPtySession(ws, backend) : createSocketSession(ws, backend); },
       message(ws, message) { ws.data.session?.message(message); },
       close(ws) { ws.data.session?.close(); sockets.delete(ws); connections--; },
     },
