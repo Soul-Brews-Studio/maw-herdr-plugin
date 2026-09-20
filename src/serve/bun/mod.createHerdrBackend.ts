@@ -93,6 +93,16 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
         return "ready";
       }, signal);
     },
+    async sendLiteral(target, text, enter, signal) {
+      if (!target || Buffer.byteLength(target) > 1024) throw new BackendError("target_not_found", "unknown or stale target");
+      if (Buffer.byteLength(text, "utf8") > 64 * 1024 || text.includes("\0")) throw new BackendError("backend_error", "invalid literal text");
+      await operation(async (s) => {
+        const pane = (await readRoster(run, s)).targets.get(target);
+        if (!pane) throw new BackendError("target_not_found", "unknown or stale target");
+        await run(["--session", pane.session, "pane", "send-text", pane.pane.id, text], s);
+        if (enter) await run(["--session", pane.session, "pane", "send-keys", pane.pane.id, "enter"], s);
+      }, signal);
+    },
     async send(target, text, signal) {
       if (!text.trim() || Buffer.byteLength(text, "utf8") > 64 * 1024 || text.includes("\0")) throw new BackendError("backend_error", "invalid prompt text");
       await operation(async (s) => {

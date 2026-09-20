@@ -173,7 +173,20 @@ async function exercise(entry, label) {
   assert.deepEqual(await ws.next(),{type:'previews',data:{[shell]:'visible output\n'}});
   ws.send(JSON.stringify({type:'send',target,text}));
   assert.deepEqual(await ws.next(),{type:'sent',ok:true,target,text,state:'accepted'});
-  for (const [command,error] of [[{type:'send',target:shell,text:'x'},'send_failed'],[{type:'send',target,text:'x',inbox:true},'send_options_not_supported'],[{type:'subscribe-previews',targets:Array(17).fill(target)},'too_many_previews'],[{type:'select',target:''},'subscription_invalid'],[{type:'unknown'},'command_not_supported']]) {
+  ws.send(JSON.stringify({type:'send',content:'\r'}));
+  assert.deepEqual(await ws.next(),{type:'sent',ok:true,target,text:'\r',state:'accepted'});
+  ws.send(JSON.stringify({type:'send',target:shell,text:'',content:'must-not-send',force:true}));
+  assert.deepEqual(await ws.next(),{type:'sent',ok:true,target:shell,text:'',state:'accepted'});
+  ws.send(JSON.stringify({type:'send',text:null,content:'must-not-send',force:true}));
+  assert.deepEqual(await ws.next(),{type:'error',error:'target_and_text_required'});
+  ws.send(JSON.stringify({type:'send',target:'',text:'must-not-send',force:true}));
+  assert.deepEqual(await ws.next(),{type:'error',error:'target_and_text_required'});
+  const inputCalls=readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args=>args[2]==='pane');
+  assert.ok(inputCalls.some(args=>args[3]==='send-text'&&args[4]==='wD:p4'&&args[5]==='\r'));
+  assert.ok(inputCalls.some(args=>args[3]==='send-text'&&args[4]==='wD:p9'&&args[5]===''));
+  assert.ok(inputCalls.some(args=>args[3]==='send-keys'&&args[4]==='wD:p9'&&args[5]==='enter'));
+  assert.ok(!inputCalls.some(args=>args.includes('must-not-send')));
+  for (const [command,error] of [[{type:'send',target:'missing',text:'x'},'send_failed'],[{type:'send',target,text:'x',inbox:true},'send_options_not_supported'],[{type:'subscribe-previews',targets:Array(17).fill(target)},'too_many_previews'],[{type:'select',target:''},'subscription_invalid'],[{type:'unknown'},'command_not_supported']]) {
     ws.send(JSON.stringify(command)); assert.deepEqual(await ws.next(),{type:'error',error});
   }
   ws.send(JSON.stringify({type:'select',extra:true}));
@@ -181,12 +194,12 @@ async function exercise(entry, label) {
   sockets.delete(ws);
   const oversized = await socket(url,(await mint()).ticket);
   await oversized.next(); await oversized.next(); await oversized.next();
-  const promptsBefore = readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent').length;
+  const promptsBefore = readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent' || (args[2] === 'pane' && ['send-text','send-keys'].includes(args[3]))).length;
   oversized.send(JSON.stringify({type:'send',target,text:'x'.repeat(65537)}));
   // Bun's transport payload gate can report abnormal close (1006), unlike Go's
   // explicit 1009. Both must close without executing the oversized command.
   assert.ok([1006,1009].includes((await deadline(oversized.closed,'oversized close')).code));
-  const promptsAfter = readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent').length;
+  const promptsAfter = readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent' || (args[2] === 'pane' && ['send-text','send-keys'].includes(args[3]))).length;
   assert.equal(promptsAfter,promptsBefore);
   sockets.delete(oversized);
   const live = await socket(url,(await mint()).ticket);
