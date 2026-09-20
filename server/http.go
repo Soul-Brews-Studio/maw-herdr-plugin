@@ -253,9 +253,15 @@ func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
 		fail(w, 501, "send_options_not_supported")
 		return
 	}
+	key, owner, proceed := s.claimDelivery(w, r, body.Target, body.Text, body.Text, "local")
+	if !proceed {
+		return
+	}
+	defer s.delivery.cancel(key, owner)
 	if err := s.backend.Send(r.Context(), body.Target, body.Text); err != nil {
 		backendFailure(w, err)
 		return
 	}
+	s.delivery.complete(key, owner, "accepted", time.Now())
 	writeJSON(w, 200, map[string]any{"ok": true, "target": body.Target, "text": body.Text, "source": "local", "lastLine": "", "state": "accepted", "receipt": []string{"herdr agent prompt accepted"}, "warning": "Prompt acceptance does not imply consumption or completion; this path does not queue an inbox message."})
 }

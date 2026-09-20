@@ -1,3 +1,5 @@
+import { claimDelivery } from './mod.claimDelivery.ts';
+import type { createDeliveryDedup } from './mod.createDeliveryDedup.ts';
 import { serveWorktrees } from './mod.serveWorktrees.ts';
 import type { Backend } from './types.ts';
 import { HTTPError, type ServeConfig } from './serverTypes.ts';
@@ -5,7 +7,7 @@ import { readJSON } from './mod.readJSON.ts';
 import { validateCommand } from './mod.validateCommand.ts';
 import { serveState } from './mod.serveState.ts';
 
-export async function serveAPI(request: Request, path: string, config: ServeConfig, backend: Backend, started: number, signal: AbortSignal): Promise<unknown> {
+export async function serveAPI(request: Request, path: string, config: ServeConfig, backend: Backend, started: number, signal: AbortSignal, delivery?: ReturnType<typeof createDeliveryDedup>): Promise<unknown> {
   if (path === '/api/ui-state' || path === '/api/asks') return serveState(request, path, config.dataDir, signal);
   switch (path) {
     case '/api/worktrees': case '/api/worktrees/cleanup': return serveWorktrees(request, path, config.worktreeRoot, backend, signal);
@@ -26,15 +28,25 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
       if (!body.target) throw new HTTPError(400, 'target_and_text_required');
       if (body.inbox) {
         if (!backend.inbox) throw new HTTPError(501, 'send_options_not_supported');
-        const inbox = await backend.inbox(body.target, body.text ?? '', config.worktreeRoot, request.headers.get('X-Maw-From') ?? '', signal);
-        return { ok: true, target: body.target, text: originalText ?? '', source: 'inbox', state: 'queued', inbox,
-          reason: '--inbox requested; pane injection skipped', receipt: ['fallback_queued'] };
+        const claim = await claimDelivery(request, body.target, body.text ?? '', originalText ?? '', 'inbox', config, backend, delivery, signal);
+        if (claim.duplicate) return claim.duplicate;
+        try {
+          const inbox = await backend.inbox(body.target, body.text ?? '', config.worktreeRoot, request.headers.get('X-Maw-From') ?? '', signal);
+          claim.complete('queued');
+          return { ok: true, target: body.target, text: originalText ?? '', source: 'inbox', state: 'queued', inbox,
+            reason: '--inbox requested; pane injection skipped', receipt: ['fallback_queued'] };
+        } finally { claim.cancel(); }
       }
       if (!body.text) throw new HTTPError(400, 'target_and_text_required');
       if (body.force) throw new HTTPError(501, 'send_options_not_supported');
-      await backend.send(body.target, body.text, signal);
-      return { ok: true, target: body.target, text: body.text, source: 'local', lastLine: '', state: 'accepted', receipt: ['herdr agent prompt accepted'],
-        warning: 'Prompt acceptance does not imply consumption or completion; this path does not queue an inbox message.' };
+      const claim = await claimDelivery(request, body.target, body.text, body.text, 'local', config, backend, delivery, signal);
+      if (claim.duplicate) return claim.duplicate;
+      try {
+        await backend.send(body.target, body.text, signal);
+        claim.complete('accepted');
+        return { ok: true, target: body.target, text: body.text, source: 'local', lastLine: '', state: 'accepted', receipt: ['herdr agent prompt accepted'],
+          warning: 'Prompt acceptance does not imply consumption or completion; this path does not queue an inbox message.' };
+      } finally { claim.cancel(); }
     }
     case '/api/sessions': return backend.sessions(signal);
     case '/api/capture': {

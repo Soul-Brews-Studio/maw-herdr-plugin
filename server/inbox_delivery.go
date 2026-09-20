@@ -42,11 +42,17 @@ func (s *Server) serveInbox(w http.ResponseWriter, r *http.Request, body sendReq
 		return
 	}
 	from := inboxDisplaySender(r.Context(), r.Header.Get("X-Maw-From"), s.configRoot, config)
+	key, owner, proceed := s.claimDelivery(w, r, body.Target, body.Text, originalText, "inbox")
+	if !proceed {
+		return
+	}
+	defer s.delivery.cancel(key, owner)
 	path, err := b.QueueInbox(r.Context(), body.Target, from, body.Text, s.configRoot, config)
 	if err != nil {
 		backendFailure(w, err)
 		return
 	}
+	s.delivery.complete(key, owner, "queued", time.Now())
 	writeJSON(w, 200, map[string]any{"ok": true, "target": body.Target, "text": originalText, "source": "inbox", "state": "queued", "inbox": path, "reason": "--inbox requested; pane injection skipped", "receipt": []string{"fallback_queued"}})
 }
 

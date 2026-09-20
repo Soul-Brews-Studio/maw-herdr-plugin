@@ -345,6 +345,11 @@ async function exercise(entry, label) {
   assert.equal(sent.state,'accepted'); assert.equal(sent.text,text); assert.equal(sent.ok,true);
   assert.ok(readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).some(args => JSON.stringify(args) === JSON.stringify(['--session','main','agent','prompt','wD:p4',text])));
   assert.equal(existsSync(join(temporary,'never')),false);
+  const countPrompts = () => readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent' && args[3] === 'prompt').length;
+  const promptsBeforeRetry = countPrompts();
+  const retryResponses = await Promise.all([0,1].map(() => http(url,'/api/send',{method:'POST',body:{target,text:'retry-once'},headers:{'X-Maw-Timestamp':'retry-fixture','X-Maw-From':'fixture:local'}})));
+  assert.equal(countPrompts(),promptsBeforeRetry+1);
+  assert.equal(retryResponses.filter(response => response.json.deduped === true).length,1);
   const attachments = [join(temporary,'literal path that does not exist'), 'https://example.invalid/literal-url?value=$(touch never)'];
   for (const body of [{target,attachments,text}, {target,attachments}]) {
     const combinedText = attachments.join('\n') + '\n' + (body.text ?? '');
