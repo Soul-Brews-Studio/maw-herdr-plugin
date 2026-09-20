@@ -18,7 +18,7 @@ func TestInboxSenderPrecedence(t *testing.T) {
 			os.Setenv("TMUX", old)
 		}
 	})
-	root := t.TempDir()
+	root := federationTempDir(t)
 	cfg := map[string]any{"node": "server", "oracle": "configured-oracle"}
 	ctx := context.Background()
 	if got := inboxDisplaySender(ctx, "", root, cfg); got != "server:configured-oracle" {

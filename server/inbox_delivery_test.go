@@ -31,10 +31,10 @@ func TestInboxGate(t *testing.T) {
 	}
 }
 func TestInboxNativeQueue(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("MAW_ORACLES_JSON", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("HOME", federationTempDir(t))
+	t.Setenv("MAW_ORACLES_JSON", filepath.Join(federationTempDir(t), "missing"))
 	t.Setenv("MAW_HEY_INBOX_AUTOWRITE", "1")
-	root := t.TempDir()
+	root := federationTempDir(t)
 	b, calls, snapshot := testBackend(t)
 	*snapshot = strings.ReplaceAll(strings.ReplaceAll(backendSnapshot, "/tmp", root), `"agent":"codex"`, `"agent":null`)
 	path, err := b.QueueInbox(context.Background(), "bWFpbg/d0Q:4", "node:sender", "hello", "", nil)
@@ -54,7 +54,7 @@ func TestInboxNativeQueue(t *testing.T) {
 		if len(args) > 3 && args[3] == "snapshot" {
 			n++
 			if n == 2 {
-				*snapshot = strings.ReplaceAll(*snapshot, root, t.TempDir())
+				*snapshot = strings.ReplaceAll(*snapshot, root, federationTempDir(t))
 			}
 		}
 		return original(ctx, args...)
@@ -64,16 +64,16 @@ func TestInboxNativeQueue(t *testing.T) {
 	}
 }
 func TestInboxHTTPOriginalAndOverride(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("HOME", federationTempDir(t))
 	t.Setenv("MAW_HEY_INBOX_AUTOWRITE", "1")
-	t.Setenv("MAW_ORACLES_JSON", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MAW_ORACLES_JSON", filepath.Join(federationTempDir(t), "missing"))
 	s, _ := testServer(t)
 	b, calls, snapshot := testBackend(t)
-	root := t.TempDir()
-	override := t.TempDir()
+	root := federationTempDir(t)
+	override := federationTempDir(t)
 	*snapshot = strings.ReplaceAll(backendSnapshot, "/tmp", root)
 	s.backend = b
-	s.configRoot = t.TempDir()
+	s.configRoot = federationTempDir(t)
 	os.Mkdir(filepath.Join(s.configRoot, ".maw"), 0700)
 	cfg, _ := json.Marshal(map[string]string{"oracle": "demo-oracle", "psiPath": filepath.Join(override, "ψ")})
 	os.WriteFile(filepath.Join(s.configRoot, ".maw", "maw.config.50.json"), cfg, 0600)
