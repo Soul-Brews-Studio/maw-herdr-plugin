@@ -87,8 +87,12 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Path {
 	case "/api/federation/status", "/fed.json":
-		c, err := readFederationConfig(true)
+		c, err := readFederationConfigAt(true, s.configRoot)
 		if err != nil {
+			if errors.Is(err, errConfig) {
+				fail(w, 503, "config_unavailable")
+				return
+			}
 			fail(w, 503, "federation_unavailable")
 			return
 		}
@@ -167,16 +171,19 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "config_query_not_supported")
 			return
 		}
-		c, err := readFederationConfig(false)
-		if err != nil {
-			fail(w, 503, "federation_unavailable")
-			return
+		peers := s.publicConfig.NamedPeers
+		if !s.publicConfig.HasPeers {
+			c, err := readFederationConfig(false)
+			if err != nil {
+				fail(w, 503, "federation_unavailable")
+				return
+			}
+			peers = []map[string]string{}
+			for _, p := range c.peers {
+				peers = append(peers, map[string]string{"name": p.Name, "url": p.URL})
+			}
 		}
-		peers := []map[string]string{}
-		for _, p := range c.peers {
-			peers = append(peers, map[string]string{"name": p.Name, "url": p.URL})
-		}
-		writeJSON(w, 200, map[string]any{"node": s.config.Node, "agents": map[string]any{}, "namedPeers": peers})
+		writeJSON(w, 200, map[string]any{"node": s.config.Node, "agents": s.publicConfig.Agents, "namedPeers": peers})
 	case "/api/teams":
 		if _, err := s.backend.Sessions(r.Context()); err != nil {
 			backendFailure(w, err)

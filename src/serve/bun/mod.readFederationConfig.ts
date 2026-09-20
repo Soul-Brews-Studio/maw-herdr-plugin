@@ -2,6 +2,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from '
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { readMawConfig } from './mod.readMawConfig.ts';
 import { HTTPError } from './serverTypes.ts';
 
 export interface FederationPeer { name: string; url: string; node: string | null; oracle: string | null; auth_ok: boolean | null }
@@ -53,8 +54,11 @@ export function readFederationConfig(signing = true) {
     if (oracle !== null && typeof oracle !== 'string') fail();
     return {name,url:value.url,node:node as string|null,auth_ok:auth as boolean|null,oracle:oracle ? String(oracle) : null};
   });
-  const sender = signing ? env.MAW_SENDER || '' : '';
-  const fleet = signing ? (env.MAW_FEDERATION_TOKEN || '').trim() : '';
+  const merged = signing ? readMawConfig() : {};
+  const oracle = typeof merged.oracle === 'string' ? merged.oracle.trim() : '';
+  const configuredSender = typeof merged.node === 'string' && merged.node && oracle ? `${merged.node}:${oracle}` : '';
+  const sender = signing ? env.MAW_SENDER ?? configuredSender : '';
+  const fleet = signing ? (env.MAW_FEDERATION_TOKEN || '').trim() || (typeof merged.federationToken === 'string' ? merged.federationToken.trim() : '') : '';
   const key = signing ? env.MAW_PEER_KEY || (read(resolve(state,'peer-key'),4096) || '').trim() : '';
   const fingerprint = createHash('sha256').update(JSON.stringify([path,raw,sender,fleet,key])).digest('hex');
   return { peers, sender, fleet, key, fingerprint };

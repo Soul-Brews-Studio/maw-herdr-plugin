@@ -50,6 +50,10 @@ jobs:
           bun utils/smoke-bun-serve.mjs
           bun utils/smoke-federation-config.ts
           node utils/smoke-federation-serve.mjs
+          bun utils/smoke-maw-config.ts
+          node utils/smoke-config-serve.mjs
+          MAW_CONFIG_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-config-serve.mjs
+          node utils/smoke-config-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           MAW_FEDERATION_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-federation-serve.mjs
           node utils/smoke-federation-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           bun utils/smoke-terminal-serve.mjs

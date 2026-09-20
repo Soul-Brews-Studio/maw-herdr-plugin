@@ -2,10 +2,10 @@
 // Contract fixture only: never connects to a real user Herdr daemon.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-const root = mkdtempSync(join(tmpdir(), 'herdr-terminal-smoke-'));
+const root = realpathSync(mkdtempSync(join(tmpdir(), 'herdr-terminal-smoke-')));
 const token = 'isolated-terminal-smoke-token-123456';
 const tokenFile = join(root, 'token'), fake = join(root, 'herdr'), calls = join(root, 'calls');
 const target = 'bWFpbg/d0Q:9';
@@ -27,7 +27,10 @@ else if(a[2]==='terminal') {
 `, { mode: 0o700 });
 const native = process.argv[2];
 const argv = ['--token-file',tokenFile,'--listen','127.0.0.1:0','--herdr',fake,'--data-dir',join(root,'state')];
-const child = spawn(native ? resolve(native) : process.execPath, native ? argv : [resolve(process.env.MAW_TERMINAL_ENTRY || 'index.mjs'),'serve',...argv], {env:{...process.env,HOME:root,MAW_HERDR_SERVE_BIN:''},stdio:['ignore','pipe','pipe']});
+const env = {...process.env, HOME:root};
+for (const key of Object.keys(env)) if (key.startsWith('MAW_') || key === 'PEERS_FILE') delete env[key];
+Object.assign(env, {MAW_CONFIG_DIR:join(root,'config'),MAW_TEST_MODE:'1',PEERS_FILE:join(root,'peers.json')});
+const child = spawn(native ? resolve(native) : process.execPath, native ? argv : [resolve(process.env.MAW_TERMINAL_ENTRY || 'index.mjs'),'serve',...argv], {env,cwd:root,stdio:['ignore','pipe','pipe']});
 let log='';const sockets=[];
 const exited=new Promise(resolve=>child.once('exit',(code,signal)=>resolve({code,signal})));
 const timeout=(p,label)=>{let t;return Promise.race([p,new Promise((_,r)=>t=setTimeout(()=>r(Error(label+' timed out')),10000))]).finally(()=>clearTimeout(t));};

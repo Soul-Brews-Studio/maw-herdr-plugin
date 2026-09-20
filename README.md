@@ -236,12 +236,45 @@ Herdr panes. Removal uses ordinary `git worktree remove` without force, branch
 deletion, or a recursive-delete fallback; dirty and locked worktrees stay protected
 by Git. Missing worktree registrations are not pruned by this endpoint.
 
+### Layered dashboard configuration
+
+The server reads numbered `maw.config.<weight>.json` and
+`maw.config.<weight>.local.json` files from its user config directory and
+`.maw/` directories along the startup working directory's ancestor chain.
+User config selection is `MAW_HOME/config`, then `MAW_CONFIG_DIR`, otherwise
+`$XDG_CONFIG_HOME/maw` (absolute XDG paths only) or `~/.config/maw`.
+An instance using `MAW_HOME` also inherits singleton user config unless
+`MAW_CONFIG_DIR` is explicitly present or `MAW_TEST_MODE=1`.
+
+Layers apply in ascending weight, scope, local-file flag, then path order.
+A higher-weight user layer can override a lower-weight project layer.
+Objects merge recursively and `null` deletes a key. `namedPeers` arrays merge
+by name, replacing the whole matching record; `[]` retains inherited peers,
+while `null` deletes the field. Ordinary arrays replace. Values are not
+interpolated, expanded or rebased against the containing file.
+
+Unnumbered user `maw.config.json` is the fallback when there are no numbered
+user candidates, or when no discovered layer loads a valid object.
+Unnumbered project files are not read. Malformed, unreadable and non-object
+layers are skipped; a valid empty object counts as loaded.
+
+`/api/config` exposes only the startup `node`, string-valued `agents`, and
+safe `namedPeers` names/URLs. It never exposes merged raw config, environment,
+tokens, keys or hooks. Credential-bearing/unsafe peer URLs are omitted.
+If `namedPeers` is absent, the existing dynamic peer-store inventory remains
+the fallback; explicit configured peers use the startup snapshot.
+
+Reads are limited to 32 ancestor directories, 128 layers, 1,024 entries per
+config directory, 1 MiB per file, 4 MiB aggregate and JSON depth 64.
+Symlinks, nonregular config files and resource-limit violations fail closed. Local directory writers
+remain trusted; these checks are not a concurrent filesystem-mutation sandbox.
+
 ### Federation status
 
 Authenticated `GET /api/federation/status` and `GET /fed.json` read the
-existing version-1 `peers.json` inventory and fetch each configured peer's
-`/api/sessions`. `/api/config` exposes the inventory as `namedPeers`; reading
-config does not probe peers. There is no network discovery or inventory write.
+existing version-1 `peers.json` inventory and fetch each stored peer's
+`/api/sessions`. The store supplies `/api/config` peer names only when no
+`namedPeers` are configured; reading config does not probe peers. There is no network discovery or inventory write.
 
 Set `PEERS_FILE` to an explicit inventory path, or use the state directory:
 `MAW_HOME`, then `MAW_STATE_DIR`, then XDG state when `MAW_XDG` is enabled,
@@ -274,12 +307,16 @@ It does **not** prove authentication or usable sessions. `auth_ok` is the stored
 probe result, not a fresh authentication claim. `agents` contains session names,
 matching the legacy contract. Errors are sanitized; credentials are never returned.
 
-Optional legacy HMAC signing reads `MAW_SENDER=node:oracle`,
-`MAW_FEDERATION_TOKEN`, and `MAW_PEER_KEY` (or an existing state-directory
-`peer-key` file). It never creates a key or forwards the browser's operator
+Optional legacy HMAC signing reads `MAW_SENDER=node:oracle` and
+`MAW_FEDERATION_TOKEN`; when absent, configured `node` plus `oracle` and
+merged `federationToken` provide fallbacks. A blank federation-token environment
+value also uses the config fallback, but a present invalid/empty `MAW_SENDER`
+does not invent an identity. `MAW_PEER_KEY` or an existing state-directory
+`peer-key` supplies the signing key. Private configuration is reloaded for
+status requests; changing signing credentials invalidates the status cache. It never creates a key or forwards the browser's operator
 token. Without all signing prerequisites, probes are unsigned. The signature
 uses the legacy fixed `/api/sessions` pathname, including for base-path URLs.
-Layered maw-config identity/token fallback, inbound peer-signature authentication,
+Automatic pane/cwd-derived signing identity, inbound peer-signature authentication,
 pairing and discovery remain unfinished; this is not full federation parity.
 
 Workspace targets use opaque base64url session/workspace IDs and stable pane

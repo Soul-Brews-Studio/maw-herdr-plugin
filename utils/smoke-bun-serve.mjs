@@ -95,7 +95,10 @@ const sessions = [{ name: 'bWFpbg/d0Q', source: 'local', windows: [
 const children = new Set(), sockets = new Set();
 let checks = 0;
 const env = { ...process.env, PATH: '/nonexistent', HOME: join(temporary, 'home'), XDG_CACHE_HOME: join(temporary, 'cache') };
-delete env.MAW_HERDR_SERVE_BIN;
+for (const key of Object.keys(env)) if (key.startsWith('MAW_') || key === 'PEERS_FILE') delete env[key];
+env.MAW_CONFIG_DIR = join(temporary, 'config');
+env.MAW_TEST_MODE = '1';
+env.HOSTNAME = 'herdr';
 // Federation inventory must not inherit a live fleet override.
 env.PEERS_FILE = join(temporary, 'absent-peers.json');
 mkdirSync(env.HOME);

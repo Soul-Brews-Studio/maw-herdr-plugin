@@ -12,7 +12,7 @@ import {readFederationConfig} from '../src/serve/bun/mod.readFederationConfig.ts
 if (process.argv[2] !== '--isolated-home') {
   const home=realpathSync(mkdtempSync(join(tmpdir(),'herdr-federation-config-')));
   try {
-    const child=spawnSync(process.execPath,[fileURLToPath(import.meta.url),'--isolated-home',home],{env:{...process.env,HOME:home},stdio:'inherit',timeout:15000});
+    const child=spawnSync(process.execPath,[fileURLToPath(import.meta.url),'--isolated-home',home],{env:{...process.env,HOME:home,MAW_CONFIG_DIR:join(home,'config'),MAW_TEST_MODE:'1'},cwd:home,stdio:'inherit',timeout:15000});
     assert.ifError(child.error);assert.equal(child.status,0);
   } finally {rmSync(home,{recursive:true,force:true});}
 } else {
