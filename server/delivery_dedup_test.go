@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -111,6 +113,29 @@ func TestHTTPDeliveryDedup(t *testing.T) {
 	headers["X-Maw-Timestamp"] = "fixture-2"
 	if w := request(s, "POST", "/api/send", body, headers); w.Code != 200 {
 		t.Fatal(w.Code)
+	}
+	history := request(s, "GET", "/api/feed", "", nil)
+	var snapshot deliverySnapshot
+	if err := json.Unmarshal(history.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if history.Code != 200 || snapshot.Total != 11 {
+		t.Fatal(history.Code, history.Body)
+	}
+	states := map[string]int{}
+	for _, event := range snapshot.Events {
+		states[event.State]++
+	}
+	if states["accepted"] != 4 || states["deduped"] != 7 {
+		t.Fatal(states)
+	}
+	for _, query := range []string{"-1", "x", "", "1&limit=2", "18446744073709551616"} {
+		if got := request(s, "GET", "/api/feed?limit="+query, "", nil); got.Code != 400 {
+			t.Fatal(query, got.Code)
+		}
+	}
+	if got := request(s, "GET", "/api/feed?limit=0", "", nil); got.Code != 200 || !strings.Contains(got.Body.String(), `"events":[]`) {
+		t.Fatal(got.Body)
 	}
 	if b.sends != 4 {
 		t.Fatal("new logical timestamp", b.sends)

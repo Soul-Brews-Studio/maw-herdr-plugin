@@ -94,7 +94,12 @@ func TestInboxHTTPOriginalAndOverride(t *testing.T) {
 	if !strings.Contains(string(raw), "from: remote:sender\n") || !strings.Contains(string(raw), "attachment\nhello") {
 		t.Fatal(string(raw))
 	}
-	if len(*calls) != 4 {
+	if len(*calls) != 6 {
 		t.Fatal(*calls)
 	}
+	history := s.deliveryHistory.snapshot(-1)
+	if history.Total != 1 || history.Events[0].State != "queued" || history.Events[0].Route != "inbox" || history.Events[0].Text != "attachment\nhello" {
+		t.Fatal(history)
+	}
+
 }

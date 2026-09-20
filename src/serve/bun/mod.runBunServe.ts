@@ -1,3 +1,4 @@
+import { createDeliveryFeed } from './mod.createDeliveryFeed.ts';
 import { createDeliveryDedup } from './mod.createDeliveryDedup.ts';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ServerWebSocket } from 'bun';
@@ -20,6 +21,7 @@ export async function runBunServe(args: string[]): Promise<number> {
   const shutdown = new AbortController();
   const started = Date.now();
   const delivery = createDeliveryDedup();
+  const deliveryHistory = createDeliveryFeed();
   const tickets = new Map<string, { origin: string; path: string; expires: number }>();
   const sockets = new Set<ServerWebSocket<SocketData>>();
   let connections = 0, requests = 0;
@@ -81,7 +83,10 @@ export async function runBunServe(args: string[]): Promise<number> {
         }
         if (!config.engine) {
           const authorization = request.headers.get('authorization') || '';
-          if (!authorization.startsWith('Bearer ') || !timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash)) return failure(401, 'operator_token_required');
+          if (!authorization.startsWith('Bearer ') || !timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash)) {
+            if (path === '/api/send' && request.method === 'POST') deliveryHistory.append({ timestamp: Math.floor(Date.now() / 1000), kind: 'message', direction: 'inbound', state: 'failed', route: 'auth', event: 'auth-reject', decision: 'operator_token_required', source: 'herdr', from: '', to: '', target: '', text: '', oracle: '' });
+            return failure(401, 'operator_token_required');
+          }
         }
         if (!allowed.includes(request.method)) return methodError();
         if (path === '/api/auth/ws-ticket') {
@@ -96,7 +101,7 @@ export async function runBunServe(args: string[]): Promise<number> {
           tickets.set(value, { origin, path: body.path, expires: now + 30_000 });
           return json({ protocol: 'maw.ws.v1', ticket: value });
         }
-        return json(await serveAPI(request, path, config, backend, started, signal, delivery));
+        return json(await serveAPI(request, path, config, backend, started, signal, delivery, deliveryHistory));
       } catch (error) {
         if (error instanceof HTTPError) return json(error.body ?? { error: error.message }, error.status);
         if (error instanceof BackendError && error.code === 'target_not_found') return failure(404, 'target_not_found');

@@ -252,7 +252,7 @@ Core API compatibility:
 | Browser auth | Bearer token; short-lived, one-use, exact-Origin-bound `/api/auth/ws-ticket` |
 | `/ws` | `sessions`, `recent`, `capture`, `previews`, observed `feed`/`feed-history`; `select`, `subscribe`, `subscribe-previews`, `send` |
 | Preferences | `/api/ui-state` object and `/api/asks` array persisted privately under `--data-dir` |
-| Not measured | Costs and HTTP `/api/feed` return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
+| Not measured | Costs return an empty compatibility payload with `supported: false`; zero costs are **not measured usage** |
 
 `recent` includes only panes with a detected Herdr agent, not ordinary shell panes.
 All panes remain available in `sessions` and the terminal. Agent detection is not
@@ -422,7 +422,19 @@ receipts expire after 24 hours. The 2,048-entry store rejects new timestamped cl
 at capacity rather than evicting active receipts, and resets on server restart.
 These headers are metadata under operator-token authentication, not signature
 verification. This is not a durable exactly-once guarantee. Signed federation
-verification and lifecycle-feed integration remain pending.
+verification and full lifecycle-feed parity remain pending.
+
+Authenticated `GET /api/feed` returns the newest 200 process-local delivery
+records in insertion order (`events`, `total`, `active_oracles`). Optional
+`?limit=N` returns the newest N records; zero returns an empty list. It records
+accepted prompts, queued inbox writes, backend delivery failures, and suppressed
+retries. These are delivery outcomes, not proof of agent consumption. Oracle
+names are resolved from Herdr; an unavailable identity remains empty. Sender
+headers are unverified display metadata. Text is truncated, but can still contain
+private prompt content: this endpoint requires the operator token. History resets
+on restart and is separate from observed-status WebSocket events. Rejected POST `/api/send` authentication attempts record only a fixed reason,
+never the supplied credentials, sender or body. Other pre-dispatch failures and
+POST feed activity are not yet recorded.
 
 WebSocket `send` instead types literal text into
 any pane, adding Enter only for `force: true`. There are at most 16 live preview targets per

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { createDeliveryFeed } from '../src/serve/bun/mod.createDeliveryFeed.ts';
+const feed = createDeliveryFeed();
+assert.deepEqual(feed.snapshot(), { events: [], total: 0, active_oracles: [] });
+for (let i = 0; i < 205; i++) feed.append({ timestamp: i, kind: 'context.message', direction: 'inbound', state: 'accepted', route: 'local', from: 'a', to: 'b', target: 'pane', text: 'x'.repeat(2001), oracle: String(i % 2), source: 'herdr' });
+const snapshot = feed.snapshot();
+assert.equal(snapshot.total, 200);
+assert.equal(snapshot.events[0].timestamp, 5);
+assert.equal(snapshot.events[0].text, 'x'.repeat(1999) + '…');
+assert.deepEqual(snapshot.active_oracles, ['1', '0']);
+snapshot.events[0].text = 'changed';
+assert.notEqual(feed.snapshot().events[0].text, 'changed');
+assert.equal(feed.snapshot(0).total, 0);
+assert.equal(feed.snapshot(1).events[0].timestamp, 204);
+assert.equal(feed.snapshot(999).total, 200);
+console.log('PASS delivery feed: bounded insertion order, limits, unique oracles, truncation and isolated snapshots');
