@@ -301,3 +301,7 @@ func TestCaptureContract(t *testing.T) {
 		}
 	}
 }
+
+func (b *fakeBackend) Input(ctx context.Context, target, text string, _ bool) error {
+	return b.Send(ctx, target, text)
+}

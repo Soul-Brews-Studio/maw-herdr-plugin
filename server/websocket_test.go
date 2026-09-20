@@ -219,7 +219,7 @@ func TestWSSendAcknowledgesAcceptanceAndRejectsUnsupportedOptions(t *testing.T) 
 	f := newWSFixture(t, b, time.Hour)
 	conn := f.connect(t)
 	initialWS(t, conn)
-	for _, option := range []string{"force", "inbox", "attachments"} {
+	for _, option := range []string{"inbox", "attachments"} {
 		command := map[string]any{"type": "send", "target": "default/w1:1", "text": "hello", option: true}
 		if option == "attachments" {
 			command[option] = []string{"file"}

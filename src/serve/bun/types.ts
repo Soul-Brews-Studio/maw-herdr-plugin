@@ -5,6 +5,7 @@ export interface Backend {
   capture(target: string, lines: number, signal?: AbortSignal): Promise<string>;
   captureBatch(targets: Record<string, number>, signal?: AbortSignal): Promise<Record<string, string>>;
   wake(target: string, signal?: AbortSignal): Promise<"ready" | "already-awake">;
+  sendLiteral(target: string, text: string, enter: boolean, signal?: AbortSignal): Promise<void>;
   send(target: string, text: string, signal?: AbortSignal): Promise<void>;
   openTerminal(target: string, cols: number, rows: number, output: (bytes: Buffer) => void, signal: AbortSignal): Promise<Terminal>;
   close?(): Promise<void>;

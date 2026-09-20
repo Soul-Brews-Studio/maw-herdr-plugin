@@ -14,15 +14,18 @@ import (
 )
 
 type socketCommand struct {
-	Command     string   `json:"command"`
-	Type        string   `json:"type"`
-	Target      string   `json:"target"`
-	Targets     []string `json:"targets"`
-	Scope       string   `json:"scope"`
-	Text        string   `json:"text"`
-	Force       bool     `json:"force"`
-	Inbox       bool     `json:"inbox"`
-	Attachments []string `json:"attachments"`
+	textPresent         bool
+	targetExplicitEmpty bool
+	Command             string   `json:"command"`
+	Type                string   `json:"type"`
+	Target              string   `json:"target"`
+	Targets             []string `json:"targets"`
+	Scope               string   `json:"scope"`
+	Text                *string  `json:"text"`
+	Content             *string  `json:"content"`
+	Force               bool     `json:"force"`
+	Inbox               bool     `json:"inbox"`
+	Attachments         []string `json:"attachments"`
 }
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) {
@@ -92,6 +95,13 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 				_ = conn.Close(websocket.StatusPolicyViolation, "invalid command JSON")
 				return
 			}
+			// Preserve JSON presence: explicit empty target/null text must not
+			// silently become a selected-target or content-alias mutation.
+			var fields map[string]json.RawMessage
+			_ = json.Unmarshal(data, &fields)
+			_, command.textPresent = fields["text"]
+			rawTarget, hasTarget := fields["target"]
+			command.targetExplicitEmpty = hasTarget && command.Target == "" && !bytes.Equal(bytes.TrimSpace(rawTarget), []byte("null"))
 			select {
 			case commands <- command:
 			case <-ctx.Done():
@@ -294,27 +304,43 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 					return
 				}
 			case "send":
-				if command.Target == "" || command.Text == "" {
+				target := command.Target
+				if target == "" && !command.targetExplicitEmpty {
+					target = selected
+				}
+				text := command.Text
+				if !command.textPresent {
+					text = command.Content
+				}
+				if target == "" || len(target) > 1024 || text == nil {
 					if !errorFrame("target_and_text_required") {
 						return
 					}
 					continue
 				}
-				if command.Force || command.Inbox || len(command.Attachments) > 0 {
+				if command.Inbox || len(command.Attachments) > 0 {
 					if !errorFrame("send_options_not_supported") {
 						return
 					}
 					continue
 				}
-				if err := s.backend.Send(ctx, command.Target, command.Text); err != nil {
+				backend, ok := s.backend.(inputBackend)
+				if !ok {
+					if !errorFrame("input_not_supported") {
+						return
+					}
+					continue
+				}
+				if err := backend.Input(ctx, target, *text, command.Force); err != nil {
 					if !errorFrame("send_failed") {
 						return
 					}
 					continue
 				}
-				if !write(map[string]any{"type": "sent", "ok": true, "target": command.Target, "text": command.Text, "state": "accepted"}) {
+				if !write(map[string]any{"type": "sent", "ok": true, "target": target, "text": *text, "state": "accepted"}) {
 					return
 				}
+
 			default:
 				if !errorFrame("command_not_supported") {
 					return

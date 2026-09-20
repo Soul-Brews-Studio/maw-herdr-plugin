@@ -87,6 +87,11 @@ This uses Herdr 0.9.0 terminal streams, not tmux or a separately spawned shell.
 Closing the browser detaches the stream; it does not close the underlying pane.
 An existing controller is never forcibly taken over.
 
+Dashboard WebSocket `send` writes literal pane input without submitting it.
+A separate carriage return submits; `force: true` appends Enter. This also works
+with shell panes and preserves empty/whitespace text. HTTP `/api/send` remains
+agent-prompt submission; it is a different operation. Both require authentication.
+
 Wake an existing pane through the dashboard or `POST /api/wake` with its canonical
 `target`. The server uses `--wake-engine claude` by default, matching `herdr wake`;
 choose another supported kind at startup (for example `--wake-engine codex`).

@@ -72,12 +72,15 @@ export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Ba
         try { await backend.wake(body.target, signal); }
         catch { error('wake_failed'); return; }
         write({ type: 'action-ok', action: 'wake', target: body.target }); return;
-      case 'send':
-        if (!body.target || !body.text) { error('target_and_text_required'); return; }
-        if (body.force || body.inbox || body.attachments?.length) { error('send_options_not_supported'); return; }
-        try { await backend.send(body.target, body.text, signal); }
+      case 'send': {
+        const target = body.target ?? selected;
+        const text = Object.hasOwn(body, 'text') ? body.text : body.content;
+        if (!target || text === undefined || text === null) { error('target_and_text_required'); return; }
+        if (body.inbox || body.attachments?.length) { error('send_options_not_supported'); return; }
+        try { await backend.sendLiteral(target, text, body.force === true, signal); }
         catch { error('send_failed'); return; }
-        write({ type: 'sent', ok: true, target: body.target, text: body.text, state: 'accepted' }); return;
+        write({ type: 'sent', ok: true, target, text, state: 'accepted' }); return;
+      }
       default: error('command_not_supported');
     }
   };
