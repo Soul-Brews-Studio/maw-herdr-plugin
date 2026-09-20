@@ -15,9 +15,20 @@ import (
 	"time"
 )
 
+// macOS temporary paths may traverse /var -> /private/var. Resolve the
+// fixture directory, not production inputs, to preserve no-symlink validation.
+func federationTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func isolatedFederation(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home := federationTempDir(t)
 	for _, key := range []string{"MAW_HOME", "MAW_STATE_DIR", "MAW_XDG", "XDG_STATE_HOME", "MAW_SENDER", "MAW_FEDERATION_TOKEN", "MAW_PEER_KEY"} {
 		t.Setenv(key, "")
 	}
@@ -199,7 +210,7 @@ func TestFederationSessionNamesIgnoreNonStrings(t *testing.T) {
 func TestFederationLegacyStoreFallback(t *testing.T) {
 	isolatedFederation(t)
 	t.Setenv("PEERS_FILE", "")
-	t.Setenv("MAW_STATE_DIR", t.TempDir())
+	t.Setenv("MAW_STATE_DIR", federationTempDir(t))
 	legacy := filepath.Join(os.Getenv("HOME"), ".maw")
 	if err := os.MkdirAll(legacy, 0700); err != nil {
 		t.Fatal(err)
@@ -209,13 +220,13 @@ func TestFederationLegacyStoreFallback(t *testing.T) {
 	if err != nil || len(c.peers) != 1 || c.peers[0].Name != "legacy" {
 		t.Fatal(c, err)
 	}
-	t.Setenv("MAW_HOME", t.TempDir())
+	t.Setenv("MAW_HOME", federationTempDir(t))
 	c, err = readFederationConfig(false)
 	if err != nil || len(c.peers) != 0 {
 		t.Fatal("explicit MAW_HOME must not fall back", c, err)
 	}
 	t.Setenv("MAW_HOME", "")
-	t.Setenv("PEERS_FILE", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("PEERS_FILE", filepath.Join(federationTempDir(t), "missing.json"))
 	c, err = readFederationConfig(false)
 	if err != nil || len(c.peers) != 0 {
 		t.Fatal("explicit PEERS_FILE must not fall back", c, err)
