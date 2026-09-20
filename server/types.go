@@ -15,6 +15,7 @@ type Session struct {
 	Source  string   `json:"source"`
 }
 type Window struct {
+	Agent  string `json:"agent,omitempty"`
 	Index  int    `json:"index"`
 	Name   string `json:"name"`
 	Active bool   `json:"active"`

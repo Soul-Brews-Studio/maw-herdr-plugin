@@ -194,7 +194,7 @@ func (b *HerdrBackend) roster(ctx context.Context) (backendRoster, error) {
 			if name == "" {
 				name = pane.ID
 			}
-			space.Windows = append(space.Windows, Window{Index: n, Name: name, Active: *pane.Focused, Cwd: pane.Cwd, Status: pane.Status})
+			space.Windows = append(space.Windows, Window{Index: n, Name: name, Active: *pane.Focused, Cwd: pane.Cwd, Status: pane.Status, Agent: strings.TrimSpace(pane.Agent)})
 			result.targets[target] = backendTarget{session: server.Name, pane: pane}
 		}
 		for _, space := range spaces {

@@ -191,6 +191,10 @@ Core API compatibility:
 | Preferences | `/api/ui-state` object and `/api/asks` array persisted privately under `--data-dir` |
 | Not measured | Teams, costs and feed return empty compatibility payloads with `supported: false`; zero costs are **not measured usage** |
 
+`recent` includes only panes with a detected Herdr agent, not ordinary shell panes.
+All panes remain available in `sessions` and the terminal. Agent detection is not
+proof of task completion; full activity-feed history is not implemented yet.
+
 Workspace targets use opaque base64url session/workspace IDs and stable pane
 numbers, not list positions. Do not save them across daemon resets that reuse
 IDs. Capture reads only the visible screen. Sending is agent-only, reports

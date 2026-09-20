@@ -43,7 +43,7 @@ func TestBackendRosterAndArgv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []Session{{Name: "bWFpbg/d0Q", Source: "local", Windows: []Window{{Index: 4, Name: "codex", Active: true, Cwd: "/tmp", Status: "idle"}, {Index: 9, Name: "wD:p9", Status: "unknown"}}}}
+	want := []Session{{Name: "bWFpbg/d0Q", Source: "local", Windows: []Window{{Index: 4, Name: "codex", Active: true, Cwd: "/tmp", Status: "idle", Agent: "codex"}, {Index: 9, Name: "wD:p9", Status: "unknown"}}}}
 	if !reflect.DeepEqual(sessions, want) {
 		t.Fatalf("got %#v", sessions)
 	}

@@ -1,4 +1,4 @@
-export interface Window { index: number; name: string; active: boolean; cwd?: string; status?: string }
+export interface Window { index: number; name: string; active: boolean; cwd?: string; status?: string; agent?: string }
 export interface Session { name: string; windows: Window[]; source: string }
 export interface Backend {
   sessions(signal?: AbortSignal): Promise<Session[]>;

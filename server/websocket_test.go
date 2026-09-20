@@ -258,7 +258,7 @@ type previewBackend struct {
 func (b *previewBackend) Sessions(context.Context) ([]Session, error) {
 	b.captureMu.Lock()
 	defer b.captureMu.Unlock()
-	windows := []Window{{Index: 1, Name: "agent", Active: true}}
+	windows := []Window{{Index: 1, Name: "agent", Active: true, Agent: "codex"}}
 	for i := 2; i <= 4; i++ {
 		if i != 2 || !b.removed {
 			windows = append(windows, Window{Index: i, Name: "preview"})
@@ -509,5 +509,31 @@ func TestWSDepartedPreviewDoesNotStarveSurvivingPane(t *testing.T) {
 	sendWS(t, conn, map[string]any{"type": "send", "target": "default/w1:1", "text": "barrier"})
 	if frame := readWS(t, conn); frame["type"] != "sent" {
 		t.Fatal(frame)
+	}
+}
+
+func TestWSRecentKeepsOnlyDetectedAgentsWithoutDroppingShellWindows(t *testing.T) {
+	backend, _, _ := testBackend(t)
+	f := newWSFixture(t, backend, time.Hour)
+	conn := f.connect(t)
+	if frame := readWS(t, conn); frame["type"] != "feed-history" {
+		t.Fatal(frame)
+	}
+	frame := readWS(t, conn)
+	sessions := frame["sessions"].([]any)
+	windows := sessions[0].(map[string]any)["windows"].([]any)
+	if len(windows) != 2 {
+		t.Fatal("shell window disappeared", frame)
+	}
+	recent := readWS(t, conn)
+	agents := recent["agents"].([]any)
+	if len(agents) != 1 || agents[0].(map[string]any)["target"] != "bWFpbg/d0Q:4" {
+		t.Fatal("shell advertised as agent", recent)
+	}
+	if windows[0].(map[string]any)["agent"] != "codex" {
+		t.Fatal("detected identity missing", frame)
+	}
+	if value, ok := windows[1].(map[string]any)["agent"]; ok && value != "" {
+		t.Fatal("shell has agent", value)
 	}
 }
