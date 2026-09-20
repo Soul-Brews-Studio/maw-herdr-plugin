@@ -372,6 +372,12 @@ async function exercise(entry, label) {
   assert.equal((await http(url,'/api/feed?limit=0')).json.total,0);
   assert.equal((await http(url,'/api/feed?limit=1')).json.total,1);
   for (const query of ['-1','x','','1&limit=2','18446744073709551616']) await http(url,'/api/feed?limit='+query,{status:400});
+  for (const invalidTarget of ['', ' ', '\t\n', '\u2003', '\u0085']) {
+    const invalid = (await http(url,'/api/send',{method:'POST',body:{target:invalidTarget,text:'undeliverable'},status:400})).json;
+    assert.deepEqual(invalid,{ok:false,error:'empty-target',state:'failed'});
+  }
+  const invalidHistory = (await http(url,'/api/feed')).json.events.filter(event=>event.error==='empty-target');
+  assert.equal(invalidHistory.length,5); assert.ok(invalidHistory.every(event=>event.route==='validate'&&event.state==='failed'));
   const attachments = [join(temporary,'literal path that does not exist'), 'https://example.invalid/literal-url?value=$(touch never)'];
   for (const body of [{target,attachments,text}, {target,attachments}]) {
     const combinedText = attachments.join('\n') + '\n' + (body.text ?? '');
