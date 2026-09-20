@@ -122,7 +122,7 @@ func (b *HerdrBackend) wake(ctx context.Context, target string, task *string) (s
 	}
 	kind := b.wakeEngine
 	if kind == "" {
-		kind = "claude"
+		kind = "codex"
 	}
 	if !validWakeEngine(kind) {
 		return "", errors.New("invalid wake engine")

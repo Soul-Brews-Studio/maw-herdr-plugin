@@ -11,7 +11,7 @@ export async function runServe(args) {
                 [--herdr PATH] [--data-dir PATH] [--wake-engine KIND] [--runtime bun|native] [--build]
 
 Core dashboard API: sessions, live pane output and prompt submission.
-Dashboard wake starts the configured agent kind (default claude) in an existing shell pane.
+Dashboard wake supports existing panes and registered repositories/tasks (default codex).
 The token file is required, including on loopback. Help needs no Go or Herdr.
 Defaults to the TypeScript server in Bun: no Go compiler or native package needed.
 --runtime native uses the checksum-pinned helper from a native plugin package.

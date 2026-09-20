@@ -61,7 +61,7 @@ func NewServer(config Config, backend Backend) (*Server, error) {
 		return nil, errors.New("backend required")
 	}
 	if config.WakeEngine == "" {
-		config.WakeEngine = "claude"
+		config.WakeEngine = "codex"
 	}
 	if !validWakeEngine(config.WakeEngine) {
 		return nil, errors.New("invalid wake engine")

@@ -30,6 +30,7 @@ const token='fixture-registry-operator-secret';const tokenFile=join(home,'token'
 const env={...process.env};for(const key of Object.keys(env))if(key.startsWith('MAW_')||key.startsWith('HERDR_')||key==='PEERS_FILE')delete env[key];
 Object.assign(env,{HOME:home,MAW_CONFIG_DIR:join(home,'config'),MAW_TEST_MODE:'1',MAW_ORACLES_JSON:registry,FIXTURE_STATE:stateFile});
 const native=process.argv[2],args=['--token-file',tokenFile,'--listen','127.0.0.1:0','--herdr',fake,'--data-dir',join(home,'ui')];
+if(process.env.MAW_TEST_WAKE_ENGINE)args.push('--wake-engine',process.env.MAW_TEST_WAKE_ENGINE);
 const child=spawn(native?resolve(native):'bun',native?args:[resolve(process.env.MAW_REGISTRY_ENTRY||'index.mjs'),'serve',...args],{cwd:home,env,stdio:['ignore','pipe','pipe']});
 let output='';const exited=new Promise(done=>child.once('exit',(code,signal)=>done({code,signal})));
 async function deadline(p){let timer;try{return await Promise.race([p,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('timeout')),15000)})]);}finally{clearTimeout(timer)}}
@@ -40,7 +41,7 @@ try{
  assert.equal((await wake('fixture',false)).status,401);assert.deepEqual(state(),fresh());
  for(const target of ['missing','test-org/missing','../repo']){assert.notEqual((await wake(target)).status,200);assert.deepEqual(state(),fresh());}
  save(registry,{oracles:[entry,{...entry,org:'other'}]});assert.notEqual((await wake('fixture')).status,200);assert.deepEqual(state(),fresh());save(registry,{oracles:[entry]});
- let response=await wake('fixture');assert.equal(response.status,200,await response.clone().text());assert.equal((await response.json()).ok,true);assert.equal(state().creates,1);assert.equal(state().starts,1);
+ let response=await wake('fixture');assert.equal(response.status,200,await response.clone().text());assert.equal((await response.json()).ok,true);assert.equal(state().creates,1);assert.equal(state().starts,1);assert.equal(state().panes[0].agent,process.env.MAW_TEST_WAKE_ENGINE||'codex','unconfigured wake engine');
  response=await wake('test-org/test-repo');assert.equal(response.status,200,await response.clone().text());assert.equal(state().creates,1);assert.equal(state().starts,1);
  save(stateFile,fresh());const concurrent=await Promise.all([wake('fixture'),wake('test-org/test-repo')]);for(const r of concurrent)assert.equal(r.status,200,await r.clone().text());assert.equal(state().creates,1);assert.equal(state().starts,1);
  save(stateFile,{...fresh(),ready:false});response=await wake('fixture');assert.notEqual(response.status,200,'failed readiness must not report success');assert.equal(state().creates,1);assert.equal(state().starts,1);

@@ -47,7 +47,7 @@ func TestWakeBackendExactPaneAndReadiness(t *testing.T) {
 	cwd, _ := json.Marshal(federationTempDir(t))
 	*snapshot = strings.Replace(*snapshot, `"agent":null`, `"agent":null,"cwd":`+string(cwd), 1)
 	old := b.run
-	response := `{"result":{"type":"agent_started","agent":{"pane_id":"wD:p9","agent":"claude","interactive_ready":true},"argv":[]}}`
+	response := `{"result":{"type":"agent_started","agent":{"pane_id":"wD:p9","agent":"codex","interactive_ready":true},"argv":[]}}`
 	b.run = func(ctx context.Context, args ...string) ([]byte, error) {
 		if len(args) > 3 && args[2] == "agent" && args[3] == "start" {
 			*calls = append(*calls, append([]string{}, args...))
@@ -69,10 +69,10 @@ func TestWakeBackendExactPaneAndReadiness(t *testing.T) {
 			argv = call
 		}
 	}
-	if len(argv) != 11 || !strings.HasPrefix(argv[4], "maw-") || len(argv[4]) != 20 || !reflect.DeepEqual(argv[:4], []string{"--session", "main", "agent", "start"}) || !reflect.DeepEqual(argv[5:], []string{"--kind", "claude", "--pane", "wD:p9", "--timeout", "8000"}) {
+	if len(argv) != 11 || !strings.HasPrefix(argv[4], "maw-") || len(argv[4]) != 20 || !reflect.DeepEqual(argv[:4], []string{"--session", "main", "agent", "start"}) || !reflect.DeepEqual(argv[5:], []string{"--kind", "codex", "--pane", "wD:p9", "--timeout", "8000"}) {
 		t.Fatal(argv)
 	}
-	for _, bad := range []string{`{}`, `{"error":"private"}`, `{"type":"agent_started","agent":{"pane_id":"other","agent":"claude","interactive_ready":true},"argv":[]}`, `{"type":"agent_started","agent":{"pane_id":"wD:p9","agent":"claude","interactive_ready":false},"argv":[]}`, `{"type":"agent_started","agent":{"pane_id":"wD:p9","agent":"claude","interactive_ready":true,"launch_pending":true},"argv":[]}`} {
+	for _, bad := range []string{`{}`, `{"error":"private"}`, `{"type":"agent_started","agent":{"pane_id":"other","agent":"codex","interactive_ready":true},"argv":[]}`, `{"type":"agent_started","agent":{"pane_id":"wD:p9","agent":"codex","interactive_ready":false},"argv":[]}`, `{"type":"agent_started","agent":{"pane_id":"wD:p9","agent":"codex","interactive_ready":true,"launch_pending":true},"argv":[]}`} {
 		response = bad
 		if _, err = b.Wake(context.Background(), "bWFpbg/d0Q:9"); err == nil {
 			t.Fatal("false readiness", bad)

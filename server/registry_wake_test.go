@@ -51,7 +51,7 @@ func TestRegistryWakeCreatesValidatesAndStarts(t *testing.T) {
 			return []byte(`{"type":"workspace_created","root_pane":{"pane_id":"w1:p1","workspace_id":"w1"},"workspace":{"workspace_id":"w1"},"tab":{}}`), nil
 		}
 		if args[2] == "agent" {
-			return []byte(`{"type":"agent_started","agent":{"pane_id":"w1:p1","agent":"claude","interactive_ready":true},"argv":[]}`), nil
+			return []byte(`{"type":"agent_started","agent":{"pane_id":"w1:p1","agent":"codex","interactive_ready":true},"argv":[]}`), nil
 		}
 		panes := []any{}
 		spaces := []any{}

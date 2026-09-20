@@ -16,7 +16,7 @@ export function readServeConfig(args: string[]): ServeConfig {
     if (!value || (key === '--engine' && inline.length)) throw new Error(`serve: invalid ${key}`);
     flags.set(key, value);
   }
-  const wakeEngine = flags.get('--wake-engine') || 'claude';
+  const wakeEngine = flags.get('--wake-engine') || 'codex';
   if (!['pi', 'claude', 'codex', 'gemini', 'cursor', 'devin', 'agy', 'cline', 'omp', 'mastracode', 'opencode', 'copilot', 'kimi', 'kiro', 'droid', 'amp', 'grok', 'hermes', 'kilo', 'qodercli', 'qwen', 'maki', 'muse'].includes(wakeEngine)) throw new Error('--wake-engine must be a supported Herdr agent kind');
   let listen = flags.get('--listen') || '127.0.0.1:3457';
   let token: string;
