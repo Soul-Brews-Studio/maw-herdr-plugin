@@ -77,7 +77,8 @@ try {
   for (const item of cases) {
     await get(item.path, item.value);
     const file = join(dataDir, item.file), saved = readFileSync(file);
-    for (const invalid of ['{"truncated":', 'null', '42', JSON.stringify(item.empty instanceof Array ? {} : []), JSON.stringify({ padding: 'x'.repeat(257 << 10) })]) {
+    // Exceed the 256 KiB state limit, not Bun's separate 257 KiB transport limit.
+    for (const invalid of ['{"truncated":', 'null', '42', JSON.stringify(item.empty instanceof Array ? {} : []), JSON.stringify({ padding: 'x'.repeat(256 << 10) })]) {
       const response = await request(item.path, 'POST', invalid);
       assert.ok(response.status >= 400 && response.status < 500, 'invalid POST rejected: ' + response.status);
       await response.text();
