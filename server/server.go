@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -28,6 +30,8 @@ type ticket struct {
 }
 
 type Server struct {
+	worktreeRoot       string
+	worktreeSlots      chan struct{}
 	observedRosterGate chan struct{}
 	observed           observedFeed
 	backend            Backend
@@ -68,6 +72,15 @@ func NewServer(config Config, backend Backend) (*Server, error) {
 		config.PollInterval = time.Second
 	}
 	s := &Server{backend: backend, config: config, tokenHash: sha256.Sum256([]byte(config.Token)), started: time.Now(), tickets: make(map[string]ticket)}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	s.worktreeRoot, err = filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return nil, err
+	}
+	s.worktreeSlots = make(chan struct{}, 8)
 	s.observedRosterGate = make(chan struct{}, 1)
 	s.context, s.cancel = context.WithCancel(context.Background())
 	s.sockets = make(chan struct{}, 32)

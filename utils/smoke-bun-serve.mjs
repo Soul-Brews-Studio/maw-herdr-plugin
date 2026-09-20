@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Actual source/bundled processes, isolated fake Herdr, no PATH tools or Go.
+// Actual source/bundled processes and isolated fake Herdr. Core needs no PATH tools; worktree fixtures explicitly require Git, never Go.
 import assert from 'node:assert/strict';
 import { createSocketSession } from '../src/serve/bun/mod.createSocketSession.ts';
 import { createHerdrBackend } from '../src/serve/bun/mod.createHerdrBackend.ts';
@@ -156,10 +156,10 @@ function deadline(promise, label, ms = 10000) {
   let timer;
   return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms); })]).finally(() => clearTimeout(timer));
 }
-async function start(entry, dataDir, enginePort) {
+async function start(entry, dataDir, enginePort, options = {}) {
   const args = enginePort ? ['--engine'] : ['--token-file', tokenFile, '--listen', '127.0.0.1:0'];
   const childEnv = enginePort ? {...env, MAW_SERVE_TOKEN:token, MAW_ENGINE_SERVE_PORT:String(enginePort), MAW_ENGINE_SERVE_PREFIX:'/api/herdr', PORT:String(enginePort)} : env;
-  const child = spawn(bun, [entry, 'serve', ...args, '--herdr', fake, '--data-dir', dataDir], { env:childEnv, cwd: temporary, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(bun, [entry, 'serve', ...args, '--herdr', fake, '--data-dir', dataDir], { env:{...childEnv,...options.env}, cwd: options.cwd || temporary, stdio: ['ignore', 'pipe', 'pipe'] });
   children.add(child);
   child.exited = new Promise((resolveExit, reject) => { child.once('exit', (code, signal) => resolveExit({code, signal})); child.once('error', reject); });
   let output = '';
@@ -258,6 +258,50 @@ async function exerciseTeams(url) {
   } finally { rmSync(claude,{recursive:true,force:true}); rmSync(failure,{force:true}); }
 }
 
+async function exerciseWorktrees(entry,label) {
+  const directory=join(temporary,label+'-worktrees');mkdirSync(directory);
+  const main=join(directory,'main'), clean=join(directory,'repo.wt-clean space_日本'), dirty=join(directory,'dirty'), untracked=join(directory,'untracked'), locked=join(directory,'locked'), active=join(directory,'active');
+  const outside=join(temporary,label+'-outside');
+  const gitEnv={...Object.fromEntries(Object.entries({...process.env,HOME:env.HOME}).filter(([key])=>!key.startsWith('GIT_'))),GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null'};
+  const git=(...args)=>{const result=spawnSync('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','user.name=Fixture','-c','user.email=fixture@example.invalid',...args],{env:gitEnv,encoding:'utf8',timeout:10000});assert.ifError(result.error);assert.equal(result.status,0,result.stderr);return result.stdout;};
+  mkdirSync(main);git('init','--initial-branch=main',main);writeFileSync(join(main,'tracked'),'original');git('-C',main,'add','tracked');git('-C',main,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-m','fixture');
+  for(const [index,path] of [clean,dirty,untracked,locked,active,outside].entries()) git('-C',main,'worktree','add','-b','branch'+index,path);
+  writeFileSync(join(dirty,'tracked'),'modified');writeFileSync(join(untracked,'loose'),'untracked');git('-C',main,'worktree','lock',locked);
+  const activeHerdr=join(directory,'herdr');
+  writeFileSync(activeHerdr,`#!${bun}
+const a=process.argv.slice(2);if(a[0]==='session')console.log(JSON.stringify({sessions:[{name:'main',running:true}]}));else console.log(JSON.stringify({protocol:22,workspaces:[{workspace_id:'w'}],panes:[{pane_id:'w:p1',workspace_id:'w',focused:true,agent_status:'unknown',cwd:${JSON.stringify(join(active,'subdir'))}}]}));
+`);chmodSync(activeHerdr,0o700);mkdirSync(join(active,'subdir'));
+  // A wrapper preserves the standard fixture executable argv while selecting a private roster.
+  const saved=readFileSync(fake);writeFileSync(fake,readFileSync(activeHerdr));
+  const {child,url}=await start(entry,join(directory,'data'),undefined,{cwd:main,env:{PATH:process.env.PATH,GIT_DIR:join(temporary,'wrong-git-dir'),GIT_WORK_TREE:outside}});
+  try {
+    const list=(await http(url,'/api/worktrees')).json;
+    assert.equal(list.length,7);assert.ok(list.every(row=>row.status==='stale'));
+    assert.deepEqual(list.find(row=>row.path===clean),{path:clean,branch:'branch0',repo:'repo.wt-clean space_日本',mainRepo:'main',name:'clean space_日本',status:'stale'});
+    await http(url,'/api/worktrees',{auth:false,status:401});await http(url,'/api/worktrees',{method:'POST',status:405});
+    await http(url,'/api/worktrees/cleanup',{status:405});await http(url,'/api/worktrees/cleanup',{method:'POST',auth:false,body:{path:clean},status:401});
+    const remove=path=>http(url,'/api/worktrees/cleanup',{method:'POST',body:{path},status:400});
+    const unregistered=join(directory,'unregistered');mkdirSync(unregistered);mkdirSync(join(unregistered,'.git'));
+    for(const path of [main,dirty,untracked,locked,active,outside,unregistered,join(directory,'..','escape'),main+'/../dirty',main+'/--bad',main+'\n']) {assert.equal((await remove(path)).json.error,'worktree_cleanup_rejected');}
+    assert.ok(existsSync(dirty)&&existsSync(untracked)&&existsSync(locked)&&existsSync(active));
+    writeFileSync(fake,`#!${bun}\nprocess.exit(7);\n`);await remove(clean);assert.ok(existsSync(clean));writeFileSync(fake,readFileSync(activeHerdr));
+    writeFileSync(fake,readFileSync(activeHerdr,'utf8').replace(JSON.stringify(join(active,'subdir')),JSON.stringify('relative/unknown')));await remove(clean);assert.ok(existsSync(clean));writeFileSync(fake,readFileSync(activeHerdr));
+    const removed=(await http(url,'/api/worktrees/cleanup',{method:'POST',body:{path:clean}})).json;
+    assert.equal(removed.ok,true);assert.equal(removed.path,clean);assert.ok(Array.isArray(removed.log));assert.equal(existsSync(clean),false);
+    assert.ok(git('-C',main,'branch','--list','branch0').includes('branch0'),'cleanup must not delete branches');
+    console.log(`PASS ${label} worktrees: real Git listing, spaces/non-ASCII, clean remove, dirty/untracked/locked/active/main/outside/unregistered/auth/env rejection`);
+  } finally {child.kill('SIGTERM');await deadline(child.exited,'worktree shutdown');children.delete(child);writeFileSync(fake,saved);}
+  const bin=join(directory,'bin');mkdirSync(bin);const gitFake=join(bin,'git');
+  writeFileSync(gitFake,`#!${bun}\nprocess.stdout.write(Array.from({length:129},(_,index)=>'worktree /tmp/fixture-'+index+'\\0HEAD a\\0\\0').join(''));\n`);chmodSync(gitFake,0o700);
+  const bounded=await start(entry,join(directory,'bounded'),undefined,{cwd:main,env:{PATH:bin}});
+  try {
+    assert.equal((await http(bounded.url,'/api/worktrees',{status:500})).json.error,'worktrees_unavailable');
+    writeFileSync(gitFake,`#!${bun}\nprocess.stdout.write('x'.repeat(4194305));setInterval(()=>{},1000);\n`);
+    assert.equal((await http(bounded.url,'/api/worktrees',{status:500})).json.error,'worktrees_unavailable');
+    console.log(`PASS ${label} worktrees: count/output bounds and sanitized subprocess failures`);
+  } finally {bounded.child.kill('SIGTERM');await deadline(bounded.child.exited,'bounded worktree shutdown');children.delete(bounded.child);}
+}
+
 async function exercise(entry, label) {
   const dataDir = join(temporary, label);
   const {child, url} = await start(entry, dataDir);
@@ -272,6 +316,7 @@ async function exercise(entry, label) {
   await http(url,'/api/wake',{method:'POST',body:{target,engine:'codex'},status:400});
   assert.equal((await http(url,'/api/wake',{method:'POST',body:{target,task:null,command:'ignored'}})).json.state,'already-awake');
   assert.deepEqual((await http(url, '/api/sessions')).json, sessions);
+  await http(url,'/api/worktrees',{status:500});
   assert.deepEqual((await http(url, '/api/capture?target=' + encodeURIComponent(target))).json, {content:'visible output\n',target,resolvedTarget:target});
   assert.deepEqual((await http(url, '/api/captures')).json, {captures:{[target]:'visible output\n',[shell]:'visible output\n'}});
   assert.deepEqual((await http(url, '/api/agents')).json,{node:'herdr',count:2,agents:[
@@ -438,12 +483,14 @@ try {
   }
   await exerciseEngine(join(root,'index.mjs'),'source');
   await exercise(join(root,'index.mjs'),'source');
+  await exerciseWorktrees(join(root,'index.mjs'),'source');
   const bundle = join(temporary,'index.js');
   const build = spawnSync(bun,['build',join(root,'index.mjs'),'--target=bun','--outfile',bundle],{env,encoding:'utf8',timeout:30000});
   assert.ifError(build.error); assert.equal(build.status,0,build.stderr);
   await exercise(bundle,'bundle');
+  await exerciseWorktrees(bundle,'bundle');
   await exerciseEngine(bundle,'bundle');
-  console.log(`PASS: ${checks} HTTP assertions; source and bundled default run without PATH tools or Go`);
+  console.log(`PASS: ${checks} HTTP assertions; source/bundle core needs no PATH tools; worktree fixtures use Git; no Go`);
 } finally {
   for (const ws of sockets) ws.close();
   for (const child of children) child.kill('SIGKILL');
