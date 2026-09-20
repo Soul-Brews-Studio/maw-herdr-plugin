@@ -299,6 +299,16 @@ Herdr panes. Removal uses ordinary `git worktree remove` without force, branch
 deletion, or a recursive-delete fallback; dirty and locked worktrees stay protected
 by Git. Missing worktree registrations are not pruned by this endpoint.
 
+### Dashboard state persistence
+
+`/api/ui-state` stores an object and `/api/asks` stores an array, surviving server
+restarts with the same `--data-dir`. To reuse compatible legacy files, explicitly
+point `--data-dir` at their existing directory; no automatic migration is performed.
+Each file is limited to 256 KiB. Missing files return empty defaults; corrupt,
+oversized, non-UTF-8, symlinked or nonregular files return an error rather than
+being silently reset. Rejected POST bodies leave the previous state unchanged.
+The configured directory is trusted; GET never follows the state-file leaf symlink.
+
 ### Layered dashboard configuration
 
 The server reads numbered `maw.config.<weight>.json` and

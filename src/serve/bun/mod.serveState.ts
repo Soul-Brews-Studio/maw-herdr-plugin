@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { HTTPError } from './serverTypes.ts';
@@ -15,7 +15,15 @@ export async function serveState(request: Request, pathname: string, directory: 
       fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const stat = fstatSync(fd);
       if (!stat.isFile() || stat.size > 256 << 10) throw new Error('invalid state file');
-      value = JSON.parse(readFileSync(fd, 'utf8'));
+      const bytes = Buffer.alloc((256 << 10) + 1);
+      let length = 0;
+      while (length < bytes.length) {
+        const count = readSync(fd, bytes, length, bytes.length - length, null);
+        if (!count) break;
+        length += count;
+      }
+      if (length > 256 << 10) throw new Error('invalid state file');
+      value = JSON.parse(new TextDecoder('utf-8', {fatal: true, ignoreBOM: true}).decode(bytes.subarray(0, length)));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return asks ? [] : {};
       throw new HTTPError(500, 'state_read_failed');

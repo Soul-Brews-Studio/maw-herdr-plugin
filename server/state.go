@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"unicode/utf8"
 )
 
 func (s *Server) serveState(w http.ResponseWriter, r *http.Request) {
@@ -24,8 +25,14 @@ func (s *Server) serveState(w http.ResponseWriter, r *http.Request) {
 	}
 	path := filepath.Join(s.config.DataDir, name)
 	if r.Method == "GET" {
-		data, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
+		// The configured directory may use platform aliases (e.g. /var on macOS).
+		// Canonicalize it, but never follow the state-file leaf itself.
+		directory, err := filepath.EvalSymlinks(s.config.DataDir)
+		var data []byte
+		if err == nil {
+			data, err = federationRead(filepath.Join(directory, name), 256<<10)
+		}
+		if os.IsNotExist(err) || (err == nil && data == nil) {
 			data, err = []byte(empty), nil
 		}
 		if err != nil || len(data) > 256<<10 || !validState(data, name) {
@@ -68,7 +75,7 @@ func (s *Server) serveState(w http.ResponseWriter, r *http.Request) {
 
 func validState(data []byte, name string) bool {
 	var value any
-	if json.Unmarshal(data, &value) != nil {
+	if !utf8.Valid(data) || json.Unmarshal(data, &value) != nil {
 		return false
 	}
 	if name == "asks.json" {

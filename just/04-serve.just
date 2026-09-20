@@ -14,6 +14,7 @@ bun-check:
     node utils/smoke-federation-serve.mjs
     bun utils/smoke-maw-config.ts
     node utils/smoke-config-serve.mjs
+    node utils/smoke-state-serve.mjs
     bun utils/smoke-registry-wake.ts
     node utils/smoke-registry-serve.mjs
     MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs
@@ -31,6 +32,7 @@ bun-check:
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-launch-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-wake-finalize.mjs
     MAW_CONFIG_ENTRY="$output/index.js" node utils/smoke-config-serve.mjs
+    MAW_STATE_ENTRY="$output/index.js" node utils/smoke-state-serve.mjs
     MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
@@ -50,6 +52,7 @@ check:
     bun utils/smoke-terminal-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-federation-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-config-serve.mjs "$output/maw-herdr-serve"
+    node utils/smoke-state-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-registry-serve.mjs "$output/maw-herdr-serve"
     MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs "$output/maw-herdr-serve"
     node utils/smoke-task-serve.mjs "$output/maw-herdr-serve"
@@ -61,6 +64,7 @@ check:
     node utils/smoke-federation-serve.mjs
     bun utils/smoke-maw-config.ts
     node utils/smoke-config-serve.mjs
+    node utils/smoke-state-serve.mjs
     bun utils/smoke-registry-wake.ts
     node utils/smoke-registry-serve.mjs
     MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs
@@ -78,6 +82,7 @@ check:
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-launch-serve.mjs
     MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-wake-finalize.mjs
     MAW_CONFIG_ENTRY="$output/index.js" node utils/smoke-config-serve.mjs
+    MAW_STATE_ENTRY="$output/index.js" node utils/smoke-state-serve.mjs
     MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
