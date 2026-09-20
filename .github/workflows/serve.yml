@@ -2,7 +2,7 @@ name: Herdr serve
 
 on:
   push:
-    branches: [main, feat/herdr-serve, feat/bun-herdr-serve]
+    branches: [main, feat/herdr-serve, feat/bun-herdr-serve, feat/herdr-terminal-stream]
   pull_request:
 
 permissions:
@@ -48,6 +48,10 @@ jobs:
           bun build index.mjs --target=bun --outfile "$RUNNER_TEMP/herdr-bun.js"
           node utils/smoke-serve-launcher.mjs
           bun utils/smoke-bun-serve.mjs
+          bun utils/smoke-terminal-serve.mjs
+          MAW_TERMINAL_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-terminal-serve.mjs
+          bun utils/smoke-terminal-limits.ts
+          bun utils/smoke-terminal-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
       - name: Build source-independent native plugin package
         run: |
           node --check utils/package-serve.mjs

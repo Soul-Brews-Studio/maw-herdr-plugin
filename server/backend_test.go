@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"reflect"
 	"strconv"
 	"strings"
@@ -311,5 +312,14 @@ func TestBackendCaptureBatchDeadline(t *testing.T) {
 	got, err := b.CaptureBatch(ctx, map[string]int{"bWFpbg/d0Q:4": 80, "bWFpbg/d0Q:9": 80})
 	if !errors.Is(err, context.DeadlineExceeded) || got != nil {
 		t.Fatalf("got=%v err=%v", got, err)
+	}
+}
+
+func TestLimitedOutputCopyCannotBypassLimit(t *testing.T) {
+	out := &limitedOutput{limit: 3}
+	// Hide strings.Reader.WriteTo so io.Copy exercises destination ReadFrom.
+	_, err := io.Copy(out, struct{ io.Reader }{strings.NewReader("four")})
+	if err == nil || out.Len() > 3 {
+		t.Fatalf("io.Copy bypassed limit: %d %v", out.Len(), err)
 	}
 }

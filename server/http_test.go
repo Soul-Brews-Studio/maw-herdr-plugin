@@ -252,13 +252,13 @@ func TestTicketShapeAndValidation(t *testing.T) {
 	if w.Code != 200 || w.Header().Get("Cache-Control") != "no-store" || len(value) != 2 || value["protocol"] != protocol || len(value["ticket"]) != 69 || !strings.HasPrefix(value["ticket"], "mwt1_") {
 		t.Fatal(w.Code, w.Body)
 	}
-	if s.consumeTicket(value["ticket"], "http://localhost") {
+	if s.consumeTicket(value["ticket"], "http://localhost", "/ws") {
 		t.Fatal("wrong origin accepted")
 	}
-	if !s.consumeTicket(value["ticket"], h["Origin"]) || s.consumeTicket(value["ticket"], h["Origin"]) {
+	if !s.consumeTicket(value["ticket"], h["Origin"], "/ws") || s.consumeTicket(value["ticket"], h["Origin"], "/ws") {
 		t.Fatal("not one-use")
 	}
-	for _, body := range []string{`{"path":"/ws/pty"}`, `{"path":"/ws","extra":1}`, `{}`, `null`, strings.Repeat(" ", 128) + `{"path":"/ws"}`} {
+	for _, body := range []string{`{"path":"/ws/tmux"}`, `{"path":"/ws","extra":1}`, `{}`, `null`, strings.Repeat(" ", 128) + `{"path":"/ws"}`} {
 		if w := request(s, "POST", "/api/auth/ws-ticket", body, h); w.Code != 400 {
 			t.Fatal(w.Code, w.Body)
 		}

@@ -76,8 +76,18 @@ be replaced using `maw-go plugin install HTTPS_TARBALL --backup`, not Git update
 
 Open <https://god.buildwithoracle.com/>, select `http://127.0.0.1:3457`, then supply
 the operator token. Authentication is mandatory even on loopback. Browser local
-network policy may require permission. This is the standalone core dashboard
-contract, **not full `maw serve` parity**: no lifecycle controls, PTY, federation,
+network policy may require permission. After initial connection failures, the
+**Operator token** field appears; paste the token and select **Authenticate**.
+On macOS, `pbcopy < "$HOME/.maw-herdr-token"` copies it without printing it.
+A direct unauthenticated API visit returning `operator_token_required` is expected.
+
+Both Bun and native servers support the dashboard interactive terminal (`/ws/pty`):
+attach to an existing Herdr pane, binary ANSI output and keyboard input, and resize.
+This uses Herdr 0.9.0 terminal streams, not tmux or a separately spawned shell.
+Closing the browser detaches the stream; it does not close the underlying pane.
+An existing controller is never forcibly taken over.
+
+This remains **not full `maw serve` parity**: no lifecycle controls, federation,
 configuration mutation, or queue/inbox delivery. Acceptance is not completion.
 Non-loopback binds are rejected; public deployment is not automated.
 

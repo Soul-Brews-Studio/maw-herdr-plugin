@@ -102,7 +102,7 @@ func (s *Server) mintTicket(w http.ResponseWriter, r *http.Request, origin strin
 	if !decodeJSON(w, r, &body, 128) {
 		return
 	}
-	if body.Path != "/ws" {
+	if body.Path != "/ws" && body.Path != "/ws/pty" {
 		fail(w, 400, "ticket_path_invalid")
 		return
 	}
@@ -124,15 +124,15 @@ func (s *Server) mintTicket(w http.ResponseWriter, r *http.Request, origin strin
 		fail(w, 429, "too_many_tickets")
 		return
 	}
-	s.tickets[value] = ticket{origin: origin, expires: now.Add(30 * time.Second)}
+	s.tickets[value] = ticket{origin: origin, path: body.Path, expires: now.Add(30 * time.Second)}
 	writeJSON(w, 200, map[string]string{"protocol": protocol, "ticket": value})
 }
 
-func (s *Server) consumeTicket(value, origin string) bool {
+func (s *Server) consumeTicket(value, origin, path string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.tickets[value]
-	if !ok || t.origin != origin || !t.expires.After(time.Now()) {
+	if !ok || t.path != path || t.origin != origin || !t.expires.After(time.Now()) {
 		return false
 	}
 	delete(s.tickets, value)
