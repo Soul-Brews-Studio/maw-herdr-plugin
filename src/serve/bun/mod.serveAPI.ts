@@ -21,8 +21,9 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
       let body;
       try { body = validateCommand(await readJSON(request, 64 << 10, signal)); }
       catch (error) { if (error instanceof HTTPError) throw error; throw new HTTPError(400, 'invalid_json'); }
+      if (body.attachments?.length) body.text = [...body.attachments, body.text ?? ''].join('\n');
       if (!body.target || !body.text) throw new HTTPError(400, 'target_and_text_required');
-      if (body.force || body.inbox || body.attachments?.length) throw new HTTPError(501, 'send_options_not_supported');
+      if (body.force || body.inbox) throw new HTTPError(501, 'send_options_not_supported');
       await backend.send(body.target, body.text, signal);
       return { ok: true, target: body.target, text: body.text, source: 'local', lastLine: '', state: 'accepted', receipt: ['herdr agent prompt accepted'],
         warning: 'Acceptance is not proof the agent consumed or completed this prompt; queue/inbox delivery is not implemented.' };
