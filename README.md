@@ -763,3 +763,5 @@ are not sandboxed; local configuration remains trusted.
 Fleet files are bounded and unsafe/symlinked or malformed files fail closed rather
 than being overwritten. Writes use atomic replacement; these are deliberate safety
 differences from legacy behavior. No legacy squad migration is performed.
+Wake writes are serialized within one server, not locked across independent server
+processes; avoid concurrent fleet writers targeting the same files.
