@@ -97,10 +97,27 @@ Wake an existing pane through the dashboard or `POST /api/wake` with its canonic
 choose another supported kind at startup (for example `--wake-engine codex`).
 Already-detected agents are left running. A successful new launch means Herdr
 verified interactive readiness, not completion of a task. Browser-supplied command
-strings are never executed. Registry aliases, new-workspace wake and nonempty
-`task`/worktree wake are not implemented by the server yet.
+strings are never executed.
 
-This remains **not full `maw serve` parity**: no other lifecycle controls, federation,
+The server also accepts exact registered oracle names or `org/repo` targets from
+`MAW_ORACLES_JSON` (otherwise `~/.maw/oracles.json`). The registry uses
+`{"oracles":[{"name":"neo","org":"example","repo":"neo-oracle","local_path":"/absolute/checkout"}]}`.
+It selects a running `default` Herdr session, or the sole running session; an
+ambiguous session or registry match fails without creating a workspace. The
+checkout must exist with a `.git` file/directory. No clone, `maw locate`, implicit
+daemon, browser shell command or label-only reuse occurs.
+
+Within the selected session, one matching canonical pane cwd is reused; multiple
+matching panes are rejected. Otherwise a no-focus workspace is created, its pane
+identity/cwd revalidated, and agent readiness checked. Concurrent wake requests
+are serialized (at most eight accepted). A failed start may leave its newly
+created shell workspace for inspection/retry; the server does not delete it.
+Registry reads are bounded to 1 MiB/1,024 entries and reject unsafe file paths.
+
+Nonempty `task`/worktree wake, repository-configured launch commands, fleet registry
+updates and post-wake hooks remain unfinished; tracked in issue #31.
+
+This remains **not full `maw serve` parity**: no other lifecycle controls, inbound federation pairing,
 configuration mutation, or queue/inbox delivery. Acceptance is not completion.
 Non-loopback binds are rejected; public deployment is not automated.
 

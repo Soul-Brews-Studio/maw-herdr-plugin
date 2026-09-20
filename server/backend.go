@@ -20,17 +20,18 @@ var ErrNotAgent = errors.New("target is not an agent pane")
 
 // HerdrBackend never invokes a shell. Each operation resolves the current roster.
 type HerdrBackend struct {
-	wakeSlots  chan struct{}
-	wakeEngine string
-	binary     string
-	run        func(context.Context, ...string) ([]byte, error)
+	wakeSlots        chan struct{}
+	registryWakeGate chan struct{}
+	wakeEngine       string
+	binary           string
+	run              func(context.Context, ...string) ([]byte, error)
 }
 
 func NewHerdrBackend(binary string) *HerdrBackend {
 	if binary == "" {
 		binary = "herdr"
 	}
-	b := &HerdrBackend{binary: binary, wakeSlots: make(chan struct{}, 8)}
+	b := &HerdrBackend{binary: binary, wakeSlots: make(chan struct{}, 8), registryWakeGate: make(chan struct{}, 1)}
 	b.run = b.command
 	return b
 }
@@ -85,6 +86,7 @@ type backendTarget struct {
 	pane    backendPane
 }
 type backendRoster struct {
+	running  []string
 	sessions []Session
 	targets  map[string]backendTarget
 }
@@ -138,6 +140,7 @@ func (b *HerdrBackend) roster(ctx context.Context) (backendRoster, error) {
 		if !*server.Running {
 			continue
 		}
+		result.running = append(result.running, server.Name)
 		raw, err = b.run(ctx, "--session", server.Name, "api", "snapshot")
 		if err != nil {
 			return result, err
