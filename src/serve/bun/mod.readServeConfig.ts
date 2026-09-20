@@ -8,13 +8,15 @@ export function readServeConfig(args: string[]): ServeConfig {
   const flags = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
     const [key, ...inline] = args[i].split('=');
-    if (!['--engine', '--listen', '--token-file', '--herdr', '--data-dir'].includes(key) || flags.has(key)) {
+    if (!['--engine', '--listen', '--token-file', '--herdr', '--data-dir', '--wake-engine'].includes(key) || flags.has(key)) {
       throw new Error(`serve: unknown or duplicate option ${key}`);
     }
     const value = key === '--engine' ? 'true' : inline.length ? inline.join('=') : args[++i];
     if (!value || (key === '--engine' && inline.length)) throw new Error(`serve: invalid ${key}`);
     flags.set(key, value);
   }
+  const wakeEngine = flags.get('--wake-engine') || 'claude';
+  if (!['pi', 'claude', 'codex', 'gemini', 'cursor', 'devin', 'agy', 'cline', 'omp', 'mastracode', 'opencode', 'copilot', 'kimi', 'kiro', 'droid', 'amp', 'grok', 'hermes', 'kilo', 'qodercli', 'qwen', 'maki', 'muse'].includes(wakeEngine)) throw new Error('--wake-engine must be a supported Herdr agent kind');
   let listen = flags.get('--listen') || '127.0.0.1:3457';
   let token: string;
   const engine = flags.has('--engine');
@@ -46,6 +48,6 @@ export function readServeConfig(args: string[]): ServeConfig {
     throw new Error('--listen must use a loopback IP or localhost and port');
   }
   const configHome = process.platform === 'darwin' ? join(homedir(), 'Library', 'Application Support') : process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return { hostname: match[1] || match[2], port: Number(match[3]), token, engine, node: 'herdr',
+  return { hostname: match[1] || match[2], port: Number(match[3]), token, engine, wakeEngine, node: 'herdr',
     binary: flags.get('--herdr') || 'herdr', dataDir: flags.get('--data-dir') || join(configHome, 'maw-herdr', 'serve') };
 }

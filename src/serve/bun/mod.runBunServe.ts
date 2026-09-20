@@ -15,7 +15,7 @@ export async function runBunServe(args: string[]): Promise<number> {
   const config = readServeConfig(args);
   const tokenHash = createHash('sha256').update(config.token).digest();
   config.token = '';
-  const backend = createHerdrBackend(config.binary);
+  const backend = createHerdrBackend(config.binary, config.wakeEngine);
   const shutdown = new AbortController();
   const started = Date.now();
   const tickets = new Map<string, { origin: string; path: string; expires: number }>();
@@ -60,7 +60,7 @@ export async function runBunServe(args: string[]): Promise<number> {
             return new Response(null, { status: 204, headers });
           }
         }
-        const allowed = path === '/api/auth/ws-ticket' || path === '/api/send' ? ['POST'] : ['/api/asks', '/api/ui-state'].includes(path) ? ['GET', 'POST'] : ['GET'];
+        const allowed = path === '/api/auth/ws-ticket' || path === '/api/send' || path === '/api/wake' ? ['POST'] : ['/api/asks', '/api/ui-state'].includes(path) ? ['GET', 'POST'] : ['GET'];
         const methodError = () => { headers.set('Allow', allowed.join(', ')); return failure(405, 'method_not_allowed'); };
         if (path === '/ws' || path === '/ws/pty') {
           if (request.method !== 'GET') return methodError();

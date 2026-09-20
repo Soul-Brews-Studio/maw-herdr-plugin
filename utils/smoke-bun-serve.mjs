@@ -38,6 +38,7 @@ if (existsSync(${JSON.stringify(failure)})) { console.error('fixture unavailable
 if (JSON.stringify(args) === JSON.stringify(['session','list','--json'])) console.log(JSON.stringify({sessions:[{name:'main',running:true},{name:'stopped',running:false}]}));
 else if (args[2] === 'api') console.log(JSON.stringify({result:{snapshot:{protocol:22,workspaces:[{workspace_id:'wD',label:'demo'}],panes:[{pane_id:'wD:p4',workspace_id:'wD',agent:'codex',focused:true,agent_status:'idle',cwd:'/tmp'},{pane_id:'wD:p9',workspace_id:'wD',agent:null,focused:false,agent_status:'unknown'}]}}}));
 else if (args[2] === 'pane') process.stdout.write('visible output\\n');
+else if (args[2] === 'agent' && args[3] === 'start') console.log(JSON.stringify({result:{type:'agent_started',argv:['claude'],agent:{pane_id:'wD:p9',agent:'claude',interactive_ready:true}}}));
 else if (args[2] === 'agent') console.log('{"ok":true}');
 else { console.error('unexpected args', args); process.exit(8); }
 `);
@@ -95,6 +96,14 @@ async function exercise(entry, label) {
   const dataDir = join(temporary, label);
   const {child, url} = await start(entry, dataDir);
   const origin = { Origin: url };
+  assert.equal((await http(url,'/api/wake',{method:'POST',body:{target}})).json.state,'already-awake');
+  assert.equal((await http(url,'/api/wake',{method:'POST',body:{target:shell}})).json.state,'ready');
+  await http(url,'/api/wake',{method:'POST',body:{target:shell,task:'new-worktree'},status:501});
+  await http(url,'/api/wake',{method:'POST',body:{target:'missing'},status:404});
+  await http(url,'/api/wake',{status:405});
+  await http(url,'/api/wake',{method:'POST',body:{target,command:123},status:400});
+  await http(url,'/api/wake',{method:'POST',body:{target,engine:'codex'},status:400});
+  assert.equal((await http(url,'/api/wake',{method:'POST',body:{target,task:null,command:'ignored'}})).json.state,'already-awake');
   assert.deepEqual((await http(url, '/api/sessions')).json, sessions);
   assert.deepEqual((await http(url, '/api/capture?target=' + encodeURIComponent(target))).json, {content:'visible output\n',target,resolvedTarget:target});
   assert.deepEqual((await http(url, '/api/captures')).json, {captures:{[target]:'visible output\n',[shell]:'visible output\n'}});
@@ -105,7 +114,7 @@ async function exercise(entry, label) {
   assert.deepEqual((await http(url, '/api/agent')).json, (await http(url, '/api/agents')).json);
   assert.deepEqual((await http(url, '/api/config')).json, {node:'herdr',agents:{},namedPeers:[]});
   const identity = (await http(url, '/api/identity')).json;
-  assert.deepEqual(identity.endpoints, ['/api/sessions','/api/capture','/api/send','/ws','/ws/pty']);
+  assert.deepEqual(identity.endpoints, ['/api/sessions','/api/capture','/api/send','/api/wake','/ws','/ws/pty']);
   assert.ok(identity.capabilities.includes('dashboard-ws') && identity.capabilities.includes('terminal-stream'));
   for (const [path, empty, value, invalid] of [['/api/ui-state',{}, {selected:target}, []], ['/api/asks',[],[{text:'hello'}],{}]]) {
     assert.deepEqual((await http(url,path)).json,empty);
@@ -154,6 +163,10 @@ async function exercise(entry, label) {
   assert.deepEqual(await ws.next(),{type:'sessions',sessions});
   assert.equal((await ws.next()).type,'recent');
   await http(url,'/ws',{auth:false,headers:{...origin,'Sec-WebSocket-Protocol':`maw.ws.v1, ${ticket.ticket}`},status:401});
+  ws.send(JSON.stringify({type:'wake',target:shell,command:''}));
+  assert.deepEqual(await ws.next(),{type:'action-ok',action:'wake',target:shell});
+  ws.send(JSON.stringify({type:'wake',target:shell,command:'must-not-execute'}));
+  assert.deepEqual(await ws.next(),{type:'error',error:'wake_command_not_supported'});
   ws.send(JSON.stringify({type:'select',target}));
   assert.deepEqual(await ws.next(),{type:'capture',target,content:'visible output\n'});
   ws.send(JSON.stringify({type:'subscribe-previews',targets:[shell]}));
@@ -193,7 +206,7 @@ async function exerciseEngine(entry, label) {
   await new Promise((done, fail) => reservation.close(error => error ? fail(error) : done()));
   const {child,url} = await start(entry,join(temporary,label+'-engine'),port);
   assert.deepEqual((await http(url,'/api/herdr/sessions',{auth:false})).json,sessions);
-  assert.deepEqual((await http(url,'/api/herdr',{auth:false})).json.endpoints,['/api/herdr/sessions','/api/herdr/capture','/api/herdr/send','/api/herdr/ws','/api/herdr/ws/pty']);
+  assert.deepEqual((await http(url,'/api/herdr',{auth:false})).json.endpoints,['/api/herdr/sessions','/api/herdr/capture','/api/herdr/send','/api/herdr/wake','/api/herdr/ws','/api/herdr/ws/pty']);
   await http(url,'/api/sessions',{auth:false,status:404});
   await http(url,'/api/herdrish/sessions',{auth:false,status:404});
   await http(url,'/api/herdr/auth/ws-ticket',{auth:false,status:501});

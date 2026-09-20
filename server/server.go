@@ -12,6 +12,7 @@ import (
 const protocol = "maw.ws.v1"
 
 type Config struct {
+	WakeEngine   string
 	Engine       bool
 	Prefix       string
 	Token        string
@@ -48,6 +49,15 @@ func NewServer(config Config, backend Backend) (*Server, error) {
 	}
 	if backend == nil {
 		return nil, errors.New("backend required")
+	}
+	if config.WakeEngine == "" {
+		config.WakeEngine = "claude"
+	}
+	if !validWakeEngine(config.WakeEngine) {
+		return nil, errors.New("invalid wake engine")
+	}
+	if b, ok := backend.(*HerdrBackend); ok {
+		b.wakeEngine = config.WakeEngine
 	}
 	if config.Node == "" {
 		config.Node = "herdr"

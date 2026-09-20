@@ -66,6 +66,12 @@ export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Ba
         if ((body.targets?.length || 0) > 16) { error('too_many_previews'); return; }
         if (body.targets?.some(target => !target || Buffer.byteLength(target) > 1024)) { error('subscription_invalid'); return; }
         previews = new Map((body.targets || []).map(target => [target, ''])); previewSent.clear(); await capture(); return;
+      case 'wake':
+        if (!body.target || Buffer.byteLength(body.target) > 1024) { error('target_required'); return; }
+        if (body.command?.length) { error('wake_command_not_supported'); return; }
+        try { await backend.wake(body.target, signal); }
+        catch { error('wake_failed'); return; }
+        write({ type: 'action-ok', action: 'wake', target: body.target }); return;
       case 'send':
         if (!body.target || !body.text) { error('target_and_text_required'); return; }
         if (body.force || body.inbox || body.attachments?.length) { error('send_options_not_supported'); return; }

@@ -60,6 +60,14 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		s.serveState(w, r)
 		return
 	}
+	if r.URL.Path == "/api/wake" {
+		if r.Method != "POST" {
+			methodNotAllowed(w, "POST")
+			return
+		}
+		s.serveWake(w, r)
+		return
+	}
 	if r.URL.Path == "/api/send" {
 		if r.Method != "POST" {
 			methodNotAllowed(w, "POST")
@@ -132,11 +140,11 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, map[string]any{"agents": agents, "count": len(agents), "node": s.config.Node})
 	case "/api/identity":
-		endpoints := []string{"/api/sessions", "/api/capture", "/api/send", "/ws", "/ws/pty"}
+		endpoints := []string{"/api/sessions", "/api/capture", "/api/send", "/api/wake", "/ws", "/ws/pty"}
 		if s.config.Engine {
-			endpoints = []string{s.config.Prefix + "/sessions", s.config.Prefix + "/capture", s.config.Prefix + "/send", s.config.Prefix + "/ws", s.config.Prefix + "/ws/pty"}
+			endpoints = []string{s.config.Prefix + "/sessions", s.config.Prefix + "/capture", s.config.Prefix + "/send", s.config.Prefix + "/wake", s.config.Prefix + "/ws", s.config.Prefix + "/ws/pty"}
 		}
-		writeJSON(w, 200, map[string]any{"version": "herdr-core-dev", "node": s.config.Node, "host": "localhost", "agents": []string{}, "uptime": int(time.Since(s.started).Seconds()), "clockUtc": time.Now().UTC().Format(time.RFC3339), "endpoints": endpoints, "capabilities": []string{"sessions", "capture", "agent-prompt", "dashboard-ws", "terminal-stream"}})
+		writeJSON(w, 200, map[string]any{"version": "herdr-core-dev", "node": s.config.Node, "host": "localhost", "agents": []string{}, "uptime": int(time.Since(s.started).Seconds()), "clockUtc": time.Now().UTC().Format(time.RFC3339), "endpoints": endpoints, "capabilities": []string{"sessions", "capture", "agent-prompt", "dashboard-ws", "terminal-stream", "existing-pane-wake"}})
 	case "/api/config":
 		if r.URL.RawQuery != "" || r.URL.ForceQuery {
 			fail(w, 400, "config_query_not_supported")
