@@ -1,4 +1,5 @@
 export interface ServeConfig {
+  worktreeRoot: string;
   hostname: string;
   port: number;
   token: string;

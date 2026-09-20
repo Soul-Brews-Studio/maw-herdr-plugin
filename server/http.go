@@ -57,6 +57,10 @@ func backendFailure(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/worktrees" || r.URL.Path == "/api/worktrees/cleanup" {
+		s.serveWorktrees(w, r)
+		return
+	}
 	if r.URL.Path == "/api/ui-state" || r.URL.Path == "/api/asks" {
 		s.serveState(w, r)
 		return

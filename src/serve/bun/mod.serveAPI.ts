@@ -1,3 +1,4 @@
+import { serveWorktrees } from './mod.serveWorktrees.ts';
 import type { Backend } from './types.ts';
 import { HTTPError, type ServeConfig } from './serverTypes.ts';
 import { readJSON } from './mod.readJSON.ts';
@@ -7,6 +8,7 @@ import { serveState } from './mod.serveState.ts';
 export async function serveAPI(request: Request, path: string, config: ServeConfig, backend: Backend, started: number, signal: AbortSignal): Promise<unknown> {
   if (path === '/api/ui-state' || path === '/api/asks') return serveState(request, path, config.dataDir, signal);
   switch (path) {
+    case '/api/worktrees': case '/api/worktrees/cleanup': return serveWorktrees(request, path, config.worktreeRoot, backend, signal);
     case '/api/wake': {
       const body = await readJSON(request, 64 << 10, signal);
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.entries(body).some(([key, value]) => !['target', 'task', 'command'].includes(key) || (value !== null && typeof value !== 'string'))) throw new HTTPError(400, 'invalid_json');

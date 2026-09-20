@@ -225,6 +225,17 @@ The legacy `alive` flag includes a two-hour recent-local-member heuristic, **not
 proof that a process is running**. Existing tmux pane IDs are not translated into
 Herdr pane IDs. Exact Herdr-to-team runtime association remains unimplemented.
 
+`GET /api/worktrees` lists Git worktrees for the server's startup working
+directory. Start `serve` from the repository you intend to manage; the endpoint
+does not scan every Herdr workspace. Legacy `stale` labels do not prove inactivity,
+and an `orphan` registration is not necessarily removable.
+
+Authenticated `POST /api/worktrees/cleanup` accepts a registered absolute path
+near that root. It refuses the main/current checkout and worktrees used by live
+Herdr panes. Removal uses ordinary `git worktree remove` without force, branch
+deletion, or a recursive-delete fallback; dirty and locked worktrees stay protected
+by Git. Missing worktree registrations are not pruned by this endpoint.
+
 Workspace targets use opaque base64url session/workspace IDs and stable pane
 numbers, not list positions. Do not save them across daemon resets that reuse
 IDs. Capture reads only the visible screen. HTTP sending is agent-only, reports

@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import { BackendError } from "./types.ts";
 
 // No shell, inherited terminal input, or stderr content enters the response.
-export function runHerdr(binary: string, args: string[], signal: AbortSignal): Promise<string> {
+export function runHerdr(binary: string, args: string[], signal: AbortSignal, env?: NodeJS.ProcessEnv): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new BackendError("backend_error", "herdr operation aborted")); return; }
-    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"], env, detached: process.platform !== "win32" });
     const chunks: Buffer[] = [];
     let stdoutBytes = 0, stderrBytes = 0;
     let failure: Error | undefined;
