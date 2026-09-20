@@ -413,7 +413,16 @@ exclusive atomic publication, never replacing an existing message. Child
 `ψ/inbox` symlinks are rejected. Repository directories are operator-trusted,
 not a sandbox against concurrent hostile directory replacement. Sender attribution
 is display metadata, not a verified signature. Queued does not mean consumed;
-legacy signed-request deduplication and lifecycle-feed integration remain pending.
+timestamped retries can share a process-local delivery receipt. `X-Maw-Timestamp`
+(or `X-Maw-Signed-At`) plus sender, canonical target and combined message identifies
+retries; requests without a timestamp are independent. Duplicate responses include
+`deduped: true` and `duplicate_dropped`. An in-flight duplicate reports `queued`,
+not successful publication. Failed claims are released for retry; completed
+receipts expire after 24 hours. The 2,048-entry store rejects new timestamped claims
+at capacity rather than evicting active receipts, and resets on server restart.
+These headers are metadata under operator-token authentication, not signature
+verification. This is not a durable exactly-once guarantee. Signed federation
+verification and lifecycle-feed integration remain pending.
 
 WebSocket `send` instead types literal text into
 any pane, adding Enter only for `force: true`. There are at most 16 live preview targets per

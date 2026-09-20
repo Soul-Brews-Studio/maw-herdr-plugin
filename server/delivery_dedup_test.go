@@ -15,6 +15,12 @@ func TestDeliveryDedupLifecycle(t *testing.T) {
 	if !ok {
 		t.Fatal("key")
 	}
+	for _, parts := range [][4]string{{"other", "target", "1", "message"}, {"sender", "other", "1", "message"}, {"sender", "target", "2", "message"}, {"sender", "target", "1", "other"}} {
+		different, _ := deliveryKey(parts[0], parts[1], parts[2], parts[3])
+		if different == key {
+			t.Fatal("key collision", parts)
+		}
+	}
 	if _, ok := deliveryKey("sender", "target", "", "message"); ok {
 		t.Fatal("missing timestamp deduped")
 	}
@@ -72,5 +78,41 @@ func TestDeliveryDedupConcurrentAndBounded(t *testing.T) {
 	overflow, _ := deliveryKey("s", "t", "overflow", "p")
 	if _, _, err := d.claim(overflow, now.Add(48*time.Hour)); err != errDeliveryDedupFull {
 		t.Fatal("in-flight claims evicted", err)
+	}
+}
+
+func TestHTTPDeliveryDedup(t *testing.T) {
+	s, b := testServer(t)
+	headers := map[string]string{"X-Maw-Timestamp": "fixture-1", "X-Maw-From": "sender:node"}
+	body := `{"target":"default/w1:1","text":"once"}`
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := request(s, "POST", "/api/send", body, headers)
+			if w.Code != 200 {
+				t.Errorf("%d %s", w.Code, w.Body)
+			}
+		}()
+	}
+	wg.Wait()
+	if b.sends != 1 {
+		t.Fatal("duplicate dispatch", b.sends)
+	}
+	for i := 0; i < 2; i++ {
+		if w := request(s, "POST", "/api/send", body, nil); w.Code != 200 {
+			t.Fatal(w.Code)
+		}
+	}
+	if b.sends != 3 {
+		t.Fatal("untimestamped dispatch", b.sends)
+	}
+	headers["X-Maw-Timestamp"] = "fixture-2"
+	if w := request(s, "POST", "/api/send", body, headers); w.Code != 200 {
+		t.Fatal(w.Code)
+	}
+	if b.sends != 4 {
+		t.Fatal("new logical timestamp", b.sends)
 	}
 }
