@@ -1,6 +1,16 @@
 # Server development checks are isolated; install explicitly updates local plugins.
 set working-directory := '../server'
 
+# Fast Bun-only build and isolated runtime smoke; no Go compiler required.
+bun-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd ..
+    output=$(mktemp -d "${TMPDIR:-/tmp}/maw-herdr-bun.XXXXXX")
+    trap 'rm -rf "$output"' EXIT
+    bun build index.mjs --target=bun --outfile "$output/index.js"
+    bun utils/smoke-bun-serve.mjs
+
 # Compile first, then run API tests and static checks.
 check:
     #!/usr/bin/env bash
@@ -10,6 +20,10 @@ check:
     GOWORK=off go build -o "$output/maw-herdr-serve" .
     GOWORK=off go test ./...
     GOWORK=off go vet ./...
+    cd ..
+    bun build index.mjs --target=bun --outfile "$output/index.js"
+    node utils/smoke-serve-launcher.mjs
+    bun utils/smoke-bun-serve.mjs
 
 # Build an installable native package; normal installed use does not need Go.
 install:

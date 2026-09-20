@@ -21,7 +21,7 @@
   },
   "engine": {
     "serve": {
-      "command": "./bin/maw-herdr-serve --engine",
+      "command": "bun index.mjs serve --engine",
       "prefix": "/api/herdr",
       "health": "/health"
     }

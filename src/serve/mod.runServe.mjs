@@ -8,21 +8,39 @@ import { dirname, join, resolve, sep } from 'node:path';
 export async function runServe(args) {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`maw herdr serve --token-file PATH [--listen 127.0.0.1:3457]
-                [--herdr PATH] [--data-dir PATH] [--build]
+                [--herdr PATH] [--data-dir PATH] [--runtime bun|native] [--build]
 
 Core dashboard API: sessions, live pane output and prompt submission.
 The token file is required, including on loopback. Help needs no Go or Herdr.
-Uses the checksum-pinned bin/maw-herdr-serve from a prebuilt plugin package.
-No Go compiler is required for packaged installs. Source developers may use
---build to compile into a user cache, or MAW_HERDR_SERVE_BIN for an explicit binary.
-Host-managed serving uses engine.serve (native --engine), not this launcher's build mode.`);
+Defaults to the TypeScript server in Bun: no Go compiler or native package needed.
+--runtime native uses the checksum-pinned helper from a native plugin package.
+--build explicitly selects/builds the native Go source into a user cache.
+MAW_HERDR_SERVE_BIN explicitly selects another native helper or runtime wrapper.
+Host-managed serving is declared separately by plugin.json engine.serve.`);
     return 0;
   }
+  let runtime;
+  const forwarded = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--runtime' || args[i].startsWith('--runtime=')) {
+      if (runtime !== undefined) throw new Error('serve: duplicate --runtime');
+      runtime = args[i] === '--runtime' ? args[++i] : args[i].slice('--runtime='.length);
+      if (!['bun', 'native'].includes(runtime)) throw new Error('serve: --runtime must be bun or native');
+    } else forwarded.push(args[i]);
+  }
+  args = forwarded;
   const build = args.includes('--build');
+  const supplied = process.env.MAW_HERDR_SERVE_BIN;
+  if (runtime === 'bun' && (build || supplied)) throw new Error('serve: --runtime bun cannot be combined with --build or MAW_HERDR_SERVE_BIN');
+  runtime ??= build || supplied ? 'native' : 'bun';
+  if (runtime === 'bun') {
+    if (!process.versions.bun) throw new Error('serve: the TypeScript server requires Bun; use bun index.mjs serve');
+    const { runBunServe } = await import('./bun/mod.runBunServe.ts');
+    return runBunServe(args);
+  }
   if (build && args.includes('--engine')) throw new Error('serve: engine startup cannot build; install a prebuilt package');
   args = args.filter(arg => arg !== '--build');
   const root = dirname(realpathSync(process.argv[1]));
-  const supplied = process.env.MAW_HERDR_SERVE_BIN;
   let binary = supplied ? resolve(supplied) : join(root, 'bin', 'maw-herdr-serve');
   const execute = (command, argv, options = {}) => new Promise((resolveExit, reject) => {
     const child = spawn(command, argv, { stdio: 'inherit', ...options });
