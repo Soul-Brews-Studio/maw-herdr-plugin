@@ -36,9 +36,10 @@ export async function readRoster(run: RunHerdr, signal: AbortSignal): Promise<Ro
     const snap = unwrap(await run(["--session", serverName, "api", "snapshot"], signal));
     if (snap.protocol !== 22 || !Array.isArray(snap.workspaces) || !Array.isArray(snap.panes)) invalid("invalid herdr protocol-22 snapshot");
     const spaces = new Map<string, Session>();
+    const labels = new Map<string,string>();
     for (const item of snap.workspaces) {
       const space = object(item), id = string(space.workspace_id);
-      string(space.label);
+      labels.set(id,string(space.label));
       if (!id || spaces.has(id)) invalid("invalid or duplicate workspace");
       const name = Buffer.from(serverName).toString("base64url") + "/" + Buffer.from(id).toString("base64url");
       spaces.set(id, { name, source: "local", windows: [] });
@@ -46,7 +47,7 @@ export async function readRoster(run: RunHerdr, signal: AbortSignal): Promise<Ro
     const seenPanes = new Set<string>();
     for (const item of snap.panes) {
       const p = object(item);
-      const pane: Pane = { id: string(p.pane_id), workspace: string(p.workspace_id), agent: string(p.agent), label: string(p.label), title: string(p.title), cwd: string(p.cwd), focused: p.focused as boolean, status: string(p.agent_status) };
+      const pane: Pane = { workspaceLabel: labels.get(string(p.workspace_id)), id: string(p.pane_id), workspace: string(p.workspace_id), agent: string(p.agent), label: string(p.label), title: string(p.title), cwd: string(p.cwd), focused: p.focused as boolean, status: string(p.agent_status) };
       if (!["idle", "working", "blocked", "done", "unknown"].includes(pane.status)) invalid("invalid pane agent status");
       const space = spaces.get(pane.workspace), prefix = pane.workspace + ":p";
       const number = pane.id.slice(prefix.length), n = Number(number);

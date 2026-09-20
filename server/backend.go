@@ -82,8 +82,9 @@ type backendPane struct {
 	Status    string `json:"agent_status"`
 }
 type backendTarget struct {
-	session string
-	pane    backendPane
+	workspaceLabel string
+	session        string
+	pane           backendPane
 }
 type backendRoster struct {
 	running  []string
@@ -161,11 +162,13 @@ func (b *HerdrBackend) roster(ctx context.Context) (backendRoster, error) {
 			return result, errors.New("invalid herdr protocol-22 snapshot")
 		}
 		spaces := map[string]*Session{}
+		labels := map[string]string{}
 		for _, space := range *snap.Workspaces {
 			if space.ID == "" || spaces[space.ID] != nil {
 				return result, errors.New("invalid or duplicate workspace")
 			}
 			name := base64.RawURLEncoding.EncodeToString([]byte(server.Name)) + "/" + base64.RawURLEncoding.EncodeToString([]byte(space.ID))
+			labels[space.ID] = space.Label
 			spaces[space.ID] = &Session{Name: name, Source: "local", Windows: []Window{}}
 		}
 		seenPanes := map[string]bool{}
@@ -198,7 +201,7 @@ func (b *HerdrBackend) roster(ctx context.Context) (backendRoster, error) {
 				name = pane.ID
 			}
 			space.Windows = append(space.Windows, Window{Index: n, Name: name, Active: *pane.Focused, Cwd: pane.Cwd, Status: pane.Status, Agent: strings.TrimSpace(pane.Agent)})
-			result.targets[target] = backendTarget{session: server.Name, pane: pane}
+			result.targets[target] = backendTarget{session: server.Name, pane: pane, workspaceLabel: labels[pane.Workspace]}
 		}
 		for _, space := range spaces {
 			sort.Slice(space.Windows, func(i, j int) bool { return space.Windows[i].Index < space.Windows[j].Index })

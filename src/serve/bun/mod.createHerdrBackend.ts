@@ -1,3 +1,4 @@
+import { planTaskWorktree } from './mod.planTaskWorktree.ts';
 import { realpathSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { resolveRegistryWake } from './mod.resolveRegistryWake.ts';
@@ -102,7 +103,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
         return captures;
       }, signal);
     },
-    async wake(target, signal) {
+    async wake(target, signal, task) {
       if (!target || Buffer.byteLength(target) > 1024) throw new BackendError("target_not_found", "unknown or stale target");
       if(waking>=8) throw new BackendError("backend_error","wake capacity reached");
       waking++;
@@ -120,10 +121,23 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
           if(s.aborted) throw new BackendError("backend_error","herdr operation aborted");
           let roster = await readRoster(run,s);
           let pane = roster.targets.get(target);
+          if(pane && task!==undefined) throw new BackendError("backend_error","task requires a registered repository");
           if (!pane) {
             const repo = resolveRegistryWake(target);
             const session = roster.runningSessions.includes("default") ? "default" : roster.runningSessions.length===1 ? roster.runningSessions[0] : undefined;
             if(!session) throw new BackendError("backend_error","running session is ambiguous or missing");
+            if(task!==undefined) {
+              const plan=await planTaskWorktree(repo.path,task,s);
+              const label=repo.name+"-"+plan.slug;
+              if(Buffer.byteLength(label)>1024) throw new BackendError("backend_error","invalid task label");
+              for(const item of roster.targets.values()) {
+                if(item.session!==session || (item.pane.label!==label && item.pane.title!==label && item.pane.workspaceLabel!==label)) continue;
+                let cwd;try{cwd=realpathSync(item.pane.cwd);}catch{throw new BackendError("backend_error","task pane cwd mismatch");}
+                if(!isAbsolute(item.pane.cwd)||cwd!==plan.path)throw new BackendError("backend_error","task pane cwd mismatch");
+              }
+              await plan.materialize();repo.path=plan.path;repo.name=label;
+              roster=await readRoster(run,s);
+            }
             const matches = [...roster.targets.values()].filter(item => {
               if(item.session!==session || !isAbsolute(item.pane.cwd)) return false;
               try { return realpathSync(item.pane.cwd)===repo.path; } catch { return false; }

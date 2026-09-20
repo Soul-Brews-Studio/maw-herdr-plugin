@@ -114,8 +114,25 @@ are serialized (at most eight accepted). A failed start may leave its newly
 created shell workspace for inspection/retry; the server does not delete it.
 Registry reads are bounded to 1 MiB/1,024 entries and reject unsafe file paths.
 
-Nonempty `task`/worktree wake, repository-configured launch commands, fleet registry
-updates and post-wake hooks remain unfinished; tracked in issue #31.
+For registered targets, `POST /api/wake` also accepts a `task` string:
+
+```json
+{"target":"example/neo-oracle","task":"Issue 90"}
+```
+
+Task names use legacy ASCII slug normalization (`Issue 90` becomes `issue-90`).
+The server reuses a unique matching registered worktree, preserving dirty files,
+or creates `<repo>/agents/<slug>` on a new `agents/<slug>` branch from HEAD.
+An existing branch alone causes numbered allocation, not a branch reset.
+Ambiguous matches, occupied unregistered paths, unsafe paths and conflicting
+workspace cwd are rejected. No fetch, force, clean, reset or deletion occurs.
+Launch failure leaves any created worktree/workspace available for inspection.
+Task requests require registry targets, not canonical pane IDs.
+
+This is stricter than legacy path-only worktree discovery: reuse must belong to
+the same Git repository. Repository-configured launch commands, fleet registry
+updates and post-wake hooks remain unfinished; tracked in issue #31. The hosted
+God UI does not currently expose a verified task-wake control.
 
 This remains **not full `maw serve` parity**: no other lifecycle controls, inbound federation pairing,
 configuration mutation, or queue/inbox delivery. Acceptance is not completion.

@@ -103,6 +103,9 @@ func registryPaneMatches(p backendTarget, path string) bool {
 	return e == nil && cwd == path
 }
 func (b *HerdrBackend) resolveRegistryWake(ctx context.Context, target string) (backendTarget, error) {
+	return b.resolveRegistryWakeTask(ctx, target, nil)
+}
+func (b *HerdrBackend) resolveRegistryWakeTask(ctx context.Context, target string, task *string) (backendTarget, error) {
 	none := backendTarget{}
 	entry, e := readWakeRegistry(target)
 	if e != nil {
@@ -124,6 +127,62 @@ func (b *HerdrBackend) resolveRegistryWake(ctx context.Context, target string) (
 	}
 	if session == "" {
 		return none, errRegistryUnavailable
+	}
+	if task != nil {
+		slug, e := taskSlug(*task)
+		if e != nil {
+			return none, e
+		}
+		plan, e := planTaskWorktree(ctx, entry.Path, slug)
+		if e != nil {
+			return none, e
+		}
+		roster, e = b.roster(ctx)
+		if e != nil {
+			return none, e
+		}
+		running := false
+		for _, name := range roster.running {
+			if name == session {
+				running = true
+			}
+		}
+		if !running {
+			return none, errRegistryUnavailable
+		}
+		label := entry.Name + "-" + slug
+		if len(label) > 1024 {
+			return none, errRegistryUnavailable
+		}
+		for _, p := range roster.targets {
+			if p.session == session && (p.workspaceLabel == label || p.pane.Label == label || p.pane.Title == label) && !registryPaneMatches(p, plan.path) {
+				return none, errRegistryUnavailable
+			}
+		}
+		if e := createTaskWorktree(ctx, entry.Path, plan); e != nil {
+			return none, e
+		}
+		entry.Path = plan.path
+		entry.Name = label
+		roster, e = b.roster(ctx)
+		if e != nil {
+			return none, e
+		}
+		running = false
+		for _, name := range roster.running {
+			if name == session {
+				running = true
+			}
+		}
+		if !running {
+			return none, errRegistryUnavailable
+		}
+		for _, p := range roster.targets {
+			if p.session == session && (p.workspaceLabel == label || p.pane.Label == label || p.pane.Title == label) && !registryPaneMatches(p, entry.Path) {
+				return none, errRegistryUnavailable
+			}
+		}
+
 	}
 	matches := []backendTarget{}
 	for _, pane := range roster.targets {
