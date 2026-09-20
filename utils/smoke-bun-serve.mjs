@@ -350,6 +350,13 @@ async function exercise(entry, label) {
   const retryResponses = await Promise.all([0,1].map(() => http(url,'/api/send',{method:'POST',body:{target,text:'retry-once'},headers:{'X-Maw-Timestamp':'retry-fixture','X-Maw-From':'fixture:local'}})));
   assert.equal(countPrompts(),promptsBeforeRetry+1);
   assert.equal(retryResponses.filter(response => response.json.deduped === true).length,1);
+  const deliveryHistory = (await http(url,'/api/feed')).json;
+  const retryEvents = deliveryHistory.events.filter(event => event.text === 'retry-once');
+  assert.deepEqual(retryEvents.map(event => event.state).sort(), ['accepted','deduped']);
+  assert.ok(retryEvents.every(event => event.source === 'herdr' && event.target === target && Number.isInteger(event.timestamp)));
+  assert.equal((await http(url,'/api/feed?limit=0')).json.total,0);
+  assert.equal((await http(url,'/api/feed?limit=1')).json.total,1);
+  for (const query of ['-1','x','','1&limit=2','18446744073709551616']) await http(url,'/api/feed?limit='+query,{status:400});
   const attachments = [join(temporary,'literal path that does not exist'), 'https://example.invalid/literal-url?value=$(touch never)'];
   for (const body of [{target,attachments,text}, {target,attachments}]) {
     const combinedText = attachments.join('\n') + '\n' + (body.text ?? '');

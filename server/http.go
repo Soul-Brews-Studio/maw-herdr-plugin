@@ -204,7 +204,29 @@ func (s *Server) serveAPI(w http.ResponseWriter, r *http.Request) {
 	case "/api/costs":
 		writeJSON(w, 200, map[string]any{"agents": []any{}, "total": map[string]any{"tokens": 0, "cost": 0, "sessions": 0, "agents": 0}, "supported": false})
 	case "/api/feed":
-		writeJSON(w, 200, map[string]any{"events": []any{}, "total": 0, "active_oracles": []string{}, "supported": false})
+		limit := -1
+		if raw, present := r.URL.Query()["limit"]; present {
+			if len(raw) != 1 || raw[0] == "" {
+				fail(w, 400, "invalid_limit")
+				return
+			}
+			for _, c := range raw[0] {
+				if c < '0' || c > '9' {
+					fail(w, 400, "invalid_limit")
+					return
+				}
+			}
+			n, err := strconv.ParseUint(raw[0], 10, 64)
+			if err != nil {
+				fail(w, 400, "invalid_limit")
+				return
+			}
+			if n > 200 {
+				n = 200
+			}
+			limit = int(n)
+		}
+		writeJSON(w, 200, s.deliveryHistory.snapshot(limit))
 	case "/api/health", "/health":
 		if _, err := s.backend.Sessions(r.Context()); err != nil {
 			writeJSON(w, 503, map[string]any{"ok": false, "error": "herdr_unavailable"})
@@ -259,9 +281,11 @@ func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.delivery.cancel(key, owner)
 	if err := s.backend.Send(r.Context(), body.Target, body.Text); err != nil {
+		s.recordDelivery(r, body.Target, body.Text, "local", "failed")
 		backendFailure(w, err)
 		return
 	}
 	s.delivery.complete(key, owner, "accepted", time.Now())
+	s.recordDelivery(r, body.Target, body.Text, "local", "accepted")
 	writeJSON(w, 200, map[string]any{"ok": true, "target": body.Target, "text": body.Text, "source": "local", "lastLine": "", "state": "accepted", "receipt": []string{"herdr agent prompt accepted"}, "warning": "Prompt acceptance does not imply consumption or completion; this path does not queue an inbox message."})
 }

@@ -26,6 +26,7 @@ bun-check:
     bun utils/smoke-wake-fleet.ts
     bun utils/smoke-receiver-inbox.ts
     bun utils/smoke-delivery-dedup.ts
+    bun utils/smoke-delivery-feed.ts
     bun utils/smoke-wake-identity.ts
     node utils/smoke-launch-serve.mjs
     node utils/smoke-wake-finalize.mjs
@@ -81,6 +82,7 @@ check:
     bun utils/smoke-wake-fleet.ts
     bun utils/smoke-receiver-inbox.ts
     bun utils/smoke-delivery-dedup.ts
+    bun utils/smoke-delivery-feed.ts
     bun utils/smoke-wake-identity.ts
     node utils/smoke-launch-serve.mjs
     node utils/smoke-wake-finalize.mjs

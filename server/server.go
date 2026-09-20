@@ -32,6 +32,7 @@ type ticket struct {
 
 type Server struct {
 	delivery           deliveryDedup
+	deliveryHistory    deliveryFeed
 	publicConfig       publicConfig
 	configRoot         string
 	federation         federationCache

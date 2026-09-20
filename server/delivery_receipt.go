@@ -54,6 +54,7 @@ func (s *Server) claimDelivery(w http.ResponseWriter, r *http.Request, target, t
 		return key, nil, false
 	}
 	if owner == nil {
+		s.recordDelivery(r, target, text, source, "deduped")
 		reason := "duplicate delivery dropped by idempotency key"
 		writeJSON(w, 200, map[string]any{"ok": true, "target": target, "text": responseText, "source": source, "state": state, "deduped": true, "idempotent": true, "reason": reason, "lastLine": reason, "receipt": []string{"duplicate_dropped"}})
 		return key, nil, false
