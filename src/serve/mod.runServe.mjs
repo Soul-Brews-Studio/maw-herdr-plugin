@@ -8,9 +8,10 @@ import { dirname, join, resolve, sep } from 'node:path';
 export async function runServe(args) {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`maw herdr serve --token-file PATH [--listen 127.0.0.1:3457]
-                [--herdr PATH] [--data-dir PATH] [--runtime bun|native] [--build]
+                [--herdr PATH] [--data-dir PATH] [--wake-engine KIND] [--runtime bun|native] [--build]
 
 Core dashboard API: sessions, live pane output and prompt submission.
+Dashboard wake starts the configured agent kind (default claude) in an existing shell pane.
 The token file is required, including on loopback. Help needs no Go or Herdr.
 Defaults to the TypeScript server in Bun: no Go compiler or native package needed.
 --runtime native uses the checksum-pinned helper from a native plugin package.

@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import { BackendError, type Backend, type RunHerdr } from "./types.ts";
 import { readRoster } from "./mod.readRoster.ts";
 import { openHerdrTerminal } from "./mod.openHerdrTerminal.ts";
 import { runHerdr } from "./mod.runHerdr.ts";
 
-export function createHerdrBackend(binary: string): Backend {
+export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backend {
   const shutdown = new AbortController();
   const pending = new Set<Promise<unknown>>();
   const waiters: Array<() => void> = [];
@@ -75,6 +76,21 @@ export function createHerdrBackend(binary: string): Backend {
         }
         if (s.aborted) throw new BackendError("backend_error", "herdr operation aborted");
         return captures;
+      }, signal);
+    },
+    async wake(target, signal) {
+      if (!target || Buffer.byteLength(target) > 1024) throw new BackendError("target_not_found", "unknown or stale target");
+      return operation(async (s) => {
+        const pane = (await readRoster(run, s)).targets.get(target);
+        if (!pane) throw new BackendError("target_not_found", "unknown or stale target");
+        if (pane.pane.agent.trim()) return "already-awake";
+        const name = "maw-" + createHash("sha256").update(pane.pane.id).digest("hex").slice(0, 16);
+        const raw = await run(["--session", pane.session, "agent", "start", name, "--kind", wakeEngine, "--pane", pane.pane.id, "--timeout", "8000"], s);
+        let response;
+        try { response = JSON.parse(raw); } catch { throw new BackendError("backend_error", "invalid agent start response"); }
+        const result = response?.result, agent = result?.agent;
+        if (!response || typeof response !== "object" || Array.isArray(response) || response.error != null || result?.error != null || result?.type !== "agent_started" || !Array.isArray(result.argv) || !result.argv.every((arg: unknown) => typeof arg === "string") || !agent || agent.pane_id !== pane.pane.id || agent.agent !== wakeEngine || agent.interactive_ready !== true || (agent.launch_pending !== undefined && agent.launch_pending !== false) || s.aborted) throw new BackendError("backend_error", "agent readiness not verified");
+        return "ready";
       }, signal);
     },
     async send(target, text, signal) {

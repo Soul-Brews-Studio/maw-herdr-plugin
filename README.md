@@ -87,7 +87,15 @@ This uses Herdr 0.9.0 terminal streams, not tmux or a separately spawned shell.
 Closing the browser detaches the stream; it does not close the underlying pane.
 An existing controller is never forcibly taken over.
 
-This remains **not full `maw serve` parity**: no lifecycle controls, federation,
+Wake an existing pane through the dashboard or `POST /api/wake` with its canonical
+`target`. The server uses `--wake-engine claude` by default, matching `herdr wake`;
+choose another supported kind at startup (for example `--wake-engine codex`).
+Already-detected agents are left running. A successful new launch means Herdr
+verified interactive readiness, not completion of a task. Browser-supplied command
+strings are never executed. Registry aliases, new-workspace wake and nonempty
+`task`/worktree wake are not implemented by the server yet.
+
+This remains **not full `maw serve` parity**: no other lifecycle controls, federation,
 configuration mutation, or queue/inbox delivery. Acceptance is not completion.
 Non-loopback binds are rejected; public deployment is not automated.
 

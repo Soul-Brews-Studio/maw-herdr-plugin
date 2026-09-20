@@ -4,6 +4,7 @@ export interface ServeConfig {
   token: string;
   dataDir: string;
   binary: string;
+  wakeEngine: string;
   engine: boolean;
   node: string;
 }

@@ -165,11 +165,11 @@ func TestIdentityEndpointsMatchServingMode(t *testing.T) {
 	for _, engine := range []bool{false, true} {
 		name, path := "standalone", "/api/identity"
 		s, _ := testServer(t)
-		want := []string{"/api/sessions", "/api/capture", "/api/send", "/ws", "/ws/pty"}
+		want := []string{"/api/sessions", "/api/capture", "/api/send", "/api/wake", "/ws", "/ws/pty"}
 		if engine {
 			name, path = "engine", "/api/herdr"
 			s, _ = newEngineServer(t)
-			want = []string{"/api/herdr/sessions", "/api/herdr/capture", "/api/herdr/send", "/api/herdr/ws", "/api/herdr/ws/pty"}
+			want = []string{"/api/herdr/sessions", "/api/herdr/capture", "/api/herdr/send", "/api/herdr/wake", "/api/herdr/ws", "/api/herdr/ws/pty"}
 		}
 		t.Run(name, func(t *testing.T) {
 			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
@@ -195,6 +195,19 @@ func TestIdentityEndpointsMatchServingMode(t *testing.T) {
 			if !found {
 				t.Fatal("missing terminal-stream capability")
 			}
+			wake := false
+			for _, capability := range identity.Capabilities {
+				if capability == "existing-pane-wake" {
+					wake = true
+				}
+				if capability == "wake" {
+					t.Fatal("overbroad wake capability")
+				}
+			}
+			if !wake {
+				t.Fatal("missing existing-pane-wake capability")
+			}
+
 			if w.Code != 200 || !reflect.DeepEqual(identity.Endpoints, want) {
 				t.Fatalf("identity endpoints: status=%d got=%v want=%v", w.Code, identity.Endpoints, want)
 			}

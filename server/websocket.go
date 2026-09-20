@@ -14,6 +14,7 @@ import (
 )
 
 type socketCommand struct {
+	Command     string   `json:"command"`
 	Type        string   `json:"type"`
 	Target      string   `json:"target"`
 	Targets     []string `json:"targets"`
@@ -261,6 +262,35 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 					previews[target] = ""
 				}
 				if !capture() {
+					return
+				}
+			case "wake":
+				if command.Command != "" {
+					if !errorFrame("wake_command_not_supported") {
+						return
+					}
+					continue
+				}
+				if command.Target == "" || len(command.Target) > 1024 {
+					if !errorFrame("target_required") {
+						return
+					}
+					continue
+				}
+				backend, ok := s.backend.(wakeBackend)
+				if !ok {
+					if !errorFrame("wake_not_supported") {
+						return
+					}
+					continue
+				}
+				if _, err := backend.Wake(ctx, command.Target); err != nil {
+					if !errorFrame("wake_failed") {
+						return
+					}
+					continue
+				}
+				if !write(map[string]any{"type": "action-ok", "action": "wake", "target": command.Target}) {
 					return
 				}
 			case "send":

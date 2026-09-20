@@ -7,6 +7,14 @@ import { serveState } from './mod.serveState.ts';
 export async function serveAPI(request: Request, path: string, config: ServeConfig, backend: Backend, started: number, signal: AbortSignal): Promise<unknown> {
   if (path === '/api/ui-state' || path === '/api/asks') return serveState(request, path, config.dataDir, signal);
   switch (path) {
+    case '/api/wake': {
+      const body = await readJSON(request, 64 << 10, signal);
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.entries(body).some(([key, value]) => !['target', 'task', 'command'].includes(key) || (value !== null && typeof value !== 'string'))) throw new HTTPError(400, 'invalid_json');
+      if (!('target' in body) || typeof body.target !== 'string' || !body.target || Buffer.byteLength(body.target) > 1024) throw new HTTPError(400, 'target_required');
+      if ('task' in body && typeof body.task === 'string' && body.task.length) throw new HTTPError(501, 'task_wake_not_supported');
+      const state = await backend.wake(body.target, signal);
+      return { ok: true, target: body.target, state };
+    }
     case '/api/send': {
       let body;
       try { body = validateCommand(await readJSON(request, 64 << 10, signal)); }
@@ -37,8 +45,8 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
     }
     case '/api/identity': return { version: 'herdr-core-dev', runtime: 'bun', node: config.node, host: 'localhost', agents: [],
       uptime: Math.floor((Date.now() - started) / 1000), clockUtc: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
-      endpoints: config.engine ? ['/api/herdr/sessions', '/api/herdr/capture', '/api/herdr/send', '/api/herdr/ws', '/api/herdr/ws/pty'] : ['/api/sessions', '/api/capture', '/api/send', '/ws', '/ws/pty'],
-      capabilities: ['sessions', 'capture', 'agent-prompt', 'dashboard-ws', 'terminal-stream'] };
+      endpoints: config.engine ? ['/api/herdr/sessions', '/api/herdr/capture', '/api/herdr/send', '/api/herdr/wake', '/api/herdr/ws', '/api/herdr/ws/pty'] : ['/api/sessions', '/api/capture', '/api/send', '/api/wake', '/ws', '/ws/pty'],
+      capabilities: ['sessions', 'capture', 'agent-prompt', 'dashboard-ws', 'terminal-stream', 'existing-pane-wake'] };
     case '/api/config':
       if (request.url.includes('?')) throw new HTTPError(400, 'config_query_not_supported');
       return { node: config.node, agents: {}, namedPeers: [] };
