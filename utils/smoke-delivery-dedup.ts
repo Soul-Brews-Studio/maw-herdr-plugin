@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { createDeliveryDedup } from '../src/serve/bun/mod.createDeliveryDedup.ts';
+let now = 1000;
+const d = createDeliveryDedup(() => now);
+assert.equal(d.key('s', 't', '', 'p'), undefined);
+const key = d.key(' s ', ' t ', ' 1 ', 'p')!;
+assert.equal(key, d.key('s', 't', '1', 'p'));
+const first = d.claim(key); assert.ok(first.complete);
+assert.equal(d.claim(key).duplicate, 'queued');
+first.cancel(); const next = d.claim(key); assert.ok(next.complete);
+first.cancel(); first.complete('wrong'); next.complete('accepted');
+now += 86_400_000; assert.equal(d.claim(key).duplicate, 'accepted');
+now++; assert.ok(d.claim(key).complete);
+for (let i = 1; i < 2048; i++) assert.ok(d.claim(d.key('s', 't', String(i + 1), 'p')!).complete);
+now += 172_800_000;
+assert.throws(() => d.claim('overflow'), /capacity/);
+console.log('PASS delivery dedup: optional timestamp, in-flight/completed receipts, retry after cancellation, stale-owner guards, TTL boundary and capacity');
