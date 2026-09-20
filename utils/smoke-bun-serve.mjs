@@ -21,7 +21,7 @@ const fake = join(temporary, 'herdr');
 const target = 'bWFpbg/d0Q:4', shell = 'bWFpbg/d0Q:9';
 // Same protocol-22 roster and envelopes as server/backend_test.go.
 const sessions = [{ name: 'bWFpbg/d0Q', source: 'local', windows: [
-  { index: 4, name: 'codex', active: true, cwd: '/tmp', status: 'idle' },
+  { index: 4, name: 'codex', active: true, cwd: '/tmp', status: 'idle', agent: 'codex' },
   { index: 9, name: 'wD:p9', active: false, status: 'unknown' },
 ] }];
 const children = new Set(), sockets = new Set();
@@ -161,7 +161,7 @@ async function exercise(entry, label) {
   const ws = await socket(url,ticket.ticket);
   assert.deepEqual(await ws.next(),{type:'feed-history',events:[]});
   assert.deepEqual(await ws.next(),{type:'sessions',sessions});
-  assert.equal((await ws.next()).type,'recent');
+  assert.deepEqual(await ws.next(), {type:'recent', agents:[{target, name:'codex', session:'bWFpbg/d0Q'}]}, 'recent must include the detected agent but never the shell pane');
   await http(url,'/ws',{auth:false,headers:{...origin,'Sec-WebSocket-Protocol':`maw.ws.v1, ${ticket.ticket}`},status:401});
   ws.send(JSON.stringify({type:'wake',target:shell,command:''}));
   assert.deepEqual(await ws.next(),{type:'action-ok',action:'wake',target:shell});
@@ -230,7 +230,7 @@ async function exerciseEngine(entry, label) {
   const ws = await socket(url,undefined,'/api/herdr/ws');
   assert.deepEqual(await ws.next(),{type:'feed-history',events:[]});
   assert.deepEqual(await ws.next(),{type:'sessions',sessions});
-  assert.equal((await ws.next()).type,'recent');
+  assert.deepEqual(await ws.next(), {type:'recent', agents:[{target, name:'codex', session:'bWFpbg/d0Q'}]}, 'recent must include the detected agent but never the shell pane');
   ws.send(JSON.stringify({type:'select',target}));
   assert.deepEqual(await ws.next(),{type:'capture',target,content:'visible output\n'});
   child.kill('SIGTERM');

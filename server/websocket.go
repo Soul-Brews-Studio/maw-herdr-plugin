@@ -144,6 +144,9 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request, origin string) 
 		recent := []map[string]string{}
 		for _, session := range sessions {
 			for _, window := range session.Windows {
+				if strings.TrimSpace(window.Agent) == "" {
+					continue
+				}
 				recent = append(recent, map[string]string{"target": session.Name + ":" + strconv.Itoa(window.Index), "name": window.Name, "session": session.Name})
 			}
 		}

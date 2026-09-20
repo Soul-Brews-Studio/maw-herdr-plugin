@@ -53,7 +53,7 @@ export async function readRoster(run: RunHerdr, signal: AbortSignal): Promise<Ro
       seenPanes.add(pane.id);
       const target = space.name + ":" + number;
       if (result.targets.has(target)) invalid("duplicate pane target");
-      space.windows.push({ index: n, name: pane.label || pane.title || pane.agent || pane.id, active: pane.focused, ...(pane.cwd ? { cwd: pane.cwd } : {}), status: pane.status });
+      space.windows.push({ index: n, name: pane.label || pane.title || pane.agent || pane.id, active: pane.focused, ...(pane.cwd ? { cwd: pane.cwd } : {}), status: pane.status, ...(pane.agent.trim() ? { agent: pane.agent.trim() } : {}) });
       result.targets.set(target, { session: serverName, pane });
     }
     for (const space of spaces.values()) {

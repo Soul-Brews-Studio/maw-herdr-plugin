@@ -29,7 +29,7 @@ export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Ba
     if (!force && data === lastSessions) return true;
     lastSessions = data;
     if (!write({ type: 'sessions', sessions })) return false;
-    return write({ type: 'recent', agents: sessions.flatMap(session => session.windows.map(window => ({ target: `${session.name}:${window.index}`, name: window.name, session: session.name }))) });
+    return write({ type: 'recent', agents: sessions.flatMap(session => session.windows.filter(window => window.agent?.trim()).map(window => ({ target: `${session.name}:${window.index}`, name: window.name, session: session.name }))) });
   };
   const capture = async () => {
     let departed = false;

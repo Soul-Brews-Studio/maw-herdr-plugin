@@ -26,7 +26,7 @@ func (b *fakeBackend) Sessions(context.Context) ([]Session, error) {
 	if b.failure {
 		return nil, errors.New("private backend failure")
 	}
-	return []Session{{Name: "default/w1", Source: "local", Windows: []Window{{Index: 1, Name: "agent", Active: true, Status: "working"}}}}, nil
+	return []Session{{Name: "default/w1", Source: "local", Windows: []Window{{Index: 1, Name: "agent", Active: true, Status: "working", Agent: "codex"}}}}, nil
 }
 func (b *fakeBackend) Capture(_ context.Context, target string, _ int) (string, error) {
 	b.mu.Lock()
