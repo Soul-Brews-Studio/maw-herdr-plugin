@@ -27,9 +27,9 @@ func validWakeEngine(kind string) bool {
 }
 func (s *Server) serveWake(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Target  string `json:"target"`
-		Task    string `json:"task"`
-		Command string `json:"command"`
+		Target  string  `json:"target"`
+		Task    *string `json:"task"`
+		Command string  `json:"command"`
 	}
 	if !decodeJSON(w, r, &body, 64<<10) {
 		return
@@ -38,8 +38,8 @@ func (s *Server) serveWake(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "target_required")
 		return
 	}
-	if body.Task != "" {
-		fail(w, 501, "task_wake_not_supported")
+	if body.Task != nil && len(*body.Task) > 1024 {
+		fail(w, 400, "invalid_task")
 		return
 	}
 	backend, ok := s.backend.(wakeBackend)
@@ -47,7 +47,20 @@ func (s *Server) serveWake(w http.ResponseWriter, r *http.Request) {
 		fail(w, 501, "wake_not_supported")
 		return
 	}
-	state, err := backend.Wake(r.Context(), body.Target)
+	var state string
+	var err error
+	if body.Task != nil {
+		if taskBackend, ok := s.backend.(interface {
+			WakeTask(context.Context, string, string) (string, error)
+		}); ok {
+			state, err = taskBackend.WakeTask(r.Context(), body.Target, *body.Task)
+		} else {
+			fail(w, 501, "task_wake_not_supported")
+			return
+		}
+	} else {
+		state, err = backend.Wake(r.Context(), body.Target)
+	}
 	if err != nil {
 		backendFailure(w, err)
 		return
@@ -56,6 +69,12 @@ func (s *Server) serveWake(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *HerdrBackend) Wake(ctx context.Context, target string) (string, error) {
+	return b.wake(ctx, target, nil)
+}
+func (b *HerdrBackend) WakeTask(ctx context.Context, target, task string) (string, error) {
+	return b.wake(ctx, target, &task)
+}
+func (b *HerdrBackend) wake(ctx context.Context, target string, task *string) (string, error) {
 	if target == "" || len(target) > 1024 {
 		return "", ErrTargetNotFound
 	}
@@ -72,6 +91,9 @@ func (b *HerdrBackend) Wake(ctx context.Context, target string) (string, error) 
 		return "", err
 	}
 	pane, found := roster.targets[target]
+	if found && task != nil {
+		return "", errRegistryUnavailable
+	}
 	if found && strings.TrimSpace(pane.pane.Agent) != "" {
 		return "already-awake", nil
 	}
@@ -84,7 +106,7 @@ func (b *HerdrBackend) Wake(ctx context.Context, target string) (string, error) 
 	if found {
 		pane, err = b.resolve(ctx, target)
 	} else {
-		pane, err = b.resolveRegistryWake(ctx, target)
+		pane, err = b.resolveRegistryWakeTask(ctx, target, task)
 	}
 	if err != nil {
 		return "", err

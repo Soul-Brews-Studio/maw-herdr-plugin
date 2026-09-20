@@ -13,8 +13,8 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
       const body = await readJSON(request, 64 << 10, signal);
       if (!body || typeof body !== 'object' || Array.isArray(body) || Object.entries(body).some(([key, value]) => !['target', 'task', 'command'].includes(key) || (value !== null && typeof value !== 'string'))) throw new HTTPError(400, 'invalid_json');
       if (!('target' in body) || typeof body.target !== 'string' || !body.target || Buffer.byteLength(body.target) > 1024) throw new HTTPError(400, 'target_required');
-      if ('task' in body && typeof body.task === 'string' && body.task.length) throw new HTTPError(501, 'task_wake_not_supported');
-      const state = await backend.wake(body.target, signal);
+      if ('task' in body && typeof body.task === 'string' && Buffer.byteLength(body.task) > 1024) throw new HTTPError(400, 'invalid_task');
+      const state = await backend.wake(body.target, signal, 'task' in body && typeof body.task === 'string' ? body.task : undefined);
       return { ok: true, target: body.target, state };
     }
     case '/api/send': {

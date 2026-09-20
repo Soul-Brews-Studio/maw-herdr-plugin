@@ -314,7 +314,7 @@ async function exercise(entry, label) {
   await exerciseTeams(url);
   assert.equal((await http(url,'/api/wake',{method:'POST',body:{target}})).json.state,'already-awake');
   assert.equal((await http(url,'/api/wake',{method:'POST',body:{target:shell}})).json.state,'ready');
-  await http(url,'/api/wake',{method:'POST',body:{target:shell,task:'new-worktree'},status:501});
+  await http(url,'/api/wake',{method:'POST',body:{target:shell,task:'new-worktree'},status:503});
   await http(url,'/api/wake',{method:'POST',body:{target:'missing'},status:404});
   await http(url,'/api/wake',{status:405});
   await http(url,'/api/wake',{method:'POST',body:{target,command:123},status:400});

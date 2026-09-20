@@ -10,7 +10,7 @@ export interface Backend {
   sessions(signal?: AbortSignal): Promise<Session[]>;
   capture(target: string, lines: number, signal?: AbortSignal): Promise<string>;
   captureBatch(targets: Record<string, number>, signal?: AbortSignal): Promise<Record<string, string>>;
-  wake(target: string, signal?: AbortSignal): Promise<"ready" | "already-awake">;
+  wake(target: string, signal?: AbortSignal, task?: string): Promise<"ready" | "already-awake">;
   sendLiteral(target: string, text: string, enter: boolean, signal?: AbortSignal): Promise<void>;
   send(target: string, text: string, signal?: AbortSignal): Promise<void>;
   openTerminal(target: string, cols: number, rows: number, output: (bytes: Buffer) => void, signal: AbortSignal): Promise<Terminal>;
@@ -23,7 +23,7 @@ export class BackendError extends Error {
   }
 }
 export type RunHerdr = (args: string[], signal: AbortSignal) => Promise<string>;
-export interface Pane { id: string; workspace: string; agent: string; label: string; title: string; cwd: string; focused: boolean; status: string }
+export interface Pane { workspaceLabel?: string; id: string; workspace: string; agent: string; label: string; title: string; cwd: string; focused: boolean; status: string }
 export interface Target { session: string; pane: Pane }
 export interface Roster { runningSessions: string[]; sessions: Session[]; targets: Map<string, Target> }
 
