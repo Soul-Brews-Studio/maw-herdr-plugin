@@ -4,10 +4,18 @@ import type { Session } from "./types.ts";
 export function createObservedFeed() {
   type Event = { timestamp: string; ts: number; oracle: string; project: string; sessionId: string; host: string; event: string; source: string; observedState: string; target: string; message: string };
   let sequence = 0;
+  const realActivity = new Map<string, number>();
   let events: Array<{ id: number; event: Event }> = [];
   let states = new Map<string, { status: string; name: string; emitted: number }>();
   const prune = (now: number) => { events = events.filter(item => now - item.event.ts < 60_000).slice(-100); };
   return {
+    markActivity(oracle: string, now = Date.now()) {
+      if (!oracle.trim() || Buffer.byteLength(oracle) > 1024) return false;
+      for (const [key, seen] of realActivity) if (now - seen >= 60_000) realActivity.delete(key);
+      if (!realActivity.has(oracle) && realActivity.size >= 1000) return false;
+      realActivity.set(oracle, now);
+      return true;
+    },
     observe(sessions: Session[], now = Date.now()) {
       const windows = sessions.flatMap(session => session.windows.map(window => ({ session, window, target: `${session.name}:${window.index}` })));
       const names = new Map<string, { count: number; target: string }>();
@@ -30,6 +38,11 @@ export function createObservedFeed() {
         safe.add(target);
         const previous = states.get(target);
         if (!previous || previous.status !== window.status || previous.name !== window.name || (window.status === "working" && now - previous.emitted >= 10_000)) {
+          const seen = realActivity.get(window.name.replace(/-oracle$/, ''));
+          if (seen !== undefined && now - seen < 60_000) {
+            next.set(target, { status: window.status!, name: window.name, emitted: previous?.emitted ?? 0 });
+            continue;
+          }
           const event: Event = { timestamp: new Date(now).toISOString(), ts: now, oracle: window.name, project: session.name, sessionId: "", host: "local", event: window.status === "working" ? "PreToolUse" : "Stop", source: "herdr-agent-status", observedState: window.status!, target, message: `Herdr observed ${window.status}; status projection, not a tool hook` };
           events.push({ id: ++sequence, event });
           next.set(target, { status: window.status!, name: window.name, emitted: now });

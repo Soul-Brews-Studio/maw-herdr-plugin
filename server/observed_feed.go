@@ -31,10 +31,11 @@ type observedStatus struct {
 	last  time.Time
 }
 type observedFeed struct {
-	mu       sync.Mutex
-	sequence uint64
-	events   []observedEvent
-	tracked  map[string]observedStatus
+	mu           sync.Mutex
+	sequence     uint64
+	events       []observedEvent
+	tracked      map[string]observedStatus
+	realActivity map[string]time.Time
 }
 
 var worktreeProject = regexp.MustCompile(`[.-]wt-(?:[0-9]+-)?(.+)$`)
@@ -98,6 +99,10 @@ func (f *observedFeed) observe(sessions []Session, now time.Time) {
 			old, exists := f.tracked[target]
 			next[target] = old
 			if exists && old.name == w.Name && old.state == w.Status && (w.Status != "working" || now.Sub(old.last) < 10*time.Second) {
+				continue
+			}
+			if seen, ok := f.realActivity[strings.TrimSuffix(w.Name, "-oracle")]; ok && now.Sub(seen) < time.Minute {
+				next[target] = observedStatus{state: w.Status, name: w.Name, last: old.last}
 				continue
 			}
 			f.sequence++
