@@ -1,3 +1,4 @@
+import { deliverReceiverInbox } from './mod.deliverReceiverInbox.ts';
 import { resolveWakeIdentity } from "./mod.resolveWakeIdentity.ts";
 import { registerWakeFleet } from "./mod.registerWakeFleet.ts";
 import { runWakeHooks } from "./mod.runWakeHooks.ts";
@@ -218,6 +219,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "codex", explici
         if (enter) await run(["--session", pane.session, "pane", "send-keys", pane.pane.id, "enter"], s);
       }, signal);
     },
+    inbox: (target, text, serverRoot, from, signal) => operation(s => deliverReceiverInbox(run, target, text, serverRoot, from, s), signal),
     async send(target, text, signal) {
       if (!text.trim() || Buffer.byteLength(text, "utf8") > 64 * 1024 || text.includes("\0")) throw new BackendError("backend_error", "invalid prompt text");
       await operation(async (s) => {

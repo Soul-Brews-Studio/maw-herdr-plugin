@@ -354,7 +354,7 @@ async function exercise(entry, label) {
     assert.deepEqual(prompts.at(-1), ['--session','main','agent','prompt','wD:p4',combinedText], 'attachments are literal prompt lines, not files to read or URLs to fetch');
   }
   assert.equal(existsSync(join(temporary,'never')),false);
-  for (const [body,status,error] of [[{target:shell,text:'x'},409,'target_not_agent'],[{target:'missing',text:'x'},404,'target_not_found'],[{target,text:'x',force:true},501,'send_options_not_supported'],[{target,text:'x',inbox:true},501,'send_options_not_supported'],[{target,text:''},400,'target_and_text_required'],[{target,text:'x',unknown:1},400,'invalid_json']]) {
+  for (const [body,status,error] of [[{target:shell,text:'x'},409,'target_not_agent'],[{target:'missing',text:'x'},404,'target_not_found'],[{target,text:'x',force:true},501,'send_options_not_supported'],[{target,text:'x',inbox:true},503,'herdr_unavailable'],[{target,text:''},400,'target_and_text_required'],[{target,text:'x',unknown:1},400,'invalid_json']]) {
     assert.equal((await http(url,'/api/send',{method:'POST',body,status})).json.error,error);
   }
   await http(url,'/api/send',{method:'POST',body:'x',headers:{'Content-Type':'text/plain'},status:415});
