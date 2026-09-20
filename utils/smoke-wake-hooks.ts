@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runWakeHooks } from "../src/serve/bun/mod.runWakeHooks.ts";
 
-const dir = mkdtempSync(join(tmpdir(), "herdr-wake-hooks-"));
+const dir = realpathSync(mkdtempSync(join(tmpdir(), "herdr-wake-hooks-")));
 const cwd = process.cwd(), env = { ...process.env };
 const config = (...postWake: unknown[]) => ({ hooks: { postWake } });
 try {

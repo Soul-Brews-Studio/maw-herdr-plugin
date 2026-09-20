@@ -13,7 +13,7 @@ func hookConfig(entries ...any) map[string]any {
 }
 
 func TestWakeHooksOrderIdentityAndFailures(t *testing.T) {
-	dir := t.TempDir()
+	dir := federationTempDir(t)
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +40,7 @@ func TestWakeHooksOrderIdentityAndFailures(t *testing.T) {
 }
 
 func TestWakeHooksCancellationStopsChildrenAndLaterHooks(t *testing.T) {
-	dir := t.TempDir()
+	dir := federationTempDir(t)
 	t.Setenv("WAKE_HOOK_DIR", dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -80,7 +80,7 @@ func TestWakeHooksCancellationStopsChildrenAndLaterHooks(t *testing.T) {
 }
 
 func TestWakeHooksDeadlineAndBackgroundCleanup(t *testing.T) {
-	dir := t.TempDir()
+	dir := federationTempDir(t)
 	t.Setenv("WAKE_HOOK_DIR", dir)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
