@@ -4,6 +4,8 @@ import "sync"
 
 // Delivery history is independent of the observed-status WebSocket projection.
 type deliveryEvent struct {
+	Event     string `json:"event,omitempty"`
+	Decision  string `json:"decision,omitempty"`
 	Timestamp int64  `json:"timestamp"`
 	Kind      string `json:"kind"`
 	Direction string `json:"direction"`

@@ -83,7 +83,10 @@ export async function runBunServe(args: string[]): Promise<number> {
         }
         if (!config.engine) {
           const authorization = request.headers.get('authorization') || '';
-          if (!authorization.startsWith('Bearer ') || !timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash)) return failure(401, 'operator_token_required');
+          if (!authorization.startsWith('Bearer ') || !timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash)) {
+            if (path === '/api/send' && request.method === 'POST') deliveryHistory.append({ timestamp: Math.floor(Date.now() / 1000), kind: 'message', direction: 'inbound', state: 'failed', route: 'auth', event: 'auth-reject', decision: 'operator_token_required', source: 'herdr', from: '', to: '', target: '', text: '', oracle: '' });
+            return failure(401, 'operator_token_required');
+          }
         }
         if (!allowed.includes(request.method)) return methodError();
         if (path === '/api/auth/ws-ticket') {

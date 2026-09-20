@@ -432,8 +432,9 @@ retries. These are delivery outcomes, not proof of agent consumption. Oracle
 names are resolved from Herdr; an unavailable identity remains empty. Sender
 headers are unverified display metadata. Text is truncated, but can still contain
 private prompt content: this endpoint requires the operator token. History resets
-on restart and is separate from observed-status WebSocket events. Authentication
-rejections, pre-dispatch failures, and POST feed activity are not yet recorded.
+on restart and is separate from observed-status WebSocket events. Rejected POST `/api/send` authentication attempts record only a fixed reason,
+never the supplied credentials, sender or body. Other pre-dispatch failures and
+POST feed activity are not yet recorded.
 
 WebSocket `send` instead types literal text into
 any pane, adding Enter only for `force: true`. There are at most 16 live preview targets per

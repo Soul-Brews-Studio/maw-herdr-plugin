@@ -1,5 +1,5 @@
 export type DeliveryEvent = {
-  timestamp: number; kind: string; direction: string; state: string; route: string;
+  event?: string; decision?: string; timestamp: number; kind: string; direction: string; state: string; route: string;
   from: string; to: string; target: string; text: string; oracle: string; source: string; error?: string;
 };
 

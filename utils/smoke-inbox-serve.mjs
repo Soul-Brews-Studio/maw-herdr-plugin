@@ -51,7 +51,7 @@ try{
  for(let i=0;i<2;i++){const r=await request(retryBody);assert.equal(r.status,200,await r.clone().text());}
  assert.equal(files().length,countBeforeRetry+3);
  const historyResponse=await fetch(url+'/api/feed',{headers:{Authorization:'Bearer '+token}});assert.equal(historyResponse.status,200);
- const history=await historyResponse.json();const retryEvents=history.events.filter(e=>e.text==='timestamp retry');
+ const history=await historyResponse.json();const authEvents=history.events.filter(e=>e.event==='auth-reject');assert.equal(authEvents.length,1);assert.equal(authEvents[0].decision,'operator_token_required');assert.equal(authEvents[0].text,'');assert.equal(authEvents[0].from,'');assert.ok(!JSON.stringify(history).includes(token));const retryEvents=history.events.filter(e=>e.text==='timestamp retry');
  assert.deepEqual(retryEvents.map(e=>e.state).sort(),['deduped','queued','queued','queued']);assert.ok(retryEvents.every(e=>e.route==='inbox'&&e.target===target));
  assert.equal((await fetch(url+'/api/feed')).status,401);
  const another=await request(retryBody,true,'sender:remote','fixture-2');assert.equal(another.status,200);assert.equal(files().length,countBeforeRetry+4);

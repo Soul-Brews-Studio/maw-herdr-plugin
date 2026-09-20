@@ -139,6 +139,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	r = r.WithContext(ctx)
 	if !s.authorized(r) {
+		if r.URL.Path == "/api/send" && r.Method == http.MethodPost {
+			s.deliveryHistory.append(deliveryEvent{Timestamp: time.Now().Unix(), Kind: "message", Direction: "inbound", State: "failed", Route: "auth", Event: "auth-reject", Decision: "operator_token_required", Source: "herdr"})
+		}
 		fail(w, 401, "operator_token_required")
 		return
 	}
