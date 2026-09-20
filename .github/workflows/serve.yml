@@ -52,6 +52,7 @@ jobs:
           node utils/smoke-federation-serve.mjs
           bun utils/smoke-maw-config.ts
           node utils/smoke-config-serve.mjs
+          node utils/smoke-state-serve.mjs
           bun utils/smoke-registry-wake.ts
           node utils/smoke-registry-serve.mjs
           MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs
@@ -74,7 +75,9 @@ jobs:
           node utils/smoke-launch-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           node utils/smoke-wake-finalize.mjs "$RUNNER_TEMP/maw-herdr-serve"
           MAW_CONFIG_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-config-serve.mjs
+          MAW_STATE_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-state-serve.mjs
           node utils/smoke-config-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
+          node utils/smoke-state-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           MAW_FEDERATION_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-federation-serve.mjs
           node utils/smoke-federation-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           bun utils/smoke-terminal-serve.mjs
