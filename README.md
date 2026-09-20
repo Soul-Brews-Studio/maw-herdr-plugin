@@ -433,8 +433,15 @@ names are resolved from Herdr; an unavailable identity remains empty. Sender
 headers are unverified display metadata. Text is truncated, but can still contain
 private prompt content: this endpoint requires the operator token. History resets
 on restart and is separate from observed-status WebSocket events. Rejected POST `/api/send` authentication attempts record only a fixed reason,
-never the supplied credentials, sender or body. Other pre-dispatch failures and
-POST feed activity are not yet recorded.
+never the supplied credentials, sender or body. Other pre-dispatch failures remain incomplete.
+
+Authenticated `POST /api/feed` marks a nonblank top-level `oracle` as recently
+active, suppressing synthetic status events for 60 seconds. It does not append
+arbitrary payloads to delivery history or broadcast invented tool events. As in
+the legacy handler, malformed JSON and missing oracle fields are acknowledged
+without a mark. Requests are bounded to 64 KiB, oracle names to 1,024 bytes, and
+live activity markers to 1,000; overflow is rejected rather than growing memory.
+Names are case-sensitive; matching removes the pane name's final `-oracle` suffix.
 
 WebSocket `send` instead types literal text into
 any pane, adding Enter only for `force: true`. There are at most 16 live preview targets per

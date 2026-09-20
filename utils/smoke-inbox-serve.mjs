@@ -50,6 +50,11 @@ try{
  assert.equal(receipts.filter(r=>r.deduped===true).length,1);assert.equal(files().length,countBeforeRetry+1);assert.deepEqual(receipts.find(r=>r.deduped).receipt,['duplicate_dropped']);
  for(let i=0;i<2;i++){const r=await request(retryBody);assert.equal(r.status,200,await r.clone().text());}
  assert.equal(files().length,countBeforeRetry+3);
+ for(const payload of ['{','null','[]','{}','{"oracle":"fixture","event":"not-injected"}']) {
+  const activity=await fetch(url+'/api/feed',{method:'POST',headers:{Authorization:'Bearer '+token},body:payload});assert.equal(activity.status,200,await activity.clone().text());assert.deepEqual(await activity.json(),{ok:true});
+ }
+ assert.equal((await fetch(url+'/api/feed',{method:'POST',body:'{"oracle":"fixture"}'})).status,401);
+ assert.equal((await fetch(url+'/api/feed',{method:'POST',headers:{Authorization:'Bearer '+token},body:'x'.repeat(65537)})).status,400);
  const historyResponse=await fetch(url+'/api/feed',{headers:{Authorization:'Bearer '+token}});assert.equal(historyResponse.status,200);
  const history=await historyResponse.json();const authEvents=history.events.filter(e=>e.event==='auth-reject');assert.equal(authEvents.length,1);assert.equal(authEvents[0].decision,'operator_token_required');assert.equal(authEvents[0].text,'');assert.equal(authEvents[0].from,'');assert.ok(!JSON.stringify(history).includes(token));const retryEvents=history.events.filter(e=>e.text==='timestamp retry');
  assert.deepEqual(retryEvents.map(e=>e.state).sort(),['deduped','queued','queued','queued']);assert.ok(retryEvents.every(e=>e.route==='inbox'&&e.target===target));

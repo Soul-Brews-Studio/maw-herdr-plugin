@@ -1,3 +1,4 @@
+import { serveFeedActivity } from './mod.serveFeedActivity.ts';
 import type { createDeliveryFeed } from './mod.createDeliveryFeed.ts';
 import { recordDelivery } from './mod.recordDelivery.ts';
 import { claimDelivery } from './mod.claimDelivery.ts';
@@ -95,6 +96,7 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
       return backend.teamInventory();
     case '/api/costs': return { agents: [], total: { tokens: 0, cost: 0, sessions: 0, agents: 0 }, supported: false };
     case '/api/feed': {
+      if (request.method === 'POST') return serveFeedActivity(request, backend, signal);
       const limits = new URL(request.url).searchParams.getAll('limit');
       if (limits.length > 1 || (limits.length && (!/^[0-9]+$/.test(limits[0]) || BigInt(limits[0]) > 18446744073709551615n))) throw new HTTPError(400, 'invalid_limit');
       const limit = limits.length ? Number(BigInt(limits[0]) > 200n ? 200n : BigInt(limits[0])) : undefined;

@@ -205,6 +205,21 @@ async function socket(url, ticket, path = '/ws') {
   assert.equal(ws.protocol, ticket ? 'maw.ws.v1' : '');
   return ws;
 }
+async function exerciseFeedActivity(entry, label) {
+  const {child,url} = await start(entry, join(temporary, `activity-${label}`));
+  await http(url, '/api/feed', {method:'POST', body:{oracle:'codex',event:'not-injected',text:'not-injected'}});
+  assert.deepEqual((await http(url, '/api/feed')).json, {events:[],total:0,active_oracles:[]});
+  const ticket = (await http(url, '/api/auth/ws-ticket', {method:'POST',headers:{Origin:url},body:{path:'/ws'}})).json;
+  const ws = await socket(url,ticket.ticket);
+  for (const type of ['sessions','recent','teams']) assert.equal((await ws.next()).type,type);
+  assert.deepEqual(await ws.next(),{type:'feed-history',events:[]});
+  ws.send(JSON.stringify({type:'unsupported'}));
+  assert.equal((await ws.next()).type,'error','HTTP activity must suppress the first synthetic transition without injecting a payload');
+  child.kill('SIGTERM');
+  assert.deepEqual(await deadline(child.exited,'activity shutdown'),{code:0,signal:null});
+  await deadline(ws.closed,'activity socket shutdown'); sockets.delete(ws); children.delete(child);
+  console.log(`PASS ${label} feed activity: authenticated HTTP suppresses WebSocket projection; no injected history`);
+}
 async function exerciseTeams(url) {
   const claude = join(env.HOME,'.claude'), teams = join(claude,'teams'), tasks = join(claude,'tasks');
   const reset = () => { rmSync(claude,{recursive:true,force:true}); mkdirSync(join(teams,'alpha'),{recursive:true}); mkdirSync(join(tasks,'alpha'),{recursive:true}); };
@@ -507,12 +522,14 @@ try {
     assert.ifError(rejected.error); assert.equal(rejected.status,1,rejected.stderr);
     assert.match(rejected.stderr,/token/i);
   }
+  await exerciseFeedActivity(join(root,'index.mjs'),'source');
   await exerciseEngine(join(root,'index.mjs'),'source');
   await exercise(join(root,'index.mjs'),'source');
   await exerciseWorktrees(join(root,'index.mjs'),'source');
   const bundle = join(temporary,'index.js');
   const build = spawnSync(bun,['build',join(root,'index.mjs'),'--target=bun','--outfile',bundle],{env,encoding:'utf8',timeout:30000});
   assert.ifError(build.error); assert.equal(build.status,0,build.stderr);
+  await exerciseFeedActivity(bundle,'bundle');
   await exercise(bundle,'bundle');
   await exerciseWorktrees(bundle,'bundle');
   await exerciseEngine(bundle,'bundle');

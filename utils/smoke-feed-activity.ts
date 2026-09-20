@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { createObservedFeed } from '../src/serve/bun/mod.createObservedFeed.ts';
+const feed = createObservedFeed(), now = 1_000_000;
+const roster = [{ name: 'main', source: 'local', windows: [{ index: 1, name: 'demo-oracle', agent: 'codex', active: true, status: 'working' }] }];
+assert.equal(feed.markActivity('demo', now), true);
+feed.observe(roster, now + 59_999);
+assert.equal(feed.read(0, now + 59_999).events.length, 0);
+feed.observe(roster, now + 60_000);
+assert.equal(feed.read(0, now + 60_000).events.length, 1);
+const bounded = createObservedFeed();
+assert.equal(bounded.markActivity(' ', now), false);
+assert.equal(bounded.markActivity('x'.repeat(1025), now), false);
+for (let i = 0; i < 1000; i++) assert.equal(bounded.markActivity(String(i), now), true);
+assert.equal(bounded.markActivity('overflow', now), false);
+assert.equal(bounded.markActivity('0', now), true);
+assert.equal(bounded.markActivity('new', now + 60_000), true);
+console.log('PASS feed activity: synthetic suppression, exact TTL, metadata/capacity bounds and refresh');
