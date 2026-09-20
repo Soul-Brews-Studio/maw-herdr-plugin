@@ -15,7 +15,7 @@ export async function runBunServe(args: string[]): Promise<number> {
   const config = readServeConfig(args);
   const tokenHash = createHash('sha256').update(config.token).digest();
   config.token = '';
-  const backend = createHerdrBackend(config.binary, config.wakeEngine);
+  const backend = createHerdrBackend(config.binary, config.wakeEngine, config.explicitWakeEngine);
   const shutdown = new AbortController();
   const started = Date.now();
   const tickets = new Map<string, { origin: string; path: string; expires: number }>();

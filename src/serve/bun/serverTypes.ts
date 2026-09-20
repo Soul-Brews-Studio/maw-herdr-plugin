@@ -6,6 +6,7 @@ export interface ServeConfig {
   dataDir: string;
   binary: string;
   wakeEngine: string;
+  explicitWakeEngine?: string;
   engine: boolean;
   node: string;
   agents: Record<string,string>;

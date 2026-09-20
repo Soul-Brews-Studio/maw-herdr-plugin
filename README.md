@@ -130,13 +130,40 @@ Launch failure leaves any created worktree/workspace available for inspection.
 Task requests require registry targets, not canonical pane IDs.
 
 This is stricter than legacy path-only worktree discovery: reuse must belong to
-the same Git repository. Repository-configured launch commands, fleet registry
-updates and post-wake hooks remain unfinished; tracked in issue #31. The hosted
+the same Git repository. Fleet registry updates and post-wake hooks remain unfinished; tracked in issue #31. The hosted
 God UI does not currently expose a verified task-wake control.
 
 This remains **not full `maw serve` parity**: no other lifecycle controls, inbound federation pairing,
 configuration mutation, or queue/inbox delivery. Acceptance is not completion.
 Non-loopback binds are rejected; public deployment is not automated.
+
+### Repository launch commands
+
+Wake reads layered configuration from the selected pane's canonical cwd, including
+its final task worktree. Local `commands`, `wake`, `defaultEngine` or `zaiPool`
+configuration selects the legacy command renderer: exact window/identity/glob
+keys, explicit engine overrides, defaults, resume/channels variants and quoted
+prompts. Registry windows use the oracle name, or `<oracle>-<task-slug>`.
+
+These are **trusted local shell programs**, not browser-supplied commands. Only
+use configuration from repositories you trust. The browser `command` field is
+not an override. The server never returns command text or captured terminal text
+in launch errors.
+
+Configured commands require a verified foreground shell at the correct cwd
+before submission. A successful response has `state: "launched"` only after a
+non-shell foreground process is observed and repeated captures show no known
+repository-trust prompt. This does **not** promise interactive agent readiness or
+completion. An immediate repeated wake may be rejected as busy until Herdr
+recognizes the launched agent; it must not resubmit the command. Exited commands,
+malformed process data, busy/wrong-cwd panes and
+trust prompts fail; the server never answers trust prompts automatically.
+
+Without launch configuration, the existing supported-agent path remains
+`--wake-engine claude` by default and returns `ready` only after Herdr's readiness
+check. Configured command selection uses the legacy `codex` fallback unless an
+explicit startup engine or configuration selects otherwise. This default-path
+difference, fleet metadata and post-wake hooks remain parity work in issue #31.
 
 ### Explicit runtime selection
 

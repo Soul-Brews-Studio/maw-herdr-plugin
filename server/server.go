@@ -14,13 +14,14 @@ import (
 const protocol = "maw.ws.v1"
 
 type Config struct {
-	WakeEngine   string
-	Engine       bool
-	Prefix       string
-	Token        string
-	Node         string
-	DataDir      string
-	PollInterval time.Duration
+	WakeEngine         string
+	WakeEngineExplicit bool
+	Engine             bool
+	Prefix             string
+	Token              string
+	Node               string
+	DataDir            string
+	PollInterval       time.Duration
 }
 
 type ticket struct {
@@ -67,6 +68,10 @@ func NewServer(config Config, backend Backend) (*Server, error) {
 	}
 	if b, ok := backend.(*HerdrBackend); ok {
 		b.wakeEngine = config.WakeEngine
+		if config.WakeEngineExplicit {
+			value := config.WakeEngine
+			b.wakeEngineExplicit = &value
+		}
 	}
 	if config.Node == "" {
 		config.Node = "herdr"
