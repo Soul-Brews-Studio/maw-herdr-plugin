@@ -67,7 +67,25 @@ func (b *HerdrBackend) Wake(ctx context.Context, target string) (string, error) 
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pane, err := b.resolve(ctx, target)
+	roster, err := b.roster(ctx)
+	if err != nil {
+		return "", err
+	}
+	pane, found := roster.targets[target]
+	if found && strings.TrimSpace(pane.pane.Agent) != "" {
+		return "already-awake", nil
+	}
+	select {
+	case b.registryWakeGate <- struct{}{}:
+		defer func() { <-b.registryWakeGate }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	if found {
+		pane, err = b.resolve(ctx, target)
+	} else {
+		pane, err = b.resolveRegistryWake(ctx, target)
+	}
 	if err != nil {
 		return "", err
 	}

@@ -23,7 +23,7 @@ function string(value: unknown): string {
   return value;
 }
 export async function readRoster(run: RunHerdr, signal: AbortSignal): Promise<Roster> {
-  const result: Roster = { sessions: [], targets: new Map() };
+  const result: Roster = { runningSessions: [], sessions: [], targets: new Map() };
   const list = unwrap(await run(["session", "list", "--json"], signal));
   if (!Array.isArray(list.sessions)) invalid("invalid herdr session list");
   const seenSessions = new Set<string>();
@@ -32,6 +32,7 @@ export async function readRoster(run: RunHerdr, signal: AbortSignal): Promise<Ro
     if (!serverName || typeof server.running !== "boolean" || seenSessions.has(serverName)) invalid("invalid or duplicate herdr session");
     seenSessions.add(serverName);
     if (!server.running) continue;
+    result.runningSessions.push(serverName);
     const snap = unwrap(await run(["--session", serverName, "api", "snapshot"], signal));
     if (snap.protocol !== 22 || !Array.isArray(snap.workspaces) || !Array.isArray(snap.panes)) invalid("invalid herdr protocol-22 snapshot");
     const spaces = new Map<string, Session>();

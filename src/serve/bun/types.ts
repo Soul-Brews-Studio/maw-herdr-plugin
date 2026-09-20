@@ -25,6 +25,6 @@ export class BackendError extends Error {
 export type RunHerdr = (args: string[], signal: AbortSignal) => Promise<string>;
 export interface Pane { id: string; workspace: string; agent: string; label: string; title: string; cwd: string; focused: boolean; status: string }
 export interface Target { session: string; pane: Pane }
-export interface Roster { sessions: Session[]; targets: Map<string, Target> }
+export interface Roster { runningSessions: string[]; sessions: Session[]; targets: Map<string, Target> }
 
 export interface Terminal { input(bytes: Buffer): void; resize(cols: number, rows: number): void; close(): void; done: Promise<void> }

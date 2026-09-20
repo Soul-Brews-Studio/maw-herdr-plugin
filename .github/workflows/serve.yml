@@ -52,6 +52,10 @@ jobs:
           node utils/smoke-federation-serve.mjs
           bun utils/smoke-maw-config.ts
           node utils/smoke-config-serve.mjs
+          bun utils/smoke-registry-wake.ts
+          node utils/smoke-registry-serve.mjs
+          MAW_REGISTRY_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-registry-serve.mjs
+          node utils/smoke-registry-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           MAW_CONFIG_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-config-serve.mjs
           node utils/smoke-config-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           MAW_FEDERATION_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-federation-serve.mjs

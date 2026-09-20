@@ -1,3 +1,6 @@
+import { realpathSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
+import { resolveRegistryWake } from './mod.resolveRegistryWake.ts';
 import { createFederation } from './mod.createFederation.ts';
 import { readTeamInventory } from './mod.readTeamInventory.ts';
 import { createObservedFeed } from "./mod.createObservedFeed.ts";
@@ -11,8 +14,9 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
   const shutdown = new AbortController();
   const pending = new Set<Promise<unknown>>();
   const waiters: Array<() => void> = [];
+  let wakeTail: Promise<void> = Promise.resolve();
   let dashboardSnapshot: Promise<Session[]> | undefined;
-  let active = 0, terminals = 0;
+  let active = 0, terminals = 0, waking = 0;
   const run: RunHerdr = (args, signal) => runHerdr(binary || "herdr", args, signal);
   async function operation<T>(fn: (signal: AbortSignal) => Promise<T>, caller?: AbortSignal): Promise<T> {
     if (shutdown.signal.aborted || caller?.aborted) throw new BackendError("backend_error", "herdr operation aborted");
@@ -100,9 +104,50 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
     },
     async wake(target, signal) {
       if (!target || Buffer.byteLength(target) > 1024) throw new BackendError("target_not_found", "unknown or stale target");
-      return operation(async (s) => {
-        const pane = (await readRoster(run, s)).targets.get(target);
-        if (!pane) throw new BackendError("target_not_found", "unknown or stale target");
+      if(waking>=8) throw new BackendError("backend_error","wake capacity reached");
+      waking++;
+      try { return await operation(async (s) => {
+        const previous = wakeTail;
+        let release!: () => void;
+        wakeTail = new Promise<void>(resolve => { release = resolve; });
+        try {
+          await new Promise<void>((resolve,reject) => {
+            const abort = () => reject(new BackendError("backend_error","herdr operation aborted"));
+            s.addEventListener("abort",abort,{once:true});
+            previous.then(() => { s.removeEventListener("abort",abort); resolve(); });
+            if(s.aborted) abort();
+          });
+          if(s.aborted) throw new BackendError("backend_error","herdr operation aborted");
+          let roster = await readRoster(run,s);
+          let pane = roster.targets.get(target);
+          if (!pane) {
+            const repo = resolveRegistryWake(target);
+            const session = roster.runningSessions.includes("default") ? "default" : roster.runningSessions.length===1 ? roster.runningSessions[0] : undefined;
+            if(!session) throw new BackendError("backend_error","running session is ambiguous or missing");
+            const matches = [...roster.targets.values()].filter(item => {
+              if(item.session!==session || !isAbsolute(item.pane.cwd)) return false;
+              try { return realpathSync(item.pane.cwd)===repo.path; } catch { return false; }
+            });
+            if(matches.length>1) throw new BackendError("backend_error","repository pane is ambiguous");
+            pane=matches[0];
+            if(!pane) {
+              let created;
+              try { created=JSON.parse(await run(["--session",session,"workspace","create","--cwd",repo.path,"--label",repo.name,"--no-focus"],s)); }
+              catch { throw new BackendError("backend_error","workspace creation failed"); }
+              const result=created?.result;
+              if(created?.error!=null || result?.error!=null || result?.type!=="workspace_created" || !result.tab || typeof result.tab!=="object" || Array.isArray(result.tab) || typeof result.root_pane?.pane_id!=="string" || typeof result.workspace?.workspace_id!=="string" || result.root_pane.workspace_id!==result.workspace.workspace_id) throw new BackendError("backend_error","workspace identity not verified");
+              roster=await readRoster(run,s);
+              pane=[...roster.targets.values()].find(item=>item.session===session && item.pane.id===result.root_pane.pane_id && item.pane.workspace===result.workspace.workspace_id);
+              if(!pane || !isAbsolute(pane.pane.cwd)) throw new BackendError("backend_error","workspace identity not verified");
+              let cwd; try {cwd=realpathSync(pane.pane.cwd);} catch {throw new BackendError("backend_error","workspace cwd not verified");}
+              if(cwd!==repo.path) throw new BackendError("backend_error","workspace cwd not verified");
+              const sameRepo = [...roster.targets.values()].filter(item => {
+                if(item.session!==session || !isAbsolute(item.pane.cwd)) return false;
+                try {return realpathSync(item.pane.cwd)===repo.path;} catch {return false;}
+              });
+              if(sameRepo.length!==1) throw new BackendError("backend_error","repository pane is ambiguous");
+            }
+          }
         if (pane.pane.agent.trim()) return "already-awake";
         const name = "maw-" + createHash("sha256").update(pane.pane.id).digest("hex").slice(0, 16);
         const raw = await run(["--session", pane.session, "agent", "start", name, "--kind", wakeEngine, "--pane", pane.pane.id, "--timeout", "8000"], s);
@@ -111,7 +156,8 @@ export function createHerdrBackend(binary: string, wakeEngine = "claude"): Backe
         const result = response?.result, agent = result?.agent;
         if (!response || typeof response !== "object" || Array.isArray(response) || response.error != null || result?.error != null || result?.type !== "agent_started" || !Array.isArray(result.argv) || !result.argv.every((arg: unknown) => typeof arg === "string") || !agent || agent.pane_id !== pane.pane.id || agent.agent !== wakeEngine || agent.interactive_ready !== true || (agent.launch_pending !== undefined && agent.launch_pending !== false) || s.aborted) throw new BackendError("backend_error", "agent readiness not verified");
         return "ready";
-      }, signal);
+        } finally { previous.then(release); }
+      }, signal); } finally { waking--; }
     },
     async sendLiteral(target, text, enter, signal) {
       if (!target || Buffer.byteLength(target) > 1024) throw new BackendError("target_not_found", "unknown or stale target");
