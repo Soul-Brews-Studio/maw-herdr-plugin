@@ -113,7 +113,7 @@ func TestAPICoreContracts(t *testing.T) {
 	if w := request(s, "GET", "/api/capture", "", nil); w.Code != 400 {
 		t.Fatal(w.Code)
 	}
-	if w := request(s, "GET", "/api/capture?target=gone", "", nil); w.Code != 200 || !strings.Contains(w.Body.String(), `"error"`) {
+	if w := request(s, "GET", "/api/capture?target=gone", "", nil); w.Code != 400 || !strings.Contains(w.Body.String(), `"error"`) {
 		t.Fatal(w.Body)
 	}
 	w = request(s, "POST", "/api/send", `{"target":"default/w1:1","text":"hello; $(touch nope)"}`, nil)
@@ -278,3 +278,26 @@ func TestTicketShapeAndValidation(t *testing.T) {
 }
 
 var _ http.Handler = (*Server)(nil)
+
+func TestCaptureContract(t *testing.T) {
+	s, b := testServer(t)
+	w := request(s, "GET", "/api/capture?target=default/w1:1", "", nil)
+	var result map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || len(result) != 3 || result["content"] != "visible terminal" || result["target"] != "default/w1:1" || result["resolvedTarget"] != "default/w1:1" {
+		t.Fatal(w.Code, result)
+	}
+	for _, target := range []string{"gone", "default/w1:1"} {
+		b.failure = target != "gone"
+		w = request(s, "GET", "/api/capture?target="+target, "", nil)
+		result = nil
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 400 || result["error"] != "capture_unavailable" || strings.Contains(w.Body.String(), "private") {
+			t.Fatal(w.Code, result)
+		}
+	}
+}

@@ -9,5 +9,5 @@ export interface ServeConfig {
 }
 
 export class HTTPError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public body?: Record<string, unknown>) { super(message); }
 }

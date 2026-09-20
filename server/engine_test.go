@@ -165,11 +165,11 @@ func TestIdentityEndpointsMatchServingMode(t *testing.T) {
 	for _, engine := range []bool{false, true} {
 		name, path := "standalone", "/api/identity"
 		s, _ := testServer(t)
-		want := []string{"/api/sessions", "/api/capture", "/api/send", "/ws"}
+		want := []string{"/api/sessions", "/api/capture", "/api/send", "/ws", "/ws/pty"}
 		if engine {
 			name, path = "engine", "/api/herdr"
 			s, _ = newEngineServer(t)
-			want = []string{"/api/herdr/sessions", "/api/herdr/capture", "/api/herdr/send", "/api/herdr/ws"}
+			want = []string{"/api/herdr/sessions", "/api/herdr/capture", "/api/herdr/send", "/api/herdr/ws", "/api/herdr/ws/pty"}
 		}
 		t.Run(name, func(t *testing.T) {
 			r := httptest.NewRequest("GET", "http://localhost"+path, nil)
@@ -180,10 +180,20 @@ func TestIdentityEndpointsMatchServingMode(t *testing.T) {
 			w := httptest.NewRecorder()
 			s.ServeHTTP(w, r)
 			var identity struct {
-				Endpoints []string `json:"endpoints"`
+				Endpoints    []string `json:"endpoints"`
+				Capabilities []string `json:"capabilities"`
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &identity); err != nil {
 				t.Fatal(err)
+			}
+			found := false
+			for _, capability := range identity.Capabilities {
+				if capability == "terminal-stream" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("missing terminal-stream capability")
 			}
 			if w.Code != 200 || !reflect.DeepEqual(identity.Endpoints, want) {
 				t.Fatalf("identity endpoints: status=%d got=%v want=%v", w.Code, identity.Endpoints, want)
