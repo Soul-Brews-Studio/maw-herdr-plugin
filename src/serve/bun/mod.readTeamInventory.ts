@@ -31,6 +31,7 @@ export function readTeamInventory(home = homedir(), now = Date.now()) {
     }
     return undefined;
   };
+  let truncated = false;
   const entries = (path: string, limit: number) => {
     if (!checked(path, true)) return [];
     const names: string[] = [];
@@ -40,7 +41,7 @@ export function readTeamInventory(home = homedir(), now = Date.now()) {
       for (;;) {
         const entry = directory.readSync();
         if (!entry) break;
-        if (names.length >= limit) fail();
+        if (names.length >= limit) { truncated = true; break; }
         names.push(entry.name);
       }
       checked(path, true);
@@ -123,7 +124,7 @@ export function readTeamInventory(home = homedir(), now = Date.now()) {
     teams.push(team);
   }
   teams.sort((left, right) => String(left.name) < String(right.name) ? -1 : String(left.name) > String(right.name) ? 1 : 0);
-  const result = { teams, total: teams.length };
+  const result = { teams, total: teams.length, ...(truncated ? { truncated: true } : {}) };
   if (Buffer.byteLength(JSON.stringify(result)) > 4 * 1024 * 1024) fail();
   return result;
 }
