@@ -32,6 +32,7 @@ export async function serveWorktrees(request: Request, path: string, startupRoot
   try {
     if (!safe(startupRoot)) throw new Error('invalid startup root');
     if (!cleanup) {
+      if (!existsSync(join(startupRoot, '.git'))) return [];
       const entries = await scan();
       return entries.map(entry => {
         const base = basename(entry.path), repo = safe(base) ? base : 'worktree';

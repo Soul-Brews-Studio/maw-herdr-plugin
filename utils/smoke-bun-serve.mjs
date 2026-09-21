@@ -271,7 +271,9 @@ async function exerciseTeams(url) {
     reset(); writeFileSync(join(teams,'alpha','config.json'),Buffer.alloc(1048577,32)); await http(url,'/api/teams',{status:503});
     reset(); config({members:Array.from({length:1001},()=>({}))}); await http(url,'/api/teams',{status:503});
     reset(); config({leadRepo:'x'.repeat(10000),members:Array.from({length:500},()=>({}))}); await http(url,'/api/teams',{status:503});
-    reset(); for(let index=0;index<100;index++) mkdirSync(join(teams,'extra'+index)); await http(url,'/api/teams',{status:503});
+    reset(); for(let index=0;index<100;index++) mkdirSync(join(teams,'extra'+index));
+    { const capped = (await http(url,'/api/teams')).json;
+      assert.equal(capped.truncated,true); assert.ok(Array.isArray(capped.teams)); }
     reset(); config({}); for(let index=0;index<1001;index++) writeFileSync(join(tasks,'alpha',index+'.json'),'{}'); await http(url,'/api/teams',{status:503});
     reset(); for(let index=0;index<5;index++) {const dir=join(teams,'large'+index);mkdirSync(dir);writeFileSync(join(dir,'config.json'),Buffer.alloc(900000,32));} await http(url,'/api/teams',{status:503});
     console.log('PASS teams: real inventory, normalization, secret filtering, heuristic bounds, malformed/missing, symlinks, file/count/aggregate/amplification limits');
@@ -336,7 +338,7 @@ async function exercise(entry, label) {
   await http(url,'/api/wake',{method:'POST',body:{target,engine:'codex'},status:400});
   assert.equal((await http(url,'/api/wake',{method:'POST',body:{target,task:null,command:'ignored'}})).json.state,'already-awake');
   assert.deepEqual((await http(url, '/api/sessions')).json, sessions);
-  await http(url,'/api/worktrees',{status:500});
+  assert.deepEqual((await http(url,'/api/worktrees')).json, []);
   assert.deepEqual((await http(url, '/api/capture?target=' + encodeURIComponent(target))).json, {content:'visible output\n',target,resolvedTarget:target});
   assert.deepEqual((await http(url, '/api/captures')).json, {captures:{[target]:'visible output\n',[shell]:'visible output\n'}});
   assert.deepEqual((await http(url, '/api/agents')).json,{node:'herdr',count:2,agents:[
