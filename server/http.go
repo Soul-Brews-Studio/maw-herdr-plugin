@@ -271,7 +271,12 @@ func (s *Server) serveSend(w http.ResponseWriter, r *http.Request) {
 		}
 		body.Text = strings.Join(append(parts, body.Text), "\n")
 	}
-	if body.Target == "" || (!body.Inbox && body.Text == "") {
+	if strings.TrimSpace(body.Target) == "" {
+		s.deliveryHistory.append(deliveryEvent{Timestamp: time.Now().Unix(), Kind: "message", Direction: "inbound", State: "failed", Route: "validate", Target: body.Target, Text: body.Text, Source: "herdr", Error: "empty-target"})
+		writeJSON(w, 400, map[string]any{"ok": false, "error": "empty-target", "state": "failed"})
+		return
+	}
+	if !body.Inbox && body.Text == "" {
 		fail(w, 400, "target_and_text_required")
 		return
 	}

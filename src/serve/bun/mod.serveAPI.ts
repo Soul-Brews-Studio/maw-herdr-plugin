@@ -28,7 +28,10 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
       catch (error) { if (error instanceof HTTPError) throw error; throw new HTTPError(400, 'invalid_json'); }
       const originalText = body.text;
       if (body.attachments?.length) body.text = [...body.attachments, body.text ?? ''].join('\n');
-      if (!body.target) throw new HTTPError(400, 'target_and_text_required');
+      if (!body.target || /^\p{White_Space}*$/u.test(body.target)) {
+        history?.append({timestamp:Math.floor(Date.now()/1000),kind:'message',direction:'inbound',state:'failed',route:'validate',target:body.target ?? '',text:body.text ?? '',from:'',to:'',oracle:'',source:'herdr',error:'empty-target'});
+        throw new HTTPError(400, 'empty-target', {ok:false,error:'empty-target',state:'failed'});
+      }
       if (body.inbox) {
         if (!backend.inbox) throw new HTTPError(501, 'send_options_not_supported');
         const claim = await claimDelivery(request, body.target, body.text ?? '', originalText ?? '', 'inbox', config, backend, delivery, signal);
