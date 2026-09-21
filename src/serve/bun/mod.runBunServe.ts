@@ -72,7 +72,10 @@ export async function runBunServe(args: string[]): Promise<number> {
           if (request.method !== 'GET') return methodError();
           if ((!config.engine && !origin) || request.url.includes('?')) return failure(400, 'websocket_request_invalid');
           const offers = (request.headers.get('Sec-WebSocket-Protocol') || '').split(',').map(value => value.trim());
-          if (!config.engine) {
+          const ticketless = !!config.insecure && path === '/ws' && offers.length === 1 && offers[0] === '';
+          if (!config.engine && ticketless) {
+            readOnly = true;
+          } else if (!config.engine) {
             if (offers.length !== 2 || offers[0] !== 'maw.ws.v1') return failure(401, 'websocket_ticket_required');
             const ticket = tickets.get(offers[1]);
             if (!/^mwt1_[0-9a-f]{64}$/.test(offers[1]) || !ticket || ticket.origin !== origin || ticket.path !== path || ticket.expires <= Date.now()) return failure(401, 'websocket_ticket_invalid');
