@@ -205,6 +205,43 @@ async function socket(url, ticket, path = '/ws') {
   assert.equal(ws.protocol, ticket ? 'maw.ws.v1' : '');
   return ws;
 }
+async function exerciseDemoMode(entry, label) {
+  // Demo mode opens reads only. The token path must keep working unchanged:
+  // config.token is wiped right after hashing, so anything that asks "was a
+  // token configured?" has to capture that before the wipe.
+  const dataDir = join(temporary, `demo-${label}`);
+  const child = spawn(bun, [entry, 'serve', '--insecure-no-token', '--listen', '127.0.0.1:0', '--demo-minutes', '5', '--herdr', fake, '--data-dir', dataDir], { env, cwd: temporary, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.add(child);
+  let output = '';
+  const url = await deadline(new Promise((resolveURL, reject) => {
+    const chunk = data => { output += data; const match = /http:\/\/[^\s]+/.exec(output); if (match) resolveURL(match[0]); };
+    child.stdout.on('data', chunk); child.stderr.on('data', chunk); child.once('error', reject);
+  }), 'demo startup');
+  const origin = new URL(url).origin;
+  for (let i = 0; i < 50 && !/stopping automatically in 5 minute/.test(output); i++) await new Promise(done => setTimeout(done, 100));
+  assert.match(output, /INSECURE read-only demo/);
+  assert.match(output, /reads \(sessions, panes, captures\) are open/);
+  assert.match(output, /stopping automatically in 5 minute/);
+  for (const path of ['/api/identity', '/api/sessions', '/api/feed']) {
+    assert.equal((await http(origin, path, { auth: false })).status, 200, path);
+  }
+  for (const path of ['/api/send', '/api/wake', '/api/worktrees/cleanup']) {
+    const denied = await http(origin, path, { auth: false, method: 'POST', body: {}, status: 401 });
+    assert.equal(denied.json.error, 'operator_token_required_for_writes', path);
+  }
+  // The dashboard needs a ticket to read over the socket; it must mint, and the
+  // socket it opens must still refuse write frames.
+  const ticket = (await http(origin, '/api/auth/ws-ticket', { auth: false, method: 'POST', headers: { Origin: origin }, body: { path: '/ws' } })).json;
+  assert.match(ticket.ticket, /^mwt1_[0-9a-f]{64}$/);
+  const ws = await socket(origin, ticket.ticket);
+  for (const type of ['sessions', 'recent', 'teams']) assert.equal((await ws.next()).type, type);
+  ws.send(JSON.stringify({ type: 'send', target: 'x', text: 'must not run' }));
+  let refused;
+  for (let i = 0; i < 8 && !refused; i++) { const frame = await ws.next(); if (frame.type === 'error') refused = frame; }
+  assert.equal(refused?.error, 'operator_token_required_for_writes');
+  ws.close(); child.kill('SIGKILL');
+  console.log(`PASS ${label} demo mode: open reads, refused writes, read-only socket, warning banner`);
+}
 async function exerciseFeedActivity(entry, label) {
   const {child,url} = await start(entry, join(temporary, `activity-${label}`));
   await http(url, '/api/feed', {method:'POST', body:{oracle:'codex',event:'not-injected',text:'not-injected'}});
@@ -531,6 +568,7 @@ try {
     assert.match(rejected.stderr,/token/i);
   }
   await exerciseFeedActivity(join(root,'index.mjs'),'source');
+  await exerciseDemoMode(join(root,'index.mjs'),'source');
   await exerciseEngine(join(root,'index.mjs'),'source');
   await exercise(join(root,'index.mjs'),'source');
   await exerciseWorktrees(join(root,'index.mjs'),'source');

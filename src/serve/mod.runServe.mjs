@@ -2,10 +2,14 @@ export async function runServe(args) {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`maw herdr serve --token-file PATH [--listen 127.0.0.1:3457]
                 [--herdr PATH] [--data-dir PATH] [--wake-engine KIND]
+                [--insecure-no-token [--demo-minutes N]]
 
 Core dashboard API: sessions, live pane output and prompt submission.
 Dashboard wake supports existing panes and registered repositories/tasks (default codex).
-The token file is required, including on loopback. Help needs no Herdr.
+The token file is required, including on loopback.
+--insecure-no-token opens READS only (sessions, panes, captures) with no token,
+for a quick demo; writes still require --token-file and the server stops itself
+after --demo-minutes (default 30). Loopback is not a boundary against a browser. Help needs no Herdr.
 The server is TypeScript on Bun; there is no native runtime and no compiler step.
 Host-managed serving is declared separately by plugin.json engine.serve.`);
     return 0;

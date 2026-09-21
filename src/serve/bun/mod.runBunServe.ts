@@ -16,13 +16,14 @@ import { createSocketSession, type SocketData } from './mod.createSocketSession.
 export async function runBunServe(args: string[]): Promise<number> {
   const config = readServeConfig(args);
   const tokenHash = createHash('sha256').update(config.token).digest();
+  const tokenConfigured = config.token.length > 0;
   config.token = '';
   const backend = createHerdrBackend(config.binary, config.wakeEngine, config.explicitWakeEngine);
   const shutdown = new AbortController();
   const started = Date.now();
   const delivery = createDeliveryDedup();
   const deliveryHistory = createDeliveryFeed();
-  const tickets = new Map<string, { origin: string; path: string; expires: number }>();
+  const tickets = new Map<string, { origin: string; path: string; expires: number; readOnly?: boolean }>();
   const sockets = new Set<ServerWebSocket<SocketData>>();
   let connections = 0, requests = 0;
   const server = Bun.serve<SocketData>({
@@ -66,6 +67,7 @@ export async function runBunServe(args: string[]): Promise<number> {
         }
         const allowed = path === '/api/auth/ws-ticket' || path === '/api/send' || path === '/api/wake' || path === '/api/worktrees/cleanup' ? ['POST'] : ['/api/asks', '/api/ui-state', '/api/feed'].includes(path) ? ['GET', 'POST'] : ['GET'];
         const methodError = () => { headers.set('Allow', allowed.join(', ')); return failure(405, 'method_not_allowed'); };
+        let readOnly = false;
         if (path === '/ws' || path === '/ws/pty') {
           if (request.method !== 'GET') return methodError();
           if ((!config.engine && !origin) || request.url.includes('?')) return failure(400, 'websocket_request_invalid');
@@ -74,16 +76,24 @@ export async function runBunServe(args: string[]): Promise<number> {
             if (offers.length !== 2 || offers[0] !== 'maw.ws.v1') return failure(401, 'websocket_ticket_required');
             const ticket = tickets.get(offers[1]);
             if (!/^mwt1_[0-9a-f]{64}$/.test(offers[1]) || !ticket || ticket.origin !== origin || ticket.path !== path || ticket.expires <= Date.now()) return failure(401, 'websocket_ticket_invalid');
+            readOnly = !!ticket.readOnly;
             tickets.delete(offers[1]); // Single-use, before upgrade, with no intervening await.
           }
           if (connections >= 32) return failure(503, 'websocket_capacity_reached');
           if (offers.includes('maw.ws.v1')) headers.set('Sec-WebSocket-Protocol', 'maw.ws.v1');
-          if (instance.upgrade(request, { headers, data: { controller: new AbortController(), path } })) { connections++; return; }
+          if (instance.upgrade(request, { headers, data: { controller: new AbortController(), path, readOnly } })) { connections++; return; }
           return failure(400, 'websocket_request_invalid');
         }
+        const WRITE_ROUTES = new Set(['/api/send', '/api/wake', '/api/worktrees/cleanup']);
+        const isWrite = path !== '/api/auth/ws-ticket' && (request.method === 'POST' || WRITE_ROUTES.has(path));
+        const authorization = request.headers.get('authorization') || '';
+        const authenticated = tokenConfigured && authorization.startsWith('Bearer ')
+          && timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash);
         if (!config.engine) {
-          const authorization = request.headers.get('authorization') || '';
-          if (!authorization.startsWith('Bearer ') || !timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash)) {
+          if (config.insecure && !isWrite) { /* read-only demo access */ }
+          else if (config.insecure && isWrite) {
+            return failure(401, 'operator_token_required_for_writes');
+          } else if (!authenticated) {
             if (path === '/api/send' && request.method === 'POST') deliveryHistory.append({ timestamp: Math.floor(Date.now() / 1000), kind: 'message', direction: 'inbound', state: 'failed', route: 'auth', event: 'auth-reject', decision: 'operator_token_required', source: 'herdr', from: '', to: '', target: '', text: '', oracle: '' });
             return failure(401, 'operator_token_required');
           }
@@ -98,7 +108,7 @@ export async function runBunServe(args: string[]): Promise<number> {
           for (const [key, ticket] of tickets) if (ticket.expires <= now) tickets.delete(key);
           if (tickets.size >= 256) return failure(429, 'too_many_tickets');
           const value = 'mwt1_' + randomBytes(32).toString('hex');
-          tickets.set(value, { origin, path: body.path, expires: now + 30_000 });
+          tickets.set(value, { origin, path: body.path, expires: now + 30_000, readOnly: !!config.insecure && !authenticated });
           return json({ protocol: 'maw.ws.v1', ticket: value });
         }
         return json(await serveAPI(request, path, config, backend, started, signal, delivery, deliveryHistory));
@@ -121,7 +131,22 @@ export async function runBunServe(args: string[]): Promise<number> {
   });
   const hostname = server.hostname || config.hostname;
   const displayHost = hostname.includes(':') ? `[${hostname}]` : hostname;
-  console.error(`maw herdr serve: http://${displayHost}:${server.port}${config.engine ? '/api/herdr' : ''} (Bun/TypeScript; ${config.engine ? 'engine child; gateway authenticates remote clients' : 'operator token required; core dashboard only'})`);
+  console.error(`maw herdr serve: http://${displayHost}:${server.port}${config.engine ? '/api/herdr' : ''} (Bun/TypeScript; ${config.engine ? 'engine child; gateway authenticates remote clients' : config.insecure ? 'INSECURE read-only demo; no token required' : 'operator token required; core dashboard only'})`);
+  if (config.insecure) {
+    // Loopback is not a boundary against a browser: any page the operator
+    // visits can reach this port. Reads are open here, so say so plainly and
+    // stop on a deadline rather than lingering.
+    console.error('maw herdr serve: WARNING — reads (sessions, panes, captures) are open to any local process or web page.');
+    console.error('maw herdr serve: writes (send, wake, cleanup) still require --token-file.');
+    console.error(`maw herdr serve: stopping automatically in ${config.demoMinutes} minute(s).`);
+    const demoTimer = setTimeout(() => {
+      console.error('maw herdr serve: demo window elapsed; stopping.');
+      shutdown.abort();
+      server.stop(true);
+      process.exit(0);
+    }, (config.demoMinutes ?? 30) * 60_000);
+    demoTimer.unref?.();
+  }
   return new Promise<number>(resolve => {
     const stop = async () => {
       if (shutdown.signal.aborted) return;
