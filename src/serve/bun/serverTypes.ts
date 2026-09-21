@@ -3,6 +3,8 @@ export interface ServeConfig {
   hostname: string;
   port: number;
   token: string;
+  insecure?: boolean;
+  demoMinutes?: number;
   dataDir: string;
   binary: string;
   wakeEngine: string;

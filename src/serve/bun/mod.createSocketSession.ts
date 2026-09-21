@@ -2,7 +2,7 @@ import type { ServerWebSocket } from 'bun';
 import type { Backend } from './types.ts';
 import { validateCommand, type Command } from './mod.validateCommand.ts';
 
-export interface SocketData { controller: AbortController; path?: string; session?: { close(): void; message(value: string | Buffer): void } }
+export interface SocketData { controller: AbortController; path?: string; readOnly?: boolean; session?: { close(): void; message(value: string | Buffer): void } }
 
 export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Backend) {
   const signal = ws.data.controller.signal;
@@ -89,12 +89,14 @@ export function createSocketSession(ws: ServerWebSocket<SocketData>, backend: Ba
         if (body.targets?.some(target => !target || Buffer.byteLength(target) > 1024)) { error('subscription_invalid'); return; }
         previews = new Map((body.targets || []).map(target => [target, ''])); previewSent.clear(); await capture(); return;
       case 'wake':
+        if (ws.data.readOnly) { error('operator_token_required_for_writes'); return; }
         if (!body.target || Buffer.byteLength(body.target) > 1024) { error('target_required'); return; }
         if (body.command?.length) { error('wake_command_not_supported'); return; }
         try { await backend.wake(body.target, signal); }
         catch { error('wake_failed'); return; }
         write({ type: 'action-ok', action: 'wake', target: body.target }); return;
       case 'send': {
+        if (ws.data.readOnly) { error('operator_token_required_for_writes'); return; }
         const target = body.target ?? selected;
         const text = Object.hasOwn(body, 'text') ? body.text : body.content;
         if (!target || text === undefined || text === null) { error('target_and_text_required'); return; }
