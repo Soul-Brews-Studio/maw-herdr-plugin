@@ -60,23 +60,13 @@ jobs:
           MAW_TASK_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-task-serve.mjs
           MAW_LAUNCH_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-launch-serve.mjs
           MAW_LAUNCH_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-wake-finalize.mjs
-          node utils/smoke-registry-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
-          MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
-          node utils/smoke-task-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
-          node utils/smoke-launch-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
-          node utils/smoke-wake-finalize.mjs "$RUNNER_TEMP/maw-herdr-serve"
           MAW_CONFIG_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-config-serve.mjs
           MAW_STATE_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-state-serve.mjs
           MAW_INBOX_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-inbox-serve.mjs
-          node utils/smoke-config-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
-          node utils/smoke-state-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
-          node utils/smoke-inbox-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           MAW_FEDERATION_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-federation-serve.mjs
-          node utils/smoke-federation-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
           bun utils/smoke-terminal-serve.mjs
           MAW_TERMINAL_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-terminal-serve.mjs
           bun utils/smoke-terminal-limits.ts
-          bun utils/smoke-terminal-serve.mjs "$RUNNER_TEMP/maw-herdr-serve"
       - name: Build source-independent native plugin package
         run: |
           node --check utils/package-serve.mjs
