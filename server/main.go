@@ -54,14 +54,17 @@ func run() error {
 			return errors.New("--listen must use a loopback IP or localhost and port")
 		}
 		if *tokenFile == "" {
-			return errors.New("--token-file is required; never pass operator tokens on the command line")
+			return errors.New("--token-file is required; never pass operator tokens on the command line\n" +
+				"  test -e ~/.maw-herdr-token || (umask 077; openssl rand -hex 32 > ~/.maw-herdr-token)\n" +
+				"  maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457")
 		}
 		info, err := os.Stat(*tokenFile)
 		if err != nil {
 			return fmt.Errorf("token file: %w", err)
 		}
 		if !info.Mode().IsRegular() || info.Size() > 4096 || info.Mode().Perm()&0077 != 0 {
-			return errors.New("token file must be a regular file <=4096 bytes, readable only by its owner (chmod 600)")
+			return fmt.Errorf("token file must be a regular file <=4096 bytes, readable only by its owner\n"+
+				"  chmod 600 %s", *tokenFile)
 		}
 		secret, err := os.ReadFile(*tokenFile)
 		if err != nil {
