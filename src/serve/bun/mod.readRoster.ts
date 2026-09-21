@@ -50,8 +50,8 @@ export async function readRoster(run: RunHerdr, signal: AbortSignal): Promise<Ro
       const pane: Pane = { workspaceLabel: labels.get(string(p.workspace_id)), id: string(p.pane_id), workspace: string(p.workspace_id), agent: string(p.agent), label: string(p.label), title: string(p.title), cwd: string(p.cwd), focused: p.focused as boolean, status: string(p.agent_status) };
       if (!["idle", "working", "blocked", "done", "unknown"].includes(pane.status)) invalid("invalid pane agent status");
       const space = spaces.get(pane.workspace), prefix = pane.workspace + ":p";
-      const number = pane.id.slice(prefix.length), n = Number(number);
-      if (!space || typeof pane.focused !== "boolean" || !pane.id.startsWith(prefix) || !Number.isSafeInteger(n) || n < 0 || String(n) !== number || seenPanes.has(pane.id)) invalid("invalid or ambiguous pane identity");
+      const number = pane.id.slice(prefix.length), n = Number.parseInt(number, 36);
+      if (!space || typeof pane.focused !== "boolean" || !pane.id.startsWith(prefix) || !/^[0-9a-z]+$/i.test(number) || !Number.isSafeInteger(n) || n < 0 || seenPanes.has(pane.id)) invalid("invalid or ambiguous pane identity");
       seenPanes.add(pane.id);
       const target = space.name + ":" + number;
       if (result.targets.has(target)) invalid("duplicate pane target");
