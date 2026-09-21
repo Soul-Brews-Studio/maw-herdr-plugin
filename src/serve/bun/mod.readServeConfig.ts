@@ -31,13 +31,16 @@ export function readServeConfig(args: string[]): ServeConfig {
     listen = `127.0.0.1:${port}`;
   } else {
     const path = flags.get('--token-file');
-    if (!path) throw new Error('--token-file is required; never pass operator tokens on the command line');
+    if (!path) throw new Error('--token-file is required; never pass operator tokens on the command line\n'
+      + '  test -e ~/.maw-herdr-token || (umask 077; openssl rand -hex 32 > ~/.maw-herdr-token)\n'
+      + '  maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457');
     let fd: number | undefined;
     try {
       fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const stat = fstatSync(fd);
       if (!stat.isFile() || stat.size > 4096 || (stat.mode & 0o077)) {
-        throw new Error('must be a regular file <=4096 bytes, readable only by its owner (chmod 600)');
+        throw new Error('must be a regular file <=4096 bytes, readable only by its owner\n'
+          + `  chmod 600 ${path}`);
       }
       token = readFileSync(fd, 'utf8').trim();
     } catch (error) { throw new Error(`token file: ${(error as Error).message}`); }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
+  `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
+  packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no
+  longer installs Go. The 63-file Go implementation remains in git history and
+  can be restored; nothing about the HTTP/WebSocket contract changed.
+- Every token-file error now ends with a copy-pasteable command, with the real
+  path substituted for the `chmod` hint.
+
 - Align serving with maw-rs `engine.serve` and checksum-pinned `bundledArtifacts`:
   source-independent native packages for Linux/macOS amd64/arm64, no implicit Go
   compilation, explicit developer `--build`, and host-managed namespaced mode.

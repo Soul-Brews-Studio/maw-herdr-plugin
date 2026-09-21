@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Run only against a native package. No daemon, credentials, network or Go required.
+// Run only against a built package. No daemon, credentials or network required.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -25,34 +25,23 @@ try {
   const manifest = JSON.parse(readFileSync(join(packaged, 'plugin.json'), 'utf8'));
   assert.equal(manifest.entry, 'index.js');
   assert.equal(manifest.artifact.path, 'index.js');
-  assert.deepEqual(manifest.bundledArtifacts.map(item => item.path), ['bin/maw-herdr-serve']);
-  for (const artifact of [manifest.artifact, ...manifest.bundledArtifacts]) {
-    const digest = createHash('sha256').update(readFileSync(join(packaged, artifact.path))).digest('hex');
-    assert.equal(artifact.sha256, `sha256:${digest}`);
-  }
-  assert.equal(existsSync(join(packaged, 'server')), false, 'package must not require server sources');
-  const binary = join(packaged, 'bin', 'maw-herdr-serve');
-  assert.equal(statSync(binary).mode & 0o777, 0o755);
+  assert.equal(manifest.bundledArtifacts, undefined, 'Bun-only packages bundle no native helper');
+  assert.equal(manifest.engine.serve.command, 'bun index.mjs serve --engine');
+  const digest = createHash('sha256').update(readFileSync(join(packaged, manifest.artifact.path))).digest('hex');
+  assert.equal(manifest.artifact.sha256, `sha256:${digest}`);
+  assert.equal(existsSync(join(packaged, 'server')), false, 'package must not ship server sources');
+  assert.equal(existsSync(join(packaged, 'bin')), false, 'package must not ship a native helper');
   const env = { ...process.env, PATH: '/nonexistent', XDG_CACHE_HOME: join(temporary, 'cache') };
   delete env.MAW_HERDR_SERVE_BIN;
-  const nativeHelp = run(binary, ['--help'], env);
-  assert.equal(nativeHelp.status, 0, nativeHelp.stderr);
-  assert.match(nativeHelp.stdout + nativeHelp.stderr, /token-file/);
   const entry = join(packaged, 'index.js');
   const help = run(bun, [entry, 'serve', '--help'], env);
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /token-file/);
-  const forwarded = run(bun, [entry, 'serve', '--runtime', 'native', '--listen', 'invalid address with spaces'], env);
-  assert.equal(forwarded.status, 1, forwarded.stderr);
-  assert.match(forwarded.stderr, /--listen must use a loopback/);
-  assert.equal(existsSync(env.XDG_CACHE_HOME), false, 'prebuilt launch must not build sources');
-  // A copied package allows corruption checks without changing the build output.
-  writeFileSync(binary, Buffer.concat([readFileSync(binary), Buffer.from('tampered')]));
-  const corrupted = run(bun, [entry, 'serve', '--runtime', 'native', '--listen', 'invalid'], env);
-  assert.notEqual(corrupted.status, 0);
-  assert.match(corrupted.stderr, /sha256|checksum|integrity|digest|hash/i);
-  assert.doesNotMatch(corrupted.stderr, /--listen must use a loopback/);
-  console.log('PASS: package hashes/mode, native help, source-free Bun help/argv without Go, tampered helper rejected');
+  const removed = run(bun, [entry, 'serve', '--runtime', 'native', '--token-file', 'unused'], env);
+  assert.equal(removed.status, 1);
+  assert.match(removed.stderr, /was removed; the server is always TypeScript on Bun/);
+  assert.equal(existsSync(env.XDG_CACHE_HOME), false, 'launch must never build anything');
+  console.log('PASS: package hash/shape, no native helper or sources, Bun help without PATH tools, removed selection rejected');
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }
