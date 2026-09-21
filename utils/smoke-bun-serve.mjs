@@ -193,8 +193,8 @@ async function http(url, path, { status = 200, auth = true, headers = {}, method
   assert.equal(result.status, status, `${path}: ${result.raw}`); checks++;
   return result;
 }
-async function socket(url, ticket, path = '/ws') {
-  const ws = new WebSocket(url.replace('http:', 'ws:') + path, { protocols: ticket ? ['maw.ws.v1', ticket] : [], headers: ticket ? { Origin: url } : {} });
+async function socket(url, ticket, path = '/ws', { origin = !!ticket } = {}) {
+  const ws = new WebSocket(url.replace('http:', 'ws:') + path, { protocols: ticket ? ['maw.ws.v1', ticket] : [], headers: origin ? { Origin: url } : {} });
   sockets.add(ws);
   const queue = [];
   let pending;
@@ -239,8 +239,17 @@ async function exerciseDemoMode(entry, label) {
   let refused;
   for (let i = 0; i < 8 && !refused; i++) { const frame = await ws.next(); if (frame.type === 'error') refused = frame; }
   assert.equal(refused?.error, 'operator_token_required_for_writes');
-  ws.close(); child.kill('SIGKILL');
-  console.log(`PASS ${label} demo mode: open reads, refused writes, read-only socket, warning banner`);
+  ws.close();
+  const legacy = await socket(origin, undefined, '/ws', { origin: true });
+  for (const type of ['sessions', 'recent', 'teams']) assert.equal((await legacy.next()).type, type);
+  legacy.send(JSON.stringify({ type: 'send', target: 'x', text: 'must not run' }));
+  let legacyRefused;
+  for (let i = 0; i < 8 && !legacyRefused; i++) { const frame = await legacy.next(); if (frame.type === 'error') legacyRefused = frame; }
+  assert.equal(legacyRefused?.error, 'operator_token_required_for_writes');
+  legacy.close();
+  await assert.rejects(socket(origin, undefined, '/ws/pty', { origin: true }), /handshake failed/);
+  child.kill('SIGKILL');
+  console.log(`PASS ${label} demo mode: open reads, refused writes, read-only ticket and legacy sockets, pty still gated, warning banner`);
 }
 async function exerciseFeedActivity(entry, label) {
   const {child,url} = await start(entry, join(temporary, `activity-${label}`));
