@@ -2,7 +2,7 @@
 // Build a source-independent plugin folder; never overwrite an existing output.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,25 +21,16 @@ if (!['linux', 'darwin'].includes(os) || !['amd64', 'arm64'].includes(arch) || !
 }
 // Non-recursive mkdir is intentional: EEXIST rejects files, directories and symlinks.
 mkdirSync(out, { mode: 0o755 });
-mkdirSync(join(out, 'bin'));
 function run(command, args, extra = {}) {
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', ...extra });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} failed (${result.status ?? result.signal}); incomplete package retained at ${out}`);
 }
-const binary = join(out, 'bin', 'maw-herdr-serve');
-run('go', ['build', '-trimpath', '-o', binary, '.'], {
-  cwd: join(root, 'server'),
-  env: { ...process.env, GOWORK: 'off', GOFLAGS: '', CGO_ENABLED: '0', GOOS: os, GOARCH: arch },
-});
-chmodSync(binary, 0o755);
 run('bun', ['build', join(root, 'index.mjs'), '--target=bun', '--outfile', join(out, 'index.js')]);
 const hash = path => `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
 const manifest = JSON.parse(readFileSync(join(root, 'plugin.json'), 'utf8'));
 manifest.entry = 'index.js';
-manifest.engine.serve.command = './bin/maw-herdr-serve --engine';
 manifest.artifact = { path: 'index.js', sha256: hash(join(out, 'index.js')) };
-manifest.bundledArtifacts = [{ path: 'bin/maw-herdr-serve', sha256: hash(binary) }];
 writeFileSync(join(out, 'plugin.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-writeFileSync(join(out, 'README.md'), `# Herdr plugin (${os}/${arch})\n\nBun/TypeScript is the default dashboard server. This package also includes a native server selected with --runtime native; no Go compiler is required.\nBun and Herdr are still runtime prerequisites.\n\nRun locally: \`bun index.js serve --help\`. After installing the plugin: \`maw herdr serve --help\`.\nUse \`maw herdr serve --token-file /absolute/path/to/token\` to start the loopback dashboard API.\nThe token file must be owner-only (chmod 600) and contain at least 16 bytes.\n\nThe command is **herdr**, not **herder**. This is a CI package, not a published release.\n`);
+writeFileSync(join(out, 'README.md'), `# Herdr plugin (${os}/${arch})\n\nThe dashboard server is TypeScript on Bun. There is no native server and no compiler step.\nBun and Herdr are runtime prerequisites.\n\nRun locally: \`bun index.js serve --help\`. After installing the plugin: \`maw herdr serve --help\`.\nUse \`maw herdr serve --token-file /absolute/path/to/token\` to start the loopback dashboard API.\nThe token file must be owner-only (chmod 600) and contain at least 16 bytes.\n\nThe command is **herdr**, not **herder**. This is a CI package, not a published release.\n`);
 console.log(`Packaged ${manifest.name}@${manifest.version} for ${os}/${arch}: ${out}`);

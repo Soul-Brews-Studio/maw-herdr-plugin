@@ -1,8 +1,8 @@
 # maw-herdr-plugin
 
 `maw herdr ls/a/wake/hey/peek` — maw's own verbs, pointed at
-[herdr](https://herdr.dev). Dev-tier JS plugin (`runtime: "bun-dev"`), runs on
-Bun/TypeScript by default. No Go compiler or native helper needed.
+[herdr](https://herdr.dev). Dev-tier JS plugin (`runtime: "bun-dev"`). The
+dashboard server is TypeScript on Bun — no compiler, no native helper.
 
 ## Install
 
@@ -19,7 +19,7 @@ From a clone, use the justfile (split into `local`/`remote`/`fleet` modules):
 
 ```bash
 just local install              # this machine, from source
-just serve install               # build + install the native package
+just serve install               # build + install the plugin package
 just remote up god@white.local   # install + smoke on a remote
 just fleet status                # versions across every machine
 ```
@@ -113,9 +113,9 @@ test -e "$HOME/.maw-herdr-token" || \
 maw-js herdr serve --token-file "$HOME/.maw-herdr-token" --listen 127.0.0.1:3457
 ```
 
-Auth is mandatory even on loopback. `--runtime native` requires the packaged,
-checksum-pinned `bin/maw-herdr-serve` and never builds implicitly; `--build`
-compiles Go source explicitly (dev only, Go 1.23+).
+Auth is mandatory even on loopback. There is one runtime: TypeScript on Bun.
+`--runtime`, `--build` and `MAW_HERDR_SERVE_BIN` were removed and now fail with
+the command to use instead.
 
 Coverage vs. the legacy `maw serve`/God UI contract — not full parity:
 
@@ -155,7 +155,7 @@ exact field/limit contracts; this README stays a map, not the spec.
 ```bash
 just local smoke                  # here, against the installed plugin
 just remote smoke god@white.local # there
-just serve check                  # Go + Bun builds, API/process smokes
+just serve check                  # Bun build, API/process smokes
 ```
 
 Skips with a `SKIP:` line (exit 0) when `maw`/`herdr` isn't on `PATH` — safe

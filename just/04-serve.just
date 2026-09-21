@@ -1,11 +1,10 @@
 # Server development checks are isolated; install explicitly updates local plugins.
-set working-directory := '../server'
+set working-directory := '..'
 
 # Fast Bun-only build and isolated runtime smoke; no Go compiler required.
 bun-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd ..
     output=$(mktemp -d "${TMPDIR:-/tmp}/maw-herdr-bun.XXXXXX")
     trap 'rm -rf "$output"' EXIT
     bun build index.mjs --target=bun --outfile "$output/index.js"
@@ -44,68 +43,13 @@ bun-check:
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
     bun utils/smoke-terminal-limits.ts
 
-# Compile first, then run API tests and static checks.
-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    output=$(mktemp -d "${TMPDIR:-/tmp}/maw-herdr-build.XXXXXX")
-    trap 'rm -rf "$output"' EXIT
-    GOWORK=off go build -o "$output/maw-herdr-serve" .
-    GOWORK=off go test ./...
-    GOWORK=off go vet ./...
-    cd ..
-    bun build index.mjs --target=bun --outfile "$output/index.js"
-    bun utils/smoke-terminal-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-federation-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-config-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-state-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-inbox-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-registry-serve.mjs "$output/maw-herdr-serve"
-    MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-task-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-launch-serve.mjs "$output/maw-herdr-serve"
-    node utils/smoke-wake-finalize.mjs "$output/maw-herdr-serve"
-    node utils/smoke-serve-launcher.mjs
-    bun utils/smoke-bun-serve.mjs
-    bun utils/smoke-federation-config.ts
-    node utils/smoke-federation-serve.mjs
-    bun utils/smoke-maw-config.ts
-    node utils/smoke-config-serve.mjs
-    node utils/smoke-state-serve.mjs
-    node utils/smoke-inbox-serve.mjs
-    bun utils/smoke-registry-wake.ts
-    node utils/smoke-registry-serve.mjs
-    MAW_TEST_WAKE_ENGINE=claude node utils/smoke-registry-serve.mjs
-    bun utils/smoke-task-plan.ts
-    node utils/smoke-task-serve.mjs
-    bun utils/smoke-wake-launch.ts
-    bun utils/smoke-wake-hooks.ts
-    bun utils/smoke-wake-fleet.ts
-    bun utils/smoke-receiver-inbox.ts
-    bun utils/smoke-delivery-dedup.ts
-    bun utils/smoke-delivery-feed.ts
-    bun utils/smoke-feed-activity.ts
-    bun utils/smoke-wake-identity.ts
-    node utils/smoke-launch-serve.mjs
-    node utils/smoke-wake-finalize.mjs
-    MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
-    MAW_TEST_WAKE_ENGINE=claude MAW_REGISTRY_ENTRY="$output/index.js" node utils/smoke-registry-serve.mjs
-    MAW_TASK_ENTRY="$output/index.js" node utils/smoke-task-serve.mjs
-    MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-launch-serve.mjs
-    MAW_LAUNCH_ENTRY="$output/index.js" node utils/smoke-wake-finalize.mjs
-    MAW_CONFIG_ENTRY="$output/index.js" node utils/smoke-config-serve.mjs
-    MAW_STATE_ENTRY="$output/index.js" node utils/smoke-state-serve.mjs
-    MAW_INBOX_ENTRY="$output/index.js" node utils/smoke-inbox-serve.mjs
-    MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
-    bun utils/smoke-terminal-serve.mjs
-    MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
-    bun utils/smoke-terminal-limits.ts
+# The server is TypeScript on Bun; check is the Bun suite.
+check: bun-check
 
-# Build an installable native package; normal installed use does not need Go.
+# Build an installable package; no compiler, no native helper.
 install:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd ..
     stage=$(mktemp -d "${TMPDIR:-/tmp}/maw-herdr-package.XXXXXX")
     trap 'rm -rf "$stage"' EXIT
     os=$(node -p 'process.platform')

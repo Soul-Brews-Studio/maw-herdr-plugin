@@ -50,12 +50,12 @@ _stage:
     # uncommitted work should still be installable while iterating
     cp index.mjs plugin.json README.md CHANGELOG.md smoke.sh "$stage/"
     # Overlay only regular source files. Never dereference source symlinks or
-    # copy generated server/bin artifacts, indexes, caches, or private files.
+    # copy generated bin artifacts, indexes, caches, or private files.
     python3 - "$stage" <<'PY_STAGE'
     from pathlib import Path
     import shutil, sys
     stage = Path(sys.argv[1])
-    for root, suffixes in [(Path('src/serve'), {'.mjs'}), (Path('server'), {'.go'})]:
+    for root, suffixes in [(Path('src/serve'), {'.mjs', '.ts'})]:
         if root.is_symlink():
             raise SystemExit(f"refusing source symlink: {root}")
         if not root.exists():
@@ -65,7 +65,7 @@ _stage:
                 raise SystemExit(f"refusing source symlink: {source}")
             if 'bin' in source.parts or any(p.startswith('.') for p in source.parts):
                 continue
-            if source.is_file() and (source.suffix in suffixes or source.name in {'go.mod', 'go.sum'}):
+            if source.is_file() and source.suffix in suffixes:
                 target = stage / source
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
