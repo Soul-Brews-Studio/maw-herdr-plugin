@@ -1,13 +1,11 @@
 import { serveFeedActivity } from './mod.serveFeedActivity.ts';
 import type { createDeliveryFeed } from './mod.createDeliveryFeed.ts';
-import { recordDelivery } from './mod.recordDelivery.ts';
-import { claimDelivery } from './mod.claimDelivery.ts';
+import { serveSend } from './mod.serveSend.ts';
 import type { createDeliveryDedup } from './mod.createDeliveryDedup.ts';
 import { serveWorktrees } from './mod.serveWorktrees.ts';
 import type { Backend } from './types.ts';
 import { HTTPError, type ServeConfig } from './serverTypes.ts';
 import { readJSON } from './mod.readJSON.ts';
-import { validateCommand } from './mod.validateCommand.ts';
 import { serveState } from './mod.serveState.ts';
 
 export async function serveAPI(request: Request, path: string, config: ServeConfig, backend: Backend, started: number, signal: AbortSignal, delivery?: ReturnType<typeof createDeliveryDedup>, history?: ReturnType<typeof createDeliveryFeed>): Promise<unknown> {
@@ -22,52 +20,7 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
       const state = await backend.wake(body.target, signal, 'task' in body && typeof body.task === 'string' ? body.task : undefined);
       return { ok: true, target: body.target, state };
     }
-    case '/api/send': {
-      let body;
-      try { body = validateCommand(await readJSON(request, 64 << 10, signal)); }
-      catch (error) { if (error instanceof HTTPError) throw error; throw new HTTPError(400, 'invalid_json'); }
-      const originalText = body.text;
-      if (body.attachments?.length) body.text = [...body.attachments, body.text ?? ''].join('\n');
-      if (!body.target || /^\p{White_Space}*$/u.test(body.target)) {
-        history?.append({timestamp:Math.floor(Date.now()/1000),kind:'message',direction:'inbound',state:'failed',route:'validate',target:body.target ?? '',text:body.text ?? '',from:'',to:'',oracle:'',source:'herdr',error:'empty-target'});
-        throw new HTTPError(400, 'empty-target', {ok:false,error:'empty-target',state:'failed'});
-      }
-      if (body.inbox) {
-        if (!backend.inbox) throw new HTTPError(501, 'send_options_not_supported');
-        const claim = await claimDelivery(request, body.target, body.text ?? '', originalText ?? '', 'inbox', config, backend, delivery, signal);
-        if (claim.duplicate) {
-          await recordDelivery(history, backend, request, body.target, body.text ?? '', body.inbox ? 'inbox' : 'local', 'deduped', signal);
-          return claim.duplicate;
-        }
-        try {
-          const inbox = await backend.inbox(body.target, body.text ?? '', config.worktreeRoot, request.headers.get('X-Maw-From') ?? '', signal);
-          claim.complete('queued');
-          await recordDelivery(history, backend, request, body.target, body.text ?? '', 'inbox', 'queued', signal);
-          return { ok: true, target: body.target, text: originalText ?? '', source: 'inbox', state: 'queued', inbox,
-            reason: '--inbox requested; pane injection skipped', receipt: ['fallback_queued'] };
-        } catch (error) {
-          await recordDelivery(history, backend, request, body.target, body.text ?? '', body.inbox ? 'inbox' : 'local', 'failed', signal);
-          throw error;
-        } finally { claim.cancel(); }
-      }
-      if (!body.text) throw new HTTPError(400, 'target_and_text_required');
-      if (body.force) throw new HTTPError(501, 'send_options_not_supported');
-      const claim = await claimDelivery(request, body.target, body.text, body.text, 'local', config, backend, delivery, signal);
-      if (claim.duplicate) {
-          await recordDelivery(history, backend, request, body.target, body.text ?? '', body.inbox ? 'inbox' : 'local', 'deduped', signal);
-          return claim.duplicate;
-        }
-      try {
-        await backend.send(body.target, body.text, signal);
-        claim.complete('accepted');
-        await recordDelivery(history, backend, request, body.target, body.text, 'local', 'accepted', signal);
-        return { ok: true, target: body.target, text: body.text, source: 'local', lastLine: '', state: 'accepted', receipt: ['herdr agent prompt accepted'],
-          warning: 'Prompt acceptance does not imply consumption or completion; this path does not queue an inbox message.' };
-      } catch (error) {
-          await recordDelivery(history, backend, request, body.target, body.text ?? '', body.inbox ? 'inbox' : 'local', 'failed', signal);
-          throw error;
-        } finally { claim.cancel(); }
-    }
+    case '/api/send': return serveSend(request, config, backend, signal, delivery, history);
     case '/api/sessions': return backend.sessions(signal);
     case '/api/capture': {
       const target = new URL(request.url).searchParams.get('target');

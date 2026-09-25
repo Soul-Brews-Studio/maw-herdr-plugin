@@ -412,7 +412,15 @@ async function exercise(entry, label) {
   const text = 'literal; $(touch never)\n--wait';
   const sent = (await http(url,'/api/send',{method:'POST',body:{target,text}})).json;
   assert.equal(sent.state,'accepted'); assert.equal(sent.text,text); assert.equal(sent.ok,true);
-  assert.ok(readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).some(args => JSON.stringify(args) === JSON.stringify(['--session','main','agent','prompt','wD:p4',text])));
+  // Legacy sender tag: the server's own identity here (it depends on the
+  // caller's tmux/cwd, so match its shape), and the header's node:oracle below.
+  const lastPrompt = () => readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent' && args[3] === 'prompt').at(-1);
+  assert.deepEqual(lastPrompt().slice(0,5), ['--session','main','agent','prompt','wD:p4']);
+  assert.match(lastPrompt()[5], /^\[[^\]\n]+:[^\]\n]+\] literal; \$\(touch never\)\n--wait$/);
+  assert.equal((await http(url,'/api/send',{method:'POST',body:{target,text},headers:{'X-Maw-From':'neo:white'}})).json.text,text);
+  assert.deepEqual(lastPrompt(), ['--session','main','agent','prompt','wD:p4','[white:neo] '+text]);
+  assert.equal((await http(url,'/api/send',{method:'POST',body:{target,text:'/compact'},headers:{'X-Maw-From':'neo:white'}})).json.text,'/compact');
+  assert.deepEqual(lastPrompt(), ['--session','main','agent','prompt','wD:p4','/compact'], 'slash commands are not tagged');
   assert.equal(existsSync(join(temporary,'never')),false);
   const countPrompts = () => readFileSync(log,'utf8').trim().split('\n').map(JSON.parse).filter(args => args[2] === 'agent' && args[3] === 'prompt').length;
   const promptsBeforeRetry = countPrompts();

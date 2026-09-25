@@ -1,4 +1,5 @@
 import { deliverReceiverInbox } from './mod.deliverReceiverInbox.ts';
+import { deliverAgentPrompt } from './mod.deliverAgentPrompt.ts';
 import { resolveWakeIdentity } from "./mod.resolveWakeIdentity.ts";
 import { registerWakeFleet } from "./mod.registerWakeFleet.ts";
 import { runWakeHooks } from "./mod.runWakeHooks.ts";
@@ -222,12 +223,7 @@ export function createHerdrBackend(binary: string, wakeEngine = "codex", explici
     inbox: (target, text, serverRoot, from, signal) => operation(s => deliverReceiverInbox(run, target, text, serverRoot, from, s), signal),
     async send(target, text, signal) {
       if (!text.trim() || Buffer.byteLength(text, "utf8") > 64 * 1024 || text.includes("\0")) throw new BackendError("backend_error", "invalid prompt text");
-      await operation(async (s) => {
-        const pane = (await readRoster(run, s)).targets.get(target);
-        if (!pane) throw new BackendError("target_not_found", "unknown or stale target");
-        if (!pane.pane.agent.trim()) throw new BackendError("target_not_agent", "target is not an agent pane");
-        await run(["--session", pane.session, "agent", "prompt", pane.pane.id, text], s);
-      }, signal);
+      return operation(s => deliverAgentPrompt(run, target, text, s), signal);
     },
     async openTerminal(target, cols, rows, output, signal) {
       if (terminals >= 16) throw new BackendError("backend_error", "terminal capacity reached");

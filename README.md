@@ -153,8 +153,16 @@ Coverage vs. the legacy `maw serve`/God UI contract — not full parity:
 | Interactive terminal | `/ws/pty` — attach to a real herdr pane, resize, ANSI |
 | Federation status | reads `peers.json`, probes each peer's `/api/sessions` |
 | Inbox delivery | `POST /api/send {"inbox":true}` → `ψ/inbox`, `queued` |
+| Prompt delivery | `POST /api/send` → `[node:oracle]` sender tag, literal attachments, draft/blocked/changed-pane refusal, `delivered`/`queued`/`accepted` receipt |
 | Fleet wake | `POST /api/wake` with a `task` → new/reused worktree |
 | Not included | full lifecycle control, inbound pairing, config mutation |
+
+`POST /api/send` receipts name what was observed, never that the agent read
+the prompt: `accepted` is herdr taking it, `delivered` is the input box seen
+empty afterwards, `queued` is the agent showing it queued. A draft already in
+the box, a blocked agent, or a pane that changed under the request is refused
+with `409` and a `hint` holding the herdr command that shows why. If the
+input box cannot be read first, nothing is typed (`503`).
 
 Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for

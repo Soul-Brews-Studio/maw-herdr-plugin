@@ -53,7 +53,11 @@ export async function readRoster(run: RunHerdr, signal: AbortSignal): Promise<Ro
       const number = pane.id.slice(prefix.length), n = Number.parseInt(number, 36);
       if (!space || typeof pane.focused !== "boolean" || !pane.id.startsWith(prefix) || !/^[0-9a-z]+$/i.test(number) || !Number.isSafeInteger(n) || n < 0 || seenPanes.has(pane.id)) invalid("invalid or ambiguous pane identity");
       seenPanes.add(pane.id);
-      const target = space.name + ":" + number;
+      // herdr pane ids count in base 36 (p8, pC, p14). The dashboard, WS and
+      // delivery claims name a pane by its decimal window index, so the
+      // roster must too: keyed by the raw digits, `:12` would be pane p12 here
+      // but pane pC on the dashboard.
+      const target = space.name + ":" + n;
       if (result.targets.has(target)) invalid("duplicate pane target");
       space.windows.push({ index: n, name: pane.label || pane.title || pane.agent || pane.id, active: pane.focused, ...(pane.cwd ? { cwd: pane.cwd } : {}), status: pane.status, ...(pane.agent.trim() ? { agent: pane.agent.trim() } : {}) });
       result.targets.set(target, { session: serverName, pane });
