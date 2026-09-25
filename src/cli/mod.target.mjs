@@ -4,12 +4,19 @@
  *   form            example                  meaning
  *   ─────────────   ──────────────────────   ─────────────────────────────────────────────
  *   self (default)  self                     the herdr pane this command runs in
- *   path            /abs/path  .  ../x  ~/x  a worktree path (or a directory inside one)
+ *   path            /abs/path  .  ../x  ~/x  the worktree containing that path
  *   pane            w5D:p1                   a herdr pane id
  *   name            digger-oracle            exact label → a repo's main worktree → unique substring
  *
  * An ambiguous target LISTS its candidates and throws; nothing is ever picked
- * for the caller. A verb given `--dry` prints the resolution and does nothing.
+ * for the caller. Within ONE herdr space the focused pane (then the active tab)
+ * may choose between that space's own agents — the target itself is not in doubt
+ * there — but focus never chooses between two spaces or two sessions. A verb
+ * given `--dry` prints the resolution and does nothing.
+ *
+ * A path means the git worktree that CONTAINS it (git's own toplevel, so `.` in a
+ * linked worktree is that worktree, never its main checkout), in both grammars.
+ * `self` and a path never fall back to name matching: a miss is an error.
  *
  * "self" comes from the environment herdr gives every pane it hosts:
  * HERDR_PANE_ID (w4B:p1) names the pane, HERDR_SOCKET_PATH names the server —
@@ -28,9 +35,11 @@
  *                                          = loadTargets + resolveTarget in one call
  *   requirePane(resolved, verb)            → pane id, or throws a TargetError that lists choices
  *   describeResolved(resolved)             → string[]  the lines a `--dry` prints
- *   resolveAgent(pool, target, verb, opts) → roster row + { how }   (hey/peek grammar, legacy text)
+ *   resolveAgent(pool, target, verb, { caller, cwd, message }) → roster row + { how }
+ *                                          (hey/peek grammar; legacy name tiers and text)
  *   pickTier(items, tiers, { narrow, ambiguous }) → { hit, how } | null   the shared tier engine
  *   narrow(hits)                           → { pick, why } | null   focused pane, then active tab
+ *   shq(value)                             → value quoted for a pasted shell command
  *   label(agentRow)                        → "workspace" or "workspace/tab"
  *   TargetError                            → Error with .code 'ambiguous'|'not-found'|'no-self'|'empty'
  *                                            and .candidates (the rows it could not choose between)
@@ -58,7 +67,7 @@
  * REAL binary, so honouring it would let a test run inside a pane walk straight past
  * the fake herdr it put first on PATH and act on the live machine.
  */
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
@@ -125,6 +134,30 @@ const isDir = p => { try { return statSync(p).isDirectory(); } catch { return fa
 const expandPath = (raw, cwd) => real(resolve(cwd, raw.replace(/^~(?=\/|$)/, homedir())));
 const within = (parent, child) => child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
 
+/** A value as it must appear in a command someone pastes: bare when safe, else single-quoted. */
+export const shq = v => {
+  const s = String(v ?? '');
+  return /^[A-Za-z0-9_/.:@%+=,-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+};
+
+// Repo hooks never run and a caller's GIT_DIR/GIT_WORK_TREE never redirects the
+// scan — the same hygiene the server's worktree routes use.
+const GIT_ENV = {
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))),
+  GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0',
+};
+const GIT_SAFE = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null'];
+
+/** The worktree a directory belongs to (git's toplevel, realpath), or null. */
+function gitToplevel(dir) {
+  try {
+    const out = execFileSync('git', [...GIT_SAFE, '-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 5_000, env: GIT_ENV, stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.trim() ? real(out.trim()) : null;
+  } catch {
+    return null;
+  }
+}
+
 // --- the tier engine ----------------------------------------------------------
 
 /**
@@ -162,40 +195,80 @@ export function narrow(hits) {
 const named = t => t && t !== '' && !/^\d+$/.test(t);
 export const label = a => `${a.workspace}${named(a.tabLabel) && a.tabLabel !== a.workspace ? `/${a.tabLabel}` : ''}`;
 
+// Focus may pick among one space's own panes, never between spaces or sessions.
+const spaceKey = a => `${a.session}\0${a.workspace}`;
+const oneSpace = hits => new Set(hits.map(spaceKey)).size === 1;
+const narrowInSpace = hits => (oneSpace(hits) ? narrow(hits) : null);
+
 // --- hey / peek: the agent-pane grammar ----------------------------------------
 
 /**
- * hey and peek address AGENT panes (roster rows from index.mjs), with the tiers
- * they have always had: pane, agent name, workspace, tab, prefix, substring. The
- * error text and exit codes below are relied on and are kept byte-for-byte.
+ * hey and peek address AGENT panes (roster rows from index.mjs), with the name
+ * tiers they have always had: pane, agent name, workspace, tab, prefix, substring.
+ * Their error text and exit codes are relied on and are kept byte-for-byte, with
+ * one deliberate change: when a tier hits agents in more than one space, the
+ * focused pane no longer decides — the candidates are listed and nothing is done.
  *
- * The shared grammar adds two forms in front, both of which previously could only
- * ever miss: `self` (this pane) and a path (the agent whose cwd is that worktree).
+ * `self` and a path are resolved on their own and never fall through to the name
+ * tiers: the literal strings "self", ".", "~" would otherwise substring-match any
+ * workspace whose label happens to contain them, and send a real prompt there.
  */
-export function resolveAgent(all, target, verb, { caller = callerFromEnv(), cwd = process.cwd() } = {}) {
+export function resolveAgent(all, target, verb, { caller = callerFromEnv(), cwd = process.cwd(), message = null } = {}) {
   if (!all.length) throw new TargetError('no agent panes in any running herdr session', 'empty');
   const form = classifyTarget(target);
-  const tiers = [];
+  const after = verb === 'hey' && message != null ? ` ${shq(message)}` : '';
+  const choices = (head, hits) => new TargetError(
+    `${head} — nothing was done. Name one:\n${hits.map(a => `  maw herdr ${verb} --session ${shq(a.session)} ${a.pane}${after}   # ${label(a)} · ${a.agent} (${a.status})`).join('\n')}`,
+    'ambiguous', hits,
+  );
+
   if (form.form === 'self') {
     const me = selfPane(caller, cwd);
-    tiers.push(['self', a => a.pane === me.pane && (!me.session || a.session === me.session)]);
-  } else if (form.form === 'path') {
-    const p = expandPath(form.value, cwd);
-    tiers.push(['path', a => !!a.cwd && real(a.cwd) === p]);
-    tiers.push(['path, inside', a => !!a.cwd && within(p, real(a.cwd))]);
+    const hits = all.filter(a => a.pane === me.pane && (!me.session || a.session === me.session));
+    if (hits.length === 1) return { ...hits[0], how: 'self' };
+    // Only without a readable HERDR_SOCKET_PATH: the id repeats across sessions.
+    if (hits.length > 1) throw choices(`"self" is herdr pane ${me.pane}, which exists in ${hits.length} sessions, and HERDR_SOCKET_PATH does not say which`, hits);
+    throw new TargetError(
+      `"self" is herdr pane ${me.pane}${me.session ? ` in session ${me.session}` : ''}, and it holds no agent — ${verb} talks to agent panes\n  see the agent panes: maw herdr ls --agents`,
+      'not-found',
+    );
   }
+
+  if (form.form === 'path') {
+    // The worktree CONTAINING the path, as `resolve` means it; then only the agents
+    // whose own cwd belongs to that same worktree (not a nested linked one below).
+    const p = expandPath(form.value, cwd);
+    const top = gitToplevel(p);
+    const owner = new Map();
+    const ownerOf = d => { if (!owner.has(d)) owner.set(d, gitToplevel(d)); return owner.get(d); };
+    const tiers = [['path', a => !!a.cwd && real(a.cwd) === p]];
+    if (top) tiers.push(['path, worktree', a => !!a.cwd && within(top, real(a.cwd)) && ownerOf(real(a.cwd)) === top]);
+    const picked = pickTier(all, tiers, {
+      narrow: narrowInSpace,
+      ambiguous: hits => choices(`'${target}'${(top ?? p) === target ? '' : ` (${top ?? p})`} holds ${hits.length} agent panes across ${new Set(hits.map(spaceKey)).size} herdr spaces`, hits),
+    });
+    if (picked) return { ...picked.hit, how: picked.how };
+    const where = top ? `the worktree ${top}${top === p ? '' : ` (which holds ${p})`}` : `${p} (not inside a git worktree)`;
+    throw new TargetError(`no agent pane sits in ${where}\n  see what that path resolves to: maw herdr resolve ${shq(p)}`, 'not-found');
+  }
+
   // Pane ids are colon-shaped too (wD:p4), so scoping is a flag, never a prefix.
-  tiers.push(
+  const tiers = [
     ['pane', a => a.pane === target],
     ['agent name', a => a.name === target],
     ['workspace', a => a.workspace === target],
     ['tab', a => a.tabLabel === target],
     ['prefix', a => a.workspace.startsWith(target)],
     ['substring', a => a.workspace.includes(target) || (a.name ?? '').includes(target)],
-  );
+  ];
   const picked = pickTier(all, tiers, {
-    narrow,
+    narrow: narrowInSpace,
     ambiguous: hits => {
+      // Focus WOULD have picked one, but across spaces it may not; and across
+      // sessions a bare pane id is no answer at all. Either way, list them.
+      if (!oneSpace(hits) && (narrow(hits) || new Set(hits.map(a => a.session)).size > 1)) {
+        return choices(`'${target}' matches ${hits.length} agent panes in ${new Set(hits.map(spaceKey)).size} herdr spaces`, hits);
+      }
       const lines = hits.map(a => `    ${a.pane.padEnd(8)} ${label(a).padEnd(22)} ${a.agent} (${a.status})`);
       return new TargetError(
         `'${target}' matches ${hits.length} agent panes and none is focused:\n${lines.join('\n')}\n  target one by pane id: maw herdr ${verb} ${hits[0].pane}${verb === 'hey' ? ' "…"' : ''}`,
@@ -204,13 +277,6 @@ export function resolveAgent(all, target, verb, { caller = callerFromEnv(), cwd 
     },
   });
   if (picked) return { ...picked.hit, how: picked.how };
-  if (form.form === 'self') {
-    const me = selfPane(caller);
-    throw new TargetError(
-      `"self" is herdr pane ${me.pane}${me.session ? ` in session ${me.session}` : ''}, and it holds no agent — ${verb} talks to agent panes\n  see the agent panes: maw herdr ls --agents`,
-      'not-found',
-    );
-  }
   const known = [...new Set(all.map(a => a.workspace))].sort();
   throw new TargetError(`no agent '${target}'. workspaces: ${known.join(', ') || '(none)'}\n  see them all: maw herdr ls --agents`, 'not-found');
 }
@@ -218,7 +284,7 @@ export function resolveAgent(all, target, verb, { caller = callerFromEnv(), cwd 
 function selfPane(caller, cwd = process.cwd()) {
   if (caller?.pane) return caller;
   throw new TargetError(
-    `"self" means the herdr pane this command runs in, and HERDR_PANE_ID is not set here — not inside a herdr pane\n  name the target by path instead: maw herdr resolve ${cwd}`,
+    `"self" means the herdr pane this command runs in, and HERDR_PANE_ID is not set here — not inside a herdr pane\n  name the target by path instead: maw herdr resolve ${shq(cwd)}`,
     'no-self',
   );
 }
@@ -234,18 +300,11 @@ function run(file, args, { timeout = 10_000, env } = {}) {
 const herdrJson = async (args, session) => JSON.parse(await run('herdr', session ? ['--session', session, ...args] : args));
 const unwrapSnapshot = raw => raw?.result?.snapshot ?? raw?.snapshot ?? raw?.result ?? raw;
 
-// Repo hooks never run and a caller's GIT_DIR/GIT_WORK_TREE never redirects the
-// scan — the same hygiene the server's worktree routes use.
-const GIT_ENV = {
-  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_'))),
-  GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0',
-};
-
 /** Every worktree of the repo `dir` belongs to, main first. [] when dir is no repo. */
 async function gitWorktrees(dir) {
   let raw;
   try {
-    raw = await run('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-C', dir, 'worktree', 'list', '--porcelain', '-z'], { timeout: 5_000, env: GIT_ENV });
+    raw = await run('git', [...GIT_SAFE, '-C', dir, 'worktree', 'list', '--porcelain', '-z'], { timeout: 5_000, env: GIT_ENV });
   } catch {
     return [];
   }
@@ -298,8 +357,14 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
   try {
     index = (await herdrJson(['session', 'list', '--json'])).sessions ?? [];
   } catch (err) {
+    if (err?.code === 'ENOENT') {
+      throw new TargetError('herdr is not on PATH, so there are no sessions to resolve against\n  command -v herdr || echo "herdr not on PATH: $PATH"', 'not-found');
+    }
     const why = String(err?.stderr || err?.message || err).trim().split('\n')[0];
     throw new TargetError(`cannot list herdr sessions — ${why}\n  check herdr answers: herdr session list --json`, 'not-found');
+  }
+  if (!Array.isArray(index)) {
+    throw new TargetError('herdr session list returned no sessions array\n  see what it returned: herdr session list --json', 'not-found');
   }
   const running = index.filter(s => s.running).map(s => s.name);
   if (session && !running.includes(session)) {
@@ -312,10 +377,15 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
   await Promise.all(scope.map(async s => {
     let snap;
     try { snap = unwrapSnapshot(await herdrJson(['api', 'snapshot'], s)); } catch { return; }
+    const [spaces, allPanes, agents] = [snap?.workspaces ?? [], snap?.panes ?? [], snap?.agents ?? []];
+    if (![spaces, allPanes, agents].every(Array.isArray)) {
+      process.stderr.write(`maw herdr: skipped herdr session ${s} — its api snapshot has no workspaces/panes/agents arrays\n  see what it returned: herdr --session ${shq(s)} api snapshot\n`);
+      return;
+    }
     // The agent's name lives on the AGENT record, not on the pane (see roster()).
-    const names = new Map((snap.agents ?? []).filter(a => a.name).map(a => [a.pane_id, a.name]));
-    for (const w of snap.workspaces ?? []) {
-      const panes = (snap.panes ?? []).filter(p => p.workspace_id === w.workspace_id).map(p => ({
+    const names = new Map(agents.filter(a => a?.name).map(a => [a.pane_id, a.name]));
+    for (const w of spaces) {
+      const panes = allPanes.filter(p => p.workspace_id === w.workspace_id).map(p => ({
         pane: p.pane_id, agent: p.agent ?? null, name: names.get(p.pane_id) ?? null,
         status: p.agent_status ?? 'unknown', focused: !!p.focused, tab: p.tab_id ?? null, cwd: p.cwd ?? null,
       }));
@@ -478,29 +548,38 @@ function finish(t, form, how, explicitPane) {
 export function requirePane(r, verb) {
   if (r.pane) return r.pane;
   if (r.paneChoices?.length) {
-    const scope = r.session ? `--session ${r.session} ` : '';
+    const scope = r.session ? `--session ${shq(r.session)} ` : '';
     throw new TargetError(
       `'${r.label}' has ${r.paneChoices.length} agent panes and none is focused — nothing was done. Name one:\n${r.paneChoices.map(p => `  maw herdr ${verb} ${scope}${p}`).join('\n')}`,
       'ambiguous', r.paneChoices,
     );
   }
+  if (r.prunable) {
+    throw new TargetError(
+      `'${r.label}' is a prunable worktree — its directory ${r.path} is gone, so there is nothing to open\n  git -C ${shq(r.repoRoot)} worktree prune`,
+      'not-found',
+    );
+  }
   throw new TargetError(
-    `'${r.label}' has no open herdr space, so there is no pane to act on\n  open one: herdr workspace create --cwd ${r.path} --label ${r.label} --no-focus`,
+    `'${r.label}' has no open herdr space, so there is no pane to act on\n  open one: herdr workspace create --cwd ${shq(r.path)} --label ${shq(r.label)} --no-focus`,
     'not-found',
   );
 }
 
 // Each candidate as its own runnable line, addressed by the most specific handle
-// that is unique among them: its path, or — when one worktree is open in two
-// sessions, or the target was a pane id held in two sessions — its pane scoped
-// by session.
+// that is unique among them: a worktree's path, or — when one worktree is open in
+// two sessions, or the target was a pane id held in two sessions — its pane scoped
+// by session. A plain space is ALWAYS its pane: its path is borrowed from whatever
+// checkout its first pane sits in, and pasting it would resolve to that worktree.
 function candidateLines(hits, verb, after, paneId = null) {
   const pathCount = new Map();
   for (const h of hits) pathCount.set(h.path, (pathCount.get(h.path) ?? 0) + 1);
   const rows = hits.slice(0, 15).map(h => {
     const firstPane = paneId ?? h.panes.find(p => p.agent)?.pane ?? h.panes[0]?.pane;
-    const handle = !paneId && (pathCount.get(h.path) === 1 || !firstPane) ? h.path : `--session ${h.session} ${firstPane}`;
-    const note = [h.state, h.session, firstPane].filter(Boolean).join(' · ');
+    const byPath = h.kind === 'worktree' && !paneId && (pathCount.get(h.path) === 1 || !firstPane);
+    const note = [h.state, h.session, firstPane, h.kind === 'space' ? `space ${h.label}` : null].filter(Boolean).join(' · ');
+    if (!byPath && !firstPane) return { cmd: `  maw herdr resolve --list --session ${shq(h.session)}`, note: `${note} · no pane to name it by` };
+    const handle = byPath ? shq(h.path) : `--session ${shq(h.session)} ${firstPane}`;
     return { cmd: `  maw herdr ${verb} ${handle}${after}`, note };
   });
   const wide = Math.max(...rows.map(r => r.cmd.length));
@@ -525,7 +604,8 @@ export function describeResolved(r) {
 
 // --- the `resolve` verb ---------------------------------------------------------
 
-const RESOLVE_USAGE = 'maw herdr resolve [<target>] [--session <name>] [--json]\n  every target it knows: maw herdr resolve --list';
+// Usage errors end in commands that run as printed, never a synopsis.
+const RESOLVE_TRY = '  maw herdr resolve self\n  maw herdr resolve --list';
 
 /** `maw herdr resolve [<target>]` — print what a target resolves to. Never acts. */
 export async function cmdResolve(args, { UsageError = Error } = {}) {
@@ -537,13 +617,13 @@ export async function cmdResolve(args, { UsageError = Error } = {}) {
   const at = rest.indexOf('--session');
   if (at !== -1) {
     session = rest[at + 1];
-    if (!session || session.startsWith('-')) throw new UsageError(`--session needs a name\n  ${RESOLVE_USAGE}`);
+    if (!session || session.startsWith('-')) throw new UsageError('--session needs a session name; list them:\n  maw herdr ls --sessions');
     rest.splice(at, 2);
   }
   const positional = rest.filter(a => a !== '--json' && a !== '--list');
   const unknown = positional.find(a => a.startsWith('-'));
-  if (unknown) throw new UsageError(`unknown argument: ${unknown}\n  ${RESOLVE_USAGE}`);
-  if (positional.length > 1) throw new UsageError(`resolve takes one target, got ${positional.length}\n  ${RESOLVE_USAGE}`);
+  if (unknown) throw new UsageError(`unknown argument: ${unknown} (resolve takes one target, --session, --list, --json)\n${RESOLVE_TRY}`);
+  if (positional.length > 1) throw new UsageError(`resolve takes one target, got ${positional.length}; resolve each on its own:\n${positional.map(a => `  maw herdr resolve ${shq(a)}`).join('\n')}`);
 
   if (list) {
     if (positional.length) throw new UsageError(`--list takes no target\n  maw herdr resolve --list`);
@@ -557,7 +637,7 @@ export async function cmdResolve(args, { UsageError = Error } = {}) {
       const pane = t.panes.find(p => p.agent)?.pane ?? t.panes[0]?.pane ?? '';
       console.log(`  ${t.state.padEnd(8)} ${t.label.padEnd(wide)} ${pane.padEnd(8)} ${C.dim}${t.path}${C.off}`);
     }
-    console.log(`  ${C.dim}${targets.length} targets · resolve one: maw herdr resolve <name|path|pane>${C.off}`);
+    console.log(`  ${C.dim}${targets.length} targets${targets.length ? ` · resolve one: maw herdr resolve ${shq(targets[0].label)}` : ''}${C.off}`);
     return;
   }
 

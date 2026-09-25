@@ -7,8 +7,12 @@
   name (exact label, then a repo's main worktree, then a unique substring).
   Ambiguity lists runnable candidates and exits 1; `--dry` is accepted wherever
   a target is. `hey` and `peek` now resolve through it with unchanged output and
-  exit codes, and gain `self`, paths and `--dry`. New read-only
-  `maw herdr resolve [<target>]` / `resolve --list` (#59).
+  exit codes, and gain `self`, paths and `--dry`. A path means the worktree
+  containing it in every verb; `self` and paths never fall through to name
+  matching; focus picks a pane only within one space, never across spaces or
+  sessions (a pane id held in two sessions is now listed, not narrowed to the
+  focused copy). New read-only `maw herdr resolve [<target>]` /
+  `resolve --list` (#59).
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
   packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no

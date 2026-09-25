@@ -1,0 +1,181 @@
+{
+  "ref": "2001b9beedd2ba7a69a12b5363325a47cd80cbef",
+  "cases": [
+    {
+      "args": [
+        "peek",
+        "feat-one"
+      ],
+      "rc": 1,
+      "out": "",
+      "err": "maw herdr: 'feat-one' matches 2 agent panes and none is focused:\n    wB:p1    feat-one               claude (idle)\n    wB:p2    feat-one               codex (idle)\n  target one by pane id: maw herdr peek wB:p1\n"
+    },
+    {
+      "args": [
+        "peek",
+        "alpha-oracle"
+      ],
+      "rc": 0,
+      "out": "  ○ alpha-oracle wA:p1 · claude · idle · default\n────────────────────────────────────────────────────────────\nfake viewport of wA:p1\n────────────────────────────────────────────────────────────\n  visible viewport, last 40 lines · talk back: maw herdr hey wA:p1 \"…\"\n",
+      "err": ""
+    },
+    {
+      "args": [
+        "peek",
+        "alpha-oracle",
+        "--json",
+        "--lines",
+        "5"
+      ],
+      "rc": 0,
+      "out": "{\"command\":\"peek\",\"pane\":\"wA:p1\",\"session\":\"default\",\"workspace\":\"alpha-oracle\",\"agent\":\"claude\",\"status\":\"idle\",\"source\":\"visible\",\"lines\":5,\"text\":\"fake viewport of wA:p1\\n\"}\n",
+      "err": ""
+    },
+    {
+      "args": [
+        "peek",
+        "wA:p1",
+        "--session",
+        "side"
+      ],
+      "rc": 0,
+      "out": "  ○ side-alpha wA:p1 · codex · idle · side\n────────────────────────────────────────────────────────────\nfake viewport of wA:p1\n────────────────────────────────────────────────────────────\n  visible viewport, last 40 lines · talk back: maw herdr hey wA:p1 \"…\"\n",
+      "err": ""
+    },
+    {
+      "args": [
+        "peek",
+        "deltabot"
+      ],
+      "rc": 0,
+      "out": "  ○ delta-main-space wE:p1 · claude · idle · default\n────────────────────────────────────────────────────────────\nfake viewport of wE:p1\n────────────────────────────────────────────────────────────\n  visible viewport, last 40 lines · talk back: maw herdr hey wE:p1 \"…\"\n",
+      "err": ""
+    },
+    {
+      "args": [
+        "peek",
+        "delta"
+      ],
+      "rc": 1,
+      "out": "",
+      "err": "maw herdr: 'delta' matches 2 agent panes and none is focused:\n    wE:p1    delta-main-space       claude (idle)\n    wF:p1    delta-wip              claude (idle)\n  target one by pane id: maw herdr peek wE:p1\n"
+    },
+    {
+      "args": [
+        "peek",
+        "om"
+      ],
+      "rc": 1,
+      "out": "",
+      "err": "maw herdr: 'om' matches 3 agent panes and none is focused:\n    wC:p1    omp                    codex (idle)\n    wG:p1    omega-one              claude (idle)\n    wH:p1    omega-two              claude (idle)\n  target one by pane id: maw herdr peek wC:p1\n"
+    },
+    {
+      "args": [
+        "peek",
+        "mp"
+      ],
+      "rc": 0,
+      "out": "  ○ omp wC:p1 · codex · idle · default\n────────────────────────────────────────────────────────────\nfake viewport of wC:p1\n────────────────────────────────────────────────────────────\n  visible viewport, last 40 lines · talk back: maw herdr hey wC:p1 \"…\"\n",
+      "err": ""
+    },
+    {
+      "args": [
+        "peek",
+        "nothing-here"
+      ],
+      "rc": 1,
+      "out": "",
+      "err": "maw herdr: no agent 'nothing-here'. workspaces: alpha-oracle, delta-main-space, delta-wip, digger-fix, feat-one, omega-one, omega-two, omp, selfcheck-oracle, side-alpha, white.local\n  see them all: maw herdr ls --agents\n"
+    },
+    {
+      "args": [
+        "peek"
+      ],
+      "rc": 2,
+      "out": "",
+      "err": "maw herdr: peek needs a target: maw herdr peek <target> [--lines N]\n  across the federation: maw herdr peek <node>:<pane>\n"
+    },
+    {
+      "args": [
+        "peek",
+        "omp",
+        "--lines",
+        "0"
+      ],
+      "rc": 2,
+      "out": "",
+      "err": "maw herdr: --lines needs a positive integer\n"
+    },
+    {
+      "args": [
+        "peek",
+        "omp",
+        "--session",
+        "dead"
+      ],
+      "rc": 1,
+      "out": "",
+      "err": "maw herdr: no agent panes in herdr session 'dead'\n"
+    },
+    {
+      "args": [
+        "hey"
+      ],
+      "rc": 2,
+      "out": "",
+      "err": "maw herdr: hey needs a target and a message: maw herdr hey <target> <message>\n  across the federation: maw herdr hey <node>:<pane> \"…\"\n"
+    },
+    {
+      "args": [
+        "hey",
+        "omp"
+      ],
+      "rc": 2,
+      "out": "",
+      "err": "maw herdr: hey needs a message: maw herdr hey omp \"<message>\"\n"
+    },
+    {
+      "args": [
+        "hey",
+        "feat-one",
+        "hello",
+        "--dry-run"
+      ],
+      "rc": 1,
+      "out": "",
+      "err": "maw herdr: 'feat-one' matches 2 agent panes and none is focused:\n    wB:p1    feat-one               claude (idle)\n    wB:p2    feat-one               codex (idle)\n  target one by pane id: maw herdr hey wB:p1 \"…\"\n"
+    },
+    {
+      "args": [
+        "hey",
+        "omp",
+        "hello",
+        "there",
+        "--dry-run"
+      ],
+      "rc": 0,
+      "out": "  ○ omp wC:p1 · codex · idle · default\n  would run: herdr --session default agent prompt wC:p1 \"hello there\"\n  matched by workspace · nothing was sent\n",
+      "err": ""
+    },
+    {
+      "args": [
+        "hey",
+        "nothing-here",
+        "hi"
+      ],
+      "rc": 1,
+      "out": "",
+      "err": "maw herdr: no agent 'nothing-here'. workspaces: alpha-oracle, delta-main-space, delta-wip, digger-fix, feat-one, omega-one, omega-two, omp, selfcheck-oracle, side-alpha, white.local\n  see them all: maw herdr ls --agents\n"
+    },
+    {
+      "args": [
+        "hey",
+        "omp",
+        "a real prompt to the fake"
+      ],
+      "rc": 0,
+      "out": "  ○ omp wC:p1 · codex · idle · default\n  sent (matched by workspace)\n  read it back: maw herdr peek wC:p1\n",
+      "err": ""
+    }
+  ]
+}

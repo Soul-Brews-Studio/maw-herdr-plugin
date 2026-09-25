@@ -36,7 +36,7 @@ session's role — the place work lives — is a WORKSPACE, and one session hold
 
 <target> is one grammar, shared by every verb that takes one:
   self           the pane you are typing in (the default where a target is optional)
-  /abs/path  .   a worktree path, or a directory inside one
+  /abs/path  .   the worktree containing that path (a directory inside one works)
   w5D:p1         a herdr pane id
   digger-oracle  a name: exact label, then a repo's main worktree, then a unique substring
 hey and peek also take an agent name or a workspace/tab label, as they always have.
@@ -804,7 +804,7 @@ async function cmdHey(args) {
   const message = args.join(' ').trim();
   if (!message) throw new UsageError(`hey needs a message: maw herdr hey ${target} "<message>"`);
 
-  const hit = resolveAgent(pool, target, verb);
+  const hit = resolveAgent(pool, target, verb, { message });
   console.log(`  ${statusDot(hit.status)} ${C.cyan}${label(hit)}${C.off} ${C.dim}${hit.pane} · ${hit.agent} · ${hit.status} · ${hit.session}${C.off}`);
   if (dryRun) {
     console.log(`  ${C.dim}would run:${C.off} herdr --session ${hit.session} agent prompt ${hit.pane} ${JSON.stringify(message)}`);

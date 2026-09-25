@@ -74,7 +74,7 @@ maw herdr wake neo --prompt "recap the last session" --attach
 | form | meaning |
 |---|---|
 | `self` | the pane you are typing in (from `HERDR_PANE_ID` + `HERDR_SOCKET_PATH`); the default where a target is optional |
-| `/abs/path`, `.`, `../x` | a worktree path, or a directory inside one (deepest worktree wins) |
+| `/abs/path`, `.`, `../x` | the git worktree containing that path (a linked worktree, never its main checkout, when you are inside one) |
 | `w5D:p1` | a herdr pane id |
 | `digger-oracle` | a name: exact label → a repo's main worktree → unique substring |
 
@@ -86,10 +86,16 @@ can name. The resolver is `src/cli/mod.target.mjs`.
 
 ### Hey and peek — targeting
 
-hey and peek take the grammar above, and keep their own agent tiers after it:
-pane id → agent name → workspace label → tab label → unique prefix/substring. Workspace label is the handle that always
-exists (agents are unnamed until `herdr agent rename`). Ambiguous matches are
-listed, never guessed:
+hey and peek take the grammar above. `self` is the agent in your own pane; a
+path is the agent(s) whose cwd belongs to the worktree containing that path.
+Neither ever falls back to name matching — a miss is an error, so `hey self`
+from a bare shell cannot land in a workspace that merely has "self" in its
+label. Names keep hey/peek's own agent tiers: pane id → agent name → workspace
+label → tab label → unique prefix/substring. Workspace label is the handle that
+always exists (agents are unnamed until `herdr agent rename`). Within one space
+the focused pane, then the active tab, picks among that space's agents; across
+two spaces or sessions nothing is picked. Ambiguous matches are listed, never
+guessed:
 
 ```bash
 $ maw herdr peek neo-oracle

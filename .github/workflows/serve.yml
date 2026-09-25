@@ -32,6 +32,8 @@ jobs:
           bun index.mjs help
           bun index.mjs serve --help
           bun build index.mjs --target=bun --outfile "$RUNNER_TEMP/herdr-bun.js"
+          bun utils/smoke-target-grammar.mjs
+          MAW_TARGET_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-target-grammar.mjs
           node utils/smoke-serve-launcher.mjs
           bun utils/smoke-bun-serve.mjs
           bun utils/smoke-federation-config.ts
