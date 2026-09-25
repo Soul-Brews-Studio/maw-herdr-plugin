@@ -3,6 +3,7 @@ import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { checkoutLine } from './src/cli/mod.checkoutLine.mjs';
@@ -13,10 +14,12 @@ import { configuredProviders } from './src/cli/mod.resumeProviders.mjs';
 import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.mjs';
 import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } from './src/cli/mod.lsStateView.mjs';
 import { cmdClose, cmdKill, cmdRestart, cmdResume } from './src/cli/mod.lifecycle.mjs';
+import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
+import { cmdInbox, cmdReply } from './src/cli/mod.inbox.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|watch|inbox|reply|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -38,6 +41,13 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|c
   resume [<target>] [--dry]            start the agent on its worktree's newest transcript
   kill [<target>] [--dry]              ctrl+c the agent until it exits; the pane stays
   close [<target>] [--force] [--dry]   close the target's herdr space; worktree stays
+  watch [<target>] [--every] [--dry]   be told when that agent finishes: a note lands
+                                       in this pane's inbox (from herdr's pushed events)
+  watch --list [--all] [--json]        what this pane watches (--all: every pane's)
+  watch [<target>] --stop              stop watching it
+  inbox [--since <id>] [--all] [--json]
+                                       notes addressed to this pane; reading never consumes
+  reply <target> <text> [--dry]        file an answer in that pane's inbox, signed by this pane
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
@@ -1099,6 +1109,10 @@ try {
   else if (command === 'resume') await cmdResume(args, { UsageError });
   else if (command === 'kill') await cmdKill(args, { UsageError });
   else if (command === 'close') await cmdClose(args, { UsageError });
+  else if (command === 'watch') await cmdWatch(args, { UsageError, entry: fileURLToPath(import.meta.url) });
+  else if (command === 'inbox') await cmdInbox(args, { UsageError });
+  else if (command === 'reply') await cmdReply(args, { UsageError });
+  else if (command === '__watch-run') process.exit(await runWatcher(args[0]));   // spawned by watch, detached; exits when the watch ends
   else throw new UsageError(`unknown command: ${command}\n  maw herdr help`);
 } catch (err) {
   // A usage error with no fix line of its own gets the one that now always works.
