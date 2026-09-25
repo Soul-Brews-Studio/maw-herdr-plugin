@@ -73,6 +73,8 @@ jobs:
           MAW_LS_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-ls-path-help.mjs
           node utils/smoke-audit-clean-sync.mjs
           MAW_CLEANUP_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-audit-clean-sync.mjs
+          node utils/smoke-cleanup-safety.mjs
+          MAW_CLEANUP_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-cleanup-safety.mjs
       - name: Build source-independent native plugin package
         run: |
           node --check utils/package-serve.mjs

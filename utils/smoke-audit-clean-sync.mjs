@@ -224,7 +224,7 @@ try {
     const merged = of('merged');
     assert.deepEqual(merged.map(f => f.label).sort(), ['idle-busy', 'idle-old', 'merged-agent', 'merged-cold', 'merged-data', 'merged-dirty', 'merged-nodemods', 'merged-shell']);
     const codes = f => f.keep.map(k => k.code);
-    ok(merged.every(f => codes(f).includes('young') || codes(f).every(c => c === 'agent')), `a worktree added today is kept under --min-age 3: ${JSON.stringify(merged.map(f => [f.label, f.keep]))}`);
+    ok(merged.every(f => codes(f).includes('young') || codes(f).every(c => c === 'agent' || c === 'shell')), `a worktree added today is kept under --min-age 3: ${JSON.stringify(merged.map(f => [f.label, f.keep]))}`);
     ok(merged.filter(f => codes(f)[0] === 'agent').map(f => f.label).sort().join() === 'idle-busy,idle-old,merged-agent', 'an agent in it is reason enough; the disk checks are skipped');
     ok(!a.findings.some(f => [wt('feature'), wt('pushed')].includes(f.path)), 'unmerged worktrees are not clean candidates unless named');
     ok(readOnly(a.calls), 'audit --json only reads');
@@ -232,7 +232,8 @@ try {
 
     const z = json(['audit', '--min-age', '0']);
     const keep = label => z.findings.find(f => f.kind === 'merged' && f.label === label).keep.map(k => k.reason).join(' | ');
-    for (const l of ['merged-shell', 'merged-cold', 'merged-nodemods']) assert.equal(keep(l), '', `${l} should be removable: ${keep(l)}`);
+    for (const l of ['merged-cold', 'merged-nodemods']) assert.equal(keep(l), '', `${l} should be removable: ${keep(l)}`);
+    ok(/shell w2:p1 is in it .*--idle-shells/.test(keep('merged-shell')), `a bare shell keeps its worktree (it may run a dev server): ${keep('merged-shell')}`);
     ok(/holds 4 KB of gitignored data \(\.data\)/.test(keep('merged-data')), `gitignored data keeps merged-data: ${keep('merged-data')}`);
     ok(/1 uncommitted: notes\.txt/.test(keep('merged-dirty')), keep('merged-dirty'));
     ok(/agent w3:p1 \(claude, idle\) is in it/.test(keep('merged-agent')), keep('merged-agent'));
@@ -248,15 +249,18 @@ try {
     assert.deepEqual(c.actions.map(a => a.key), [`gone:${wt('gone-cold')}`, `gone:${wt('gone-open')}`]);
     ok(c.kept.some(k => k.path === wt('gone-agent') && k.reasons[0].fix === 'maw herdr peek --session default w9:p1'), 'a gone worktree whose space holds an agent is kept: closing the space would end the agent');
     ok(readOnly(c.calls), 'clean plan only reads');
-    const c0 = json(['clean', '--min-age', '0']);
+    const c0s = json(['clean', '--min-age', '0']);
+    assert.deepEqual(c0s.actions.map(a => a.label), ['gone-cold', 'gone-open', 'merged-cold', 'merged-nodemods'], 'without --idle-shells the bare shell in merged-shell keeps it');
+    ok(c0s.kept.some(k => k.label === 'merged-shell' && k.reasons[0].code === 'shell'), 'merged-shell kept for its shell');
+    const c0 = json(['clean', '--min-age', '0', '--idle-shells']);
     assert.deepEqual(c0.actions.map(a => a.label), ['gone-cold', 'gone-open', 'merged-cold', 'merged-nodemods', 'merged-shell']);
     assert.deepEqual(c0.actions.find(a => a.label === 'merged-shell').commands, ['herdr --session default worktree remove --workspace w2'], 'a worktree with a space is removed through herdr');
     assert.deepEqual(c0.actions.find(a => a.label === 'merged-cold').commands, [`git -C ${repo} worktree remove ${wt('merged-cold')}`], 'no --force when nothing is untracked');
-    assert.deepEqual(c0.actions.find(a => a.label === 'merged-nodemods').commands, [`git -C ${repo} worktree remove --force ${wt('merged-nodemods')}`], '--force only because .DS_Store is all that is untracked');
+    assert.deepEqual(c0.actions.find(a => a.label === 'merged-nodemods').commands, [`rm -f -- ${join(wt('merged-nodemods'), '.DS_Store')}`, `git -C ${repo} worktree remove ${wt('merged-nodemods')}`], 'the .DS_Store the plan saw is deleted by name, and git removes WITHOUT --force');
     assert.deepEqual(c0.actions.find(a => a.label === 'gone-open').commands, ['herdr --session default workspace close w5', `git -C ${repo} worktree remove ${wt('gone-open')}`]);
     ok(c0.kept.some(k => k.label === 'merged-data' && k.reasons.some(r => r.reason.includes('gitignored data'))), 'merged-data is kept in the plan');
-    const text = run(['clean', '--min-age', '0']);
-    ok(text.out.includes('plan only, nothing was changed') && text.out.includes('run them all:   maw herdr clean --min-age 0 --go') && text.out.includes('ask for each:   maw herdr clean --min-age 0 --pick'), text.out);
+    const text = run(['clean', '--min-age', '0', '--idle-shells']);
+    ok(text.out.includes('plan only, nothing was changed') && text.out.includes('run them all:   maw herdr clean --idle-shells --min-age 0 --go') && text.out.includes('ask for each:   maw herdr clean --idle-shells --min-age 0 --pick'), text.out);
     const s = json(['sync']);
     assert.deepEqual(s.actions.map(a => a.key), [`gone:${wt('gone-cold')}`, `gone:${wt('gone-open')}`, 'orphan:default/w4', `behind:${repo}`]);
     assert.deepEqual(s.actions.find(a => a.kind === 'behind').commands, [`git -C ${repo} merge --ff-only '@{u}'`]);
@@ -265,21 +269,21 @@ try {
     const si = json(['sync', '--idle-agents']);
     ok(si.actions.some(a => a.key === 'idle:default/w6'), 'sync --idle-agents plans closing w6');
     ok(si.kept.some(k => k.workspace === 'w7' && k.reasons.some(r => r.reason.includes('w7:p2 in the same space is working'))), 'one working agent keeps the whole space');
-    ok([c, c0, s, si].every(x => readOnly(x.calls)), 'plans only read herdr');
+    ok([c, c0s, c0, s, si].every(x => readOnly(x.calls)), 'plans only read herdr');
     unchanged('clean / sync plans');
     console.log('PASS clean and sync are plan-only by default: every action listed with its exact command, nothing changed');
   }
 
   // --- --pick asks, and no or no answer changes nothing ------------------------------------
   {
-    const eof = run(['clean', '--min-age', '0', '--pick']);
+    const eof = run(['clean', '--min-age', '0', '--idle-shells', '--pick']);
     assert.equal(eof.code, 0, eof.err);
     ok(eof.err.includes('do it? [y/N/q]') && eof.err.includes('herdr --session default workspace close w5') === false, 'the first prompt is shown; end of input stops asking');
     ok((eof.err.match(/do it\? \[y\/N\/q\]/g) ?? []).length === 1, `one prompt, then EOF stops: ${eof.err}`);
     ok(eof.out.includes('declined 5'), eof.out);
     ok(mutations(eof.calls).length === 0, `nothing closed without a yes: ${JSON.stringify(eof.calls)}`);
     unchanged('clean --pick with stdin closed');
-    const no = run(['clean', '--min-age', '0', '--pick'], { input: 'n\nn\nn\nn\nn\n' });
+    const no = run(['clean', '--min-age', '0', '--idle-shells', '--pick'], { input: 'n\nn\nn\nn\nn\n' });
     ok((no.err.match(/do it\? \[y\/N\/q\]/g) ?? []).length === 5, `five prompts: ${no.err}`);
     ok(no.err.includes('runs:\n    herdr --session default worktree remove --workspace w2'), 'each prompt shows the exact commands it will run');
     ok(mutations(no.calls).length === 0, 'answering no closes nothing');
@@ -317,7 +321,7 @@ try {
 
   // --- --pick: yes to one, and it goes through herdr -------------------------------------
   {
-    const r = run(['clean', '--min-age', '0', '--pick'], { input: 'n\nn\nn\nn\ny\n' });
+    const r = run(['clean', '--min-age', '0', '--idle-shells', '--pick'], { input: 'n\nn\nn\nn\ny\n' });
     assert.equal(r.code, 0, r.out + r.err);
     assert.deepEqual(mutations(r.calls), [['--session', 'default', 'worktree', 'remove', '--workspace', 'w2']]);
     ok(!existsSync(wt('merged-shell')) && !gitListed().includes(wt('merged-shell')) && !spaces().includes('w2'), 'merged-shell is gone from disk, git and herdr');

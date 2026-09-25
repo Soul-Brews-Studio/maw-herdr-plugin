@@ -14,7 +14,11 @@
   agent, uncommitted work, a lock, or local-only commits. Removals go through
   herdr when a space is open, and herdr and `git worktree list` are re-read
   afterwards to prove they agree. A herdr session whose snapshot fails stops
-  `clean`/`sync` from acting.
+  `clean`/`sync` from acting. Panes count by their cwd, whatever space holds
+  them, so an agent in a plain space or one cd'd in from another checkout keeps
+  the worktree; a bare shell keeps it too unless `--idle-shells`. An idle agent
+  is judged by its own transcript (its provider, and herdr's `agent_session`
+  id), and `.envrc` counts as data. Removal never uses `--force`.
 
 - Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
   takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a

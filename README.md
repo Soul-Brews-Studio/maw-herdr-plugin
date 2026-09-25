@@ -181,7 +181,7 @@ rewrites an index) and never fetches.
 |---|---|---|
 | gone | git lists a worktree whose folder is gone | `clean`, `sync` |
 | orphan | a herdr space points at a folder that is gone | `sync` |
-| idle | herdr says idle/done, and the newest transcript a resume provider finds is older than `--idle` (default `24h`) | `sync --idle-agents` |
+| idle | herdr says idle/done, and that agent's own transcript is older than `--idle` (default `24h`): from the provider of its kind, and the very session herdr names in `agent_session` when it names one | `sync --idle-agents` |
 | behind | a checkout only behind its upstream (as of the last fetch), nothing ahead | `sync` (fast-forward) |
 | merged | a linked worktree whose HEAD is in the default branch, touched over `--min-age` days ago (default 3) | `clean` |
 
@@ -192,27 +192,41 @@ the grammar above to narrow the scope; a worktree **named** to `clean` is also
 removable when it is not merged but its commits are on a remote (a
 squash-merged PR looks like that), and `--min-age` does not apply to it. `--session <name>` narrows which herdr
 session a target is resolved in; every session is still read, so a space in
-another session always counts.
+another session always counts. `--session` without a target is a usage error
+(it would narrow nothing), which lists targets in that session to name.
 
 What is never removed or closed, each with the command that shows why:
 
 - a worktree holding **gitignored data** — `git worktree remove` deletes ignored
-  files and no commit brings them back. Rebuildable directories
-  (`node_modules`, `.venv`, `target`, `dist`, `build`, caches) do not count;
-  `.DS_Store`, `._*` and `.envrc` are litter.
+  files and no commit brings them back. Rebuildable directories do not count:
+  `node_modules`, `.venv`, `__pycache__` and tool caches at any depth, and
+  `target`, `dist`, `build`, `coverage` only as a directory at the worktree root
+  or beside a package manifest (`data/target/labels.db` is data). `.DS_Store`
+  and `._*` are litter; an `.envrc` is data (it holds the operator token here).
 - uncommitted changes, local-only commits (named targets), a git lock, the
-  checkout you are running in, a repo's main checkout;
-- anything with an agent in it — an idle one too, except through
+  checkout you are running in (by cwd or `HERDR_PANE_ID`), a repo's main checkout;
+- anything with an agent in it, found by each pane's cwd whatever space holds
+  it — a plain space from `workspace create --cwd`, or a pane that `cd`'d in
+  from a space bound to another checkout. An idle agent too, except through
   `sync --idle-agents`, which closes a space only when every agent in it is idle
-  past `--idle` with a transcript to resume, and prints the resume command.
+  past `--idle` with a transcript of its own to resume, and prints the resume
+  command;
+- a bare shell in it (it may be running a dev server or an editor), unless
+  `--idle-shells` is given — and even then only a shell whose space the removal
+  closes.
 
 Removals go through herdr: a worktree with an open space is removed with
-`herdr worktree remove --workspace`, a gone worktree's spaces are closed with
-`herdr workspace close` before git forgets it, and a worktree with no space is
-`git worktree remove`d (`--force` only when junk is all that is untracked).
-After acting, herdr and git are read again and any disagreement is printed with
-the command that settles it. If a herdr session does not answer its snapshot,
-`clean`/`sync` refuse to act: a worktree whose space lives there would look unused.
+`herdr worktree remove --workspace`, a plain space sitting wholly inside it is
+closed first, a gone worktree's spaces are closed with `herdr workspace close`
+before git forgets it, and a worktree with no space is `git worktree remove`d.
+Never `--force`: the litter files the plan saw are deleted by name first, so
+git's own refusal still guards anything written since. After acting, herdr and
+git are read again and any disagreement (a space or a pane still on the removed
+folder) is printed with the command that settles it; a failed step prints other
+commands to try, never the same one again. If a herdr session does not answer
+its snapshot in the very load the plan was built from, `clean`/`sync` refuse to
+act: a worktree whose space lives there would look unused. `--pick` re-plans
+after each yes and skips the action if its steps are no longer the ones shown.
 
 ### Federation map
 

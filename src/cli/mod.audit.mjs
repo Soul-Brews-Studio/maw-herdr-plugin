@@ -27,9 +27,9 @@
  */
 import { execFile } from 'node:child_process';
 import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { writeJson } from './mod.lsStateView.mjs';
-import { configuredProviders, findSessions } from './mod.resumeProviders.mjs';
+import { configuredProviders, findAllSessions } from './mod.resumeProviders.mjs';
 import { ghqRoots, reposWithWorktrees } from './mod.worktreeStates.mjs';
 import { callerFromEnv, loadTargets, resolveTarget, shq, takeDry } from './mod.target.mjs';
 
@@ -107,10 +107,51 @@ export function fmtBytes(b) {
 // --- what a worktree holds that git cannot give back ----------------------------
 
 // Gitignored but rebuildable: removing these with a worktree loses nothing a
-// build or an install will not make again.
-const REBUILDABLE = /(^|\/)(node_modules|\.venv|venv|__pycache__|target|dist|build|\.next|\.turbo|\.cache|\.parcel-cache|\.gradle|\.pytest_cache|\.mypy_cache|\.ruff_cache|coverage)(\/|$)/;
-// OS litter and the per-checkout direnv file: never a reason to keep a worktree.
-const JUNK = /(^|\/)(\._[^/]*|\.DS_Store|\.envrc)$/;
+// build or an install will not make again. The unambiguous names count at any
+// depth, whatever git lists inside them (.pytest_cache ignores itself, so git
+// lists its files one by one). The generic ones — build, dist, target, coverage —
+// count only as a directory at the worktree root or beside a package manifest:
+// data/target/labels.db and data/build/results.db are data.
+const REBUILDABLE_ANYWHERE = new Set(['node_modules', '.venv', 'venv', '__pycache__', '.next', '.turbo', '.cache', '.parcel-cache', '.gradle', '.pytest_cache', '.mypy_cache', '.ruff_cache']);
+const REBUILDABLE_AT_PACKAGE = new Set(['target', 'dist', 'build', 'coverage']);
+const MANIFESTS = ['package.json', 'Cargo.toml', 'pyproject.toml', 'setup.py', 'go.mod', 'build.gradle', 'build.gradle.kts', 'pom.xml', 'mix.exs', 'composer.json'];
+// OS litter: never a reason to keep a worktree. (.envrc is NOT litter: in this
+// fleet it holds the operator token `maw token use` writes, so it is data.)
+const JUNK = /(^|\/)(\._[^/]*|\.DS_Store)$/;
+
+/** Is one `ls-files --ignored --directory` entry rebuildable? `entry` as git printed it. */
+export function rebuildable(worktree, entry) {
+  const segs = entry.replace(/\/$/, '').split('/');
+  if (segs.some(s => REBUILDABLE_ANYWHERE.has(s))) return true;
+  // a generic name counts as a directory: not the entry's own last segment
+  // unless git printed it as a directory
+  const dirs = entry.endsWith('/') ? segs.length : segs.length - 1;
+  for (let i = 0; i < dirs; i++) {
+    if (!REBUILDABLE_AT_PACKAGE.has(segs[i])) continue;
+    const parent = segs.slice(0, i).join('/');
+    if (!parent || MANIFESTS.some(m => existsSync(join(worktree, parent, m)))) return true;
+  }
+  return false;
+}
+
+/**
+ * Does the ignored directory `rel` hold nothing but rebuildable files and litter?
+ * Walks it without following symlinks; a directory too big to walk within the
+ * budget is data — the safe answer when the question cannot be settled.
+ */
+function onlyRebuildable(worktree, rel, budget = { left: 5_000 }) {
+  let list;
+  try { list = readdirSync(join(worktree, rel), { withFileTypes: true }); } catch { return false; }
+  for (const e of list) {
+    if (--budget.left < 0) return false;
+    const child = `${rel}/${e.name}`;
+    if (e.isDirectory()) {
+      if (rebuildable(worktree, `${child}/`)) continue;
+      if (!onlyRebuildable(worktree, child, budget)) return false;
+    } else if (!rebuildable(worktree, child) && !JUNK.test(child)) return false;
+  }
+  return true;
+}
 
 /** Bytes under a path, without following symlinks; stops counting after `cap` entries. */
 function du(path, budget = { left: 20_000 }) {
@@ -136,8 +177,15 @@ function du(path, budget = { left: 20_000 }) {
 export async function ignoredData(path) {
   const r = await git(path, ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory']);
   if (!r.ok) return { error: firstLine(r.err) || 'git ls-files failed' };
-  const entries = r.out.split('\0').filter(Boolean).map(e => e.replace(/\/$/, ''))
-    .filter(e => !REBUILDABLE.test(e) && !JUNK.test(e))
+  const entries = r.out.split('\0').filter(Boolean)
+    .filter(e => !rebuildable(path, e) && !JUNK.test(e.replace(/\/$/, '')))
+    // git lists a directory whose whole content is ignored (app/ holding only a
+    // self-ignoring .pytest_cache): look inside before calling it data
+    .filter(e => !e.endsWith('/') || !onlyRebuildable(path, e.slice(0, -1)))
+    .map(e => e.replace(/\/$/, ''))
+    // git lists an ignored dir AND files inside it at times (data/ and
+    // data/target/labels.db); count each byte once, under the outermost entry
+    .filter((e, _, all) => !all.some(o => o !== e && e.startsWith(`${o}/`)))
     .map(e => ({ path: e, bytes: du(join(path, e)) }))
     .sort((a, b) => b.bytes - a.bytes);
   return { entries, bytes: entries.reduce((n, e) => n + e.bytes, 0) };
@@ -165,41 +213,24 @@ export async function uncommitted(path) {
 // --- loading the world ------------------------------------------------------------
 
 /**
- * herdr sessions whose snapshot does not come back. #59's loader skips such a
- * session quietly, which is right for resolving a name and wrong for cleanup: a
- * worktree whose only space lives in that session would look like it has none.
- * So cleanup asks again and refuses to act when this is not empty.
- */
-async function unreadableSessions() {
-  const list = await run('herdr', ['session', 'list', '--json']);
-  let sessions;
-  try { sessions = JSON.parse(list.out).sessions; } catch { return []; }   // loadTargets already threw on this
-  if (!Array.isArray(sessions)) return [];
-  const out = [];
-  await Promise.all(sessions.filter(s => s.running).map(async s => {
-    const r = await run('herdr', ['--session', s.name, 'api', 'snapshot']);
-    let snap = null;
-    try { const raw = JSON.parse(r.out); snap = raw?.result?.snapshot ?? raw?.snapshot ?? raw?.result ?? raw; } catch { /* reported below */ }
-    if (!r.ok || !Array.isArray(snap?.workspaces) || !Array.isArray(snap?.panes)) {
-      out.push({ session: s.name, reason: r.ok ? 'snapshot has no workspaces/panes arrays' : firstLine(r.err) || 'snapshot failed' });
-    }
-  }));
-  return out.sort((a, b) => a.session.localeCompare(b.session));
-}
-
-/**
  * Everything cleanup reasons about, read once:
  *   targets     #59's rows — one per herdr space, one per closed git worktree
- *   trees       one per checkout path: its spaces (in any session), git's view of it
+ *   trees       one per checkout path: the spaces bound to it (in any session),
+ *               plain spaces that sit wholly inside it, every pane whose cwd is
+ *               inside it (whatever space holds that pane), git's view of it
  *   plain       herdr spaces bound to no git worktree
  *   sessions    newest resumable transcript per path (#60 providers)
- *   incomplete  herdr sessions whose snapshot failed
+ *   transcripts every resumable transcript per path, newest first
+ *   incomplete  herdr sessions whose snapshot failed IN THIS SAME LOAD — a
+ *               session left out of `targets` is always listed here, so a
+ *               worktree whose space lives there can never look unused
  */
 export async function loadWorld({ env = process.env, registryRoot, cwd = process.cwd() } = {}) {
   const providers = configuredProviders(env);   // a bad provider name fails before anything is read
   const repos = reposWithWorktrees(ghqRoots(env, registryRoot));
-  const targets = await loadTargets({ cwd, paths: repos, ghq: false });
-  const incomplete = await unreadableSessions();
+  const skipped = [];
+  const targets = await loadTargets({ cwd, paths: repos, ghq: false, skipped });
+  const incomplete = skipped.sort((a, b) => a.session.localeCompare(b.session));
 
   const trees = new Map();
   const plain = [];
@@ -207,7 +238,7 @@ export async function loadWorld({ env = process.env, registryRoot, cwd = process
     if (t.kind === 'space') { plain.push(t); continue; }
     let w = trees.get(t.path);
     if (!w) {
-      w = { path: t.path, label: t.name, repo: t.repo, repoRoot: t.repoRoot, linked: t.linked, branch: t.branch, prunable: t.prunable, spaces: [] };
+      w = { path: t.path, label: t.name, repo: t.repo, repoRoot: t.repoRoot, linked: t.linked, branch: t.branch, prunable: t.prunable, spaces: [], plainSpaces: [], panes: [] };
       trees.set(t.path, w);
     }
     w.repoRoot ??= t.repoRoot;
@@ -220,17 +251,58 @@ export async function loadWorld({ env = process.env, registryRoot, cwd = process
     }
   }
 
+  // A pane belongs to the innermost checkout its cwd is in (a linked worktree
+  // under <repo>/wt/ is inside the main checkout's folder too), whatever space
+  // holds it: `herdr workspace create --cwd` binds no repo, and a pane can `cd`
+  // into a worktree from a space bound to another checkout. Binding alone would
+  // miss both, and clean would remove a folder an agent is sitting in.
+  const treeList = [...trees.values()];
+  const home = dir => {
+    let best = null;
+    for (const w of treeList) if (within(w.path, dir) && (!best || w.path.length > best.path.length)) best = w;
+    return best;
+  };
+  const homeOf = p => { const raw = p.foregroundCwd || p.cwd; return raw ? home(real(raw)) ?? home(raw) : null; };
+  for (const t of targets.filter(t => t.state !== 'closed')) {
+    for (const p of t.panes) homeOf(p)?.panes.push({ ...p, session: t.session, workspace: t.workspace });
+  }
+  // a plain space whose every pane sits inside one checkout is that checkout's:
+  // removing the checkout closes it, or it would be left on a deleted folder
+  for (const t of plain.filter(t => t.state !== 'closed')) {
+    const homes = t.panes.filter(p => p.foregroundCwd || p.cwd).map(homeOf);
+    if (homes.length && homes.every(h => h && h === homes[0])) homes[0].plainSpaces.push(t);
+  }
+
   const aliases = new Map();
   for (const w of trees.values()) aliases.set(w.path, w.path);
-  for (const t of targets) for (const p of t.panes) if (p.cwd) aliases.set(p.cwd, real(p.cwd));
-  const sessions = findSessions(providers, aliases);
-  return { targets, trees: [...trees.values()].sort((a, b) => a.path.localeCompare(b.path)), plain, sessions, providers, incomplete, repos };
+  for (const t of targets) for (const p of t.panes) for (const d of [p.cwd, p.foregroundCwd]) if (d) aliases.set(d, real(d));
+  const transcripts = findAllSessions(providers, aliases);
+  const sessions = new Map([...transcripts].map(([k, list]) => [k, list[0]]));
+  return { targets, trees: treeList.sort((a, b) => a.path.localeCompare(b.path)), plain, sessions, transcripts, providers, incomplete, repos };
+}
+
+/**
+ * Every pane a removal of `w` would touch, each once: the panes of every space
+ * it would close (bound to w, or plain and wholly inside it) and every pane whose
+ * cwd is inside w, wherever it lives. `closable` says whether its space is one
+ * the removal closes; a pane in some other space never is.
+ */
+export function occupants(w) {
+  const closing = [...(w.spaces ?? []), ...(w.plainSpaces ?? [])];
+  const keys = new Set(closing.map(s => `${s.session}\0${s.workspace}`));
+  const out = new Map();
+  for (const s of closing) for (const p of s.panes) out.set(`${s.session}\0${p.pane}`, { ...p, session: s.session, workspace: s.workspace, closable: true });
+  for (const p of w.panes ?? []) {
+    const k = `${p.session}\0${p.pane}`;
+    if (!out.has(k)) out.set(k, { ...p, closable: keys.has(`${p.session}\0${p.workspace}`) });
+  }
+  return [...out.values()];
 }
 
 /** #60's four states, for one tree. */
 export function stateOf(w, sessions) {
-  if (w.spaces.some(s => s.panes.some(p => p.agent))) return 'running';
-  if (w.spaces.length) return 'open';
+  if (occupants(w).some(p => p.agent)) return 'running';
+  if (w.spaces.length || w.plainSpaces?.length) return 'open';
   return sessions.get(w.path) ? 'resumable' : 'cold';
 }
 
@@ -291,20 +363,37 @@ const spaceRef = s => ({ session: s.session, workspace: s.workspace, label: s.la
  * Why a worktree clean would otherwise remove must stay, each reason with a
  * code, and the command that shows it. An empty list means it may go.
  *
- *   agent  caller  locked     someone is using it — checked first, and enough on
- *                             their own: the disk checks below are skipped
+ *   agent  shell  caller  locked
+ *                             someone is using it — checked first, and enough on
+ *                             their own: the disk checks below are skipped. An
+ *                             agent or a shell counts wherever its space is, by
+ *                             the pane's cwd; a bare shell may be running a dev
+ *                             server or an editor, so it keeps the worktree
+ *                             unless --idle-shells says close it (and only when
+ *                             its space is one the removal closes)
  *   local-only  uncommitted  status  ignored     it holds something git cannot give back
  *   young                     touched under --min-age days ago (a new branch looks merged)
  */
-export const IN_USE = new Set(['agent', 'caller', 'locked']);
+export const IN_USE = new Set(['agent', 'shell', 'caller', 'locked']);
 
-async function keepReasons(w, f, { named, minAgeDays, now, caller, cwd, locked }) {
+const peekCmd = p => `maw herdr peek --session ${shq(p.session)} ${p.pane}`;
+
+/** The 'agent' and 'shell' keep reasons for the panes a removal of `w` would touch. */
+export function paneReasons(w, { idleShells = false } = {}) {
+  const out = [];
+  for (const p of occupants(w)) {
+    const where = p.closable ? '' : ` (from space ${p.workspace} in ${p.session}, which clean will not close)`;
+    if (p.agent) out.push({ code: 'agent', reason: `agent ${p.pane} (${p.agent}, ${p.status}) is in it${where}`, fix: peekCmd(p) });
+    else if (!idleShells || !p.closable) out.push({ code: 'shell', reason: `shell ${p.pane} is in it${where || ' — it may be running something; --idle-shells closes it'}`, fix: peekCmd(p) });
+  }
+  return out;
+}
+
+async function keepReasons(w, f, { named, minAgeDays, now, caller, cwd, locked, idleShells }) {
   const why = [];
   const add = (code, reason, fix) => why.push({ code, reason, fix });
-  for (const s of w.spaces) {
-    for (const p of s.panes.filter(p => p.agent)) add('agent', `agent ${p.pane} (${p.agent}, ${p.status}) is in it`, `maw herdr peek --session ${shq(s.session)} ${p.pane}`);
-  }
-  const mine = caller && w.spaces.some(s => s.panes.some(p => p.pane === caller.pane && (!caller.session || s.session === caller.session)));
+  why.push(...paneReasons(w, { idleShells }));
+  const mine = caller && occupants(w).some(p => p.pane === caller.pane && (!caller.session || p.session === caller.session));
   if (mine || within(w.path, real(cwd))) add('caller', 'this command is running inside it', `cd ${shq(w.repoRoot)}`);
   if (locked.has(w.path)) add('locked', 'git has it locked', `git -C ${shq(w.repoRoot)} worktree unlock ${shq(w.path)}`);
   if (why.length || (!f.merged && !named)) return why;
@@ -316,20 +405,32 @@ async function keepReasons(w, f, { named, minAgeDays, now, caller, cwd, locked }
   const status = await uncommitted(w.path);
   const dirty = status?.dirty ?? [];
   // junk is untracked too, and git refuses to remove a worktree with any
-  // untracked file unless forced; clean forces only when junk is all there is
-  why.junk = status?.junk.length ?? 0;
+  // untracked file; clean deletes exactly these files first and then removes
+  // WITHOUT --force, so git's own refusal still guards anything new
+  why.junk = status?.junk ?? [];
   if (status === null) add('status', 'git status failed in it', `git -C ${shq(w.path)} status`);
   else if (dirty.length) add('uncommitted', `${dirty.length} uncommitted: ${dirty.slice(0, 3).join(' ')}${dirty.length > 3 ? ` +${dirty.length - 3}` : ''}`, `git -C ${shq(w.path)} status`);
   const ig = await ignoredData(w.path);
   if (ig.error) add('ignored', `cannot list its gitignored files (${ig.error})`, `git -C ${shq(w.path)} status --ignored`);
   else if (ig.entries.length) {
     const top = ig.entries[0];
-    add('ignored', `holds ${fmtBytes(ig.bytes)} of gitignored data (${ig.entries.slice(0, 3).map(e => e.path).join(', ')}${ig.entries.length > 3 ? ` +${ig.entries.length - 3}` : ''}) that no commit can bring back`,
-      `du -sh ${shq(join(w.path, top.path))}`);
+    const envrc = ig.entries.some(e => e.path === '.envrc' || e.path.endsWith('/.envrc'));
+    add('ignored', `holds ${fmtBytes(ig.bytes)} of gitignored data (${ig.entries.slice(0, 3).map(e => e.path).join(', ')}${ig.entries.length > 3 ? ` +${ig.entries.length - 3}` : ''}) that no commit can bring back${envrc ? '; an .envrc may hold a token' : ''}`,
+      // line count only: an .envrc may hold a token, and this line is printed
+      ig.entries.length === 1 && top.path === '.envrc' ? `wc -l ${shq(join(w.path, '.envrc'))}` : `du -sh ${shq(join(w.path, top.path))}`);
   }
   const ageDays = Math.floor((now - f.last) / 86_400_000);
   if (!named && ageDays < minAgeDays) add('young', `active ${ageDays}d ago (under --min-age ${minAgeDays}; a new branch looks merged too)`, `maw herdr clean ${shq(w.path)}`);
   return why;
+}
+
+/** The transcript of the agent in pane `p` (in space `s`), or null when none can be told. */
+export function ownTranscript(world, s, p) {
+  const at = [p.foregroundCwd, p.cwd].filter(Boolean).map(d => world.transcripts.get(real(d)) ?? world.transcripts.get(d)).find(Boolean)
+    ?? world.transcripts.get(s.path) ?? [];
+  const own = at.filter(t => t.provider === p.agent);
+  if (p.agentSession?.id) return own.find(t => t.id === p.agentSession.id) ?? null;
+  return own[0] ?? null;
 }
 
 /**
@@ -340,7 +441,7 @@ async function keepReasons(w, f, { named, minAgeDays, now, caller, cwd, locked }
  * pushed but not merged (a squash-merged PR looks like that), and skip --min-age:
  * a person picked them.
  */
-export async function audit(world, { idleMs = DEFAULT_IDLE_MS, minAgeDays = DEFAULT_MIN_AGE_DAYS, scope = null, now = Date.now(), caller = callerFromEnv(), cwd = process.cwd() } = {}) {
+export async function audit(world, { idleMs = DEFAULT_IDLE_MS, minAgeDays = DEFAULT_MIN_AGE_DAYS, scope = null, now = Date.now(), caller = callerFromEnv(), cwd = process.cwd(), idleShells = false } = {}) {
   const inScope = w => !scope || scope.paths.has(w.path) || w.spaces?.some(s => scope.spaces.has(`${s.session}\0${s.workspace}`));
   const spaceInScope = s => !scope || scope.spaces.has(`${s.session}\0${s.workspace}`) || scope.paths.has(s.path);
   const named = w => !!scope?.paths.has(w.path);
@@ -351,10 +452,11 @@ export async function audit(world, { idleMs = DEFAULT_IDLE_MS, minAgeDays = DEFA
   const locks = root => { if (!lockedMemo.has(root)) lockedMemo.set(root, lockedPaths(root)); return lockedMemo.get(root); };
 
   const trees = world.trees.filter(inScope);
+  const baseOf = w => ({ label: w.label, path: w.path, repo: w.repo, repoRoot: w.repoRoot, branch: w.branch, linked: w.linked, state: stateOf(w, world.sessions), spaces: w.spaces.map(spaceRef), plainSpaces: (w.plainSpaces ?? []).map(spaceRef) });
   for (const w of trees) {
-    const base = { label: w.label, path: w.path, repo: w.repo, repoRoot: w.repoRoot, branch: w.branch, linked: w.linked, state: stateOf(w, world.sessions), spaces: w.spaces.map(spaceRef) };
+    const base = baseOf(w);
     if (w.prunable) {
-      const agents = w.spaces.flatMap(s => s.panes.filter(p => p.agent).map(p => ({ session: s.session, pane: p.pane, agent: p.agent, status: p.status })));
+      const agents = occupants(w).filter(p => p.agent).map(p => ({ session: p.session, pane: p.pane, agent: p.agent, status: p.status }));
       findings.push({ kind: 'gone', ...base, agents, locked: w.repoRoot ? (await locks(w.repoRoot)).has(w.path) : false, detail: `folder gone; git still lists it${w.spaces.length ? ` and ${w.spaces.length} herdr space${w.spaces.length === 1 ? '' : 's'} still point${w.spaces.length === 1 ? 's' : ''} at it` : ''}` });
     } else if (w.spaces.length && !existsSync(w.path)) {
       for (const s of w.spaces) {
@@ -363,19 +465,25 @@ export async function audit(world, { idleMs = DEFAULT_IDLE_MS, minAgeDays = DEFA
       }
     }
   }
+  // a plain space wholly inside a gone worktree is closed by that worktree's removal
+  const claimed = new Set(world.trees.filter(w => w.prunable).flatMap(w => (w.plainSpaces ?? []).map(s => `${s.session}\0${s.workspace}`)));
   for (const s of world.plain.filter(spaceInScope)) {
+    if (claimed.has(`${s.session}\0${s.workspace}`)) continue;
     const dirs = s.panes.map(p => p.cwd).filter(Boolean);
     if (!dirs.length || dirs.some(d => existsSync(d))) continue;
     const agents = s.panes.filter(p => p.agent);
     findings.push({ kind: 'orphan', label: s.label, path: s.path, repo: null, repoRoot: null, branch: null, linked: false, state: agents.length ? 'running' : 'open', spaces: [spaceRef(s)], session: s.session, workspace: s.workspace, agents: agents.map(p => p.pane), detail: `herdr space ${s.workspace} in ${s.session}: every pane sits in a folder that is gone${agents.length ? `, with agent ${agents.map(p => p.pane).join(', ')} in it` : ''}` });
   }
 
-  // idle agents: herdr says idle, and the newest transcript the providers find
-  // for its directory is older than the threshold. No transcript, no finding —
+  // idle agents: herdr says idle, and THAT agent's own transcript is older than
+  // the threshold. Its own: the provider must be the agent's kind (a stale claude
+  // transcript says nothing about a codex beside it), and when herdr knows the
+  // agent's session id (agent_session) it must be that very transcript — else the
+  // printed resume would open another conversation. No transcript, no finding:
   // its idle time is unknown, and closing it could not be undone by resume.
   for (const s of world.targets.filter(t => t.state !== 'closed' && spaceInScope(t))) {
     for (const p of s.panes.filter(p => p.agent && IDLE.has(p.status))) {
-      const tx = world.sessions.get(real(p.cwd ?? '')) ?? world.sessions.get(s.path);
+      const tx = ownTranscript(world, s, p);
       if (!tx || now - tx.at < idleMs) continue;
       findings.push({
         kind: 'idle', label: s.label, path: s.path, repo: s.repo, repoRoot: s.repoRoot, branch: s.branch, linked: s.linked, state: 'running',
@@ -392,7 +500,7 @@ export async function audit(world, { idleMs = DEFAULT_IDLE_MS, minAgeDays = DEFA
   for (let i = 0; i < live.length; i++) {
     const w = live[i];
     const f = factList[i];
-    const base = { label: w.label, path: w.path, repo: w.repo, repoRoot: w.repoRoot, branch: w.branch, linked: w.linked, state: stateOf(w, world.sessions), spaces: w.spaces.map(spaceRef) };
+    const base = baseOf(w);
     if (f.upstream && f.behind > 0 && f.ahead === 0) {
       findings.push({ kind: 'behind', ...base, upstream: f.upstream, behind: f.behind, detail: `${w.branch ?? 'HEAD'} is ${f.behind} behind ${f.upstream} and 0 ahead (as of the last fetch)` });
     }
@@ -401,9 +509,9 @@ export async function audit(world, { idleMs = DEFAULT_IDLE_MS, minAgeDays = DEFA
         keep: [{ code: 'main', reason: "it is the repo's main checkout; clean removes linked worktrees only", fix: `git -C ${shq(w.path)} worktree list` }],
         detail: 'named by you' });
     } else if (w.linked && (f.merged || named(w))) {
-      const keep = await keepReasons(w, f, { named: named(w), minAgeDays, now, caller, cwd, locked: w.repoRoot ? await locks(w.repoRoot) : new Set() });
+      const keep = await keepReasons(w, f, { named: named(w), minAgeDays, now, caller, cwd, idleShells, locked: w.repoRoot ? await locks(w.repoRoot) : new Set() });
       findings.push({
-        kind: 'merged', ...base, named: named(w), merged: f.merged, defaultRef: f.defaultRef, ageMs: now - f.last, keep: [...keep], junk: keep.junk ?? 0,
+        kind: 'merged', ...base, named: named(w), merged: f.merged, defaultRef: f.defaultRef, ageMs: now - f.last, keep: [...keep], junk: keep.junk ?? [],
         detail: f.merged ? `HEAD is in ${f.defaultRef}` : `named by you; its commits are on a remote`,
       });
     }
@@ -417,8 +525,8 @@ export async function audit(world, { idleMs = DEFAULT_IDLE_MS, minAgeDays = DEFA
 
 const FLAGS = {
   audit: { bool: ['--json'], value: ['--idle', '--min-age', '--session'] },
-  clean: { bool: ['--json', '--go', '--pick'], value: ['--min-age', '--session'] },
-  sync: { bool: ['--json', '--go', '--pick', '--idle-agents'], value: ['--idle', '--session'] },
+  clean: { bool: ['--json', '--go', '--pick', '--idle-shells'], value: ['--min-age', '--session'] },
+  sync: { bool: ['--json', '--go', '--pick', '--idle-agents', '--idle-shells'], value: ['--idle', '--session'] },
 };
 
 /** The three verbs' shared argv: targets, flags, and the usage errors (exit 2) that end in a command. */
@@ -426,7 +534,7 @@ export function parseArgs(verb, argv, UsageError) {
   const rest = [...argv];
   const dry = takeDry(rest);
   const spec = FLAGS[verb];
-  const o = { json: false, go: false, pick: false, idleAgents: false, idleMs: DEFAULT_IDLE_MS, idleRaw: null, minAgeDays: DEFAULT_MIN_AGE_DAYS, session: null, targets: [], dry };
+  const o = { json: false, go: false, pick: false, idleAgents: false, idleShells: false, idleMs: DEFAULT_IDLE_MS, idleRaw: null, minAgeDays: DEFAULT_MIN_AGE_DAYS, session: null, targets: [], dry };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (spec.value.includes(a)) {
@@ -442,7 +550,7 @@ export function parseArgs(verb, argv, UsageError) {
         o.minAgeDays = Number(v);
       } else o.session = v;
     } else if (spec.bool.includes(a)) {
-      o[{ '--json': 'json', '--go': 'go', '--pick': 'pick', '--idle-agents': 'idleAgents' }[a]] = true;
+      o[{ '--json': 'json', '--go': 'go', '--pick': 'pick', '--idle-agents': 'idleAgents', '--idle-shells': 'idleShells' }[a]] = true;
     } else if (a.startsWith('-')) {
       const takes = [...spec.bool, ...spec.value].join(', ');
       throw new UsageError(`unknown argument for ${verb}: ${a} (takes ${takes}, and targets)\n  maw herdr ${verb} --help`);
@@ -458,7 +566,14 @@ export function parseArgs(verb, argv, UsageError) {
  * #59's worktree grammar (self, path, pane id, name); an ambiguous one throws the
  * TargetError that lists its candidates as runnable commands.
  */
-export function scopeOf(world, raws, { verb, session }) {
+export function scopeOf(world, raws, { verb, session, UsageError = Error }) {
+  if (!raws.length && session) {
+    // --session picks where a NAMED target resolves; every session is always
+    // read. Without a target it would narrow nothing while looking like it did.
+    const here = world.targets.filter(t => t.session === session && t.state !== 'closed');
+    const names = here.map(t => (t.kind === 'worktree' ? shq(t.path) : t.panes[0]?.pane)).filter(Boolean).slice(0, 3);
+    throw new UsageError(`--session narrows which session a named target resolves in, and no target was named${names.length ? `; name one:\n${names.map(n => `  maw herdr ${verb} --session ${shq(session)} ${n}`).join('\n')}` : ` (session ${session} has no open space)\n  maw herdr ls --sessions`}\n  or drop it to ${verb} every session:\n  maw herdr ${verb}`);
+  }
   if (!raws.length) return null;
   const pool = session ? world.targets.filter(t => !t.session || t.session === session) : world.targets;
   const scope = { paths: new Set(), spaces: new Set() };
@@ -478,7 +593,7 @@ export function warnIncomplete(incomplete, acting) {
   }
 }
 
-const KEPT_WORDS = { agent: 'an agent in it', caller: 'you are in it', locked: 'locked', main: 'main checkout', 'local-only': 'local-only commits', uncommitted: 'uncommitted changes', status: 'git status failed', ignored: 'gitignored data', young: 'touched under --min-age', 'orphan-agent': 'an agent in a space on nothing', 'needs-flag': 'idle, needs --idle-agents' };
+const KEPT_WORDS = { agent: 'an agent in it', shell: 'a shell in it', caller: 'you are in it', locked: 'locked', main: 'main checkout', 'local-only': 'local-only commits', uncommitted: 'uncommitted changes', status: 'git status failed', ignored: 'gitignored data', young: 'touched under --min-age', 'orphan-agent': 'an agent in a space on nothing', 'needs-flag': 'idle, needs --idle-agents' };
 
 /** "4 an agent in it · 2 touched under --min-age" — each kept worktree counted once, by its first reason. */
 export function keptSummary(reasonLists) {
@@ -502,7 +617,7 @@ function printFinding(f) {
 export async function cmdAudit(argv, { UsageError = Error, registryRoot } = {}) {
   const o = parseArgs('audit', argv, UsageError);
   const world = await loadWorld({ registryRoot });
-  const scope = scopeOf(world, o.targets, { verb: 'audit', session: o.session });
+  const scope = scopeOf(world, o.targets, { verb: 'audit', session: o.session, UsageError });
   const report = await audit(world, { idleMs: o.idleMs, minAgeDays: o.minAgeDays, scope });
   warnIncomplete(report.incomplete, false);
   if (o.json) {

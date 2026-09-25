@@ -37,10 +37,11 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|audit|clean|sync|serv
                                        report only, never changes anything: worktrees whose
                                        folder is gone, spaces on nothing, idle agents,
                                        checkouts only behind, merged worktrees (or why kept)
-  clean [<target>...] [--go|--pick] [--min-age 3] [--json]
+  clean [<target>...] [--go|--pick] [--min-age 3] [--idle-shells] [--json]
                                        plan removing gone + merged worktrees, through herdr;
-                                       a named target is removed if its commits are pushed
-  sync [<target>...] [--idle-agents] [--idle 24h] [--go|--pick] [--json]
+                                       a named target is removed if its commits are pushed;
+                                       a pane in it (agent, or shell without --idle-shells) keeps it
+  sync [<target>...] [--idle-agents] [--idle 24h] [--idle-shells] [--go|--pick] [--json]
                                        plan making herdr and git agree: prune gone worktrees,
                                        close spaces on nothing, fast-forward behind checkouts;
                                        --idle-agents also closes idle agents' spaces
