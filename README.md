@@ -158,6 +158,15 @@ starting an OAuth flow. Host and Origin checks are the same as for `/api/*`.
 `--mcp` is refused under `--engine`. Negotiated protocol versions:
 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05.
 
+Every MCP error ends with a command that fixes it: usually a `curl` against
+this listener, which reads the token from the token file through
+`-H @<(printf …)` so the token never appears in argv. Caller-supplied text,
+such as a target, is never copied into a suggested command. Paths are
+shell-quoted. Write tools are annotated `destructiveHint: true`. A refused
+`herdr_send` in token mode lands in `/api/feed` as `auth-reject`, like a
+refused `POST /api/send`. A frame over 256 KiB answers 413. Bun rejects a body
+over 257 KiB before the handler runs, with an empty 413.
+
 Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for
 exact field/limit contracts; this README stays a map, not the spec.

@@ -7,7 +7,10 @@
   (`herdr_sessions`, `herdr_agents`, `herdr_capture`, `herdr_worktrees`) call
   the same routes as their HTTP twins and follow the mode; write tools
   (`herdr_send`, `herdr_wake`) require the operator token in every mode,
-  including `--insecure-no-token`. Refused under `--engine`.
+  including `--insecure-no-token`. Refused under `--engine`. Every MCP error,
+  including a wrong Content-Type (415) and an over-limit frame (413), stays
+  inside the JSON-RPC envelope and ends with a runnable fix command. Paths are
+  shell-quoted, and caller input is never echoed into one.
 
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,

@@ -1,6 +1,6 @@
 import { HTTPError } from './serverTypes.ts';
 import { BackendError } from './types.ts';
-import { readJSON } from './mod.readJSON.ts';
+import { BodyTooLargeError, readJSON } from './mod.readJSON.ts';
 
 /**
  * MCP over Streamable HTTP, mounted at /mcp on the dashboard listener by
@@ -38,7 +38,11 @@ export interface MCPContext {
   tokenFile?: string;
   binary: string;
   worktreeRoot: string;
+  /** Token mode: an unauthenticated POST carried a herdr_send frame (feed parity with POST /api/send). */
+  onSendRefused?(): void;
 }
+
+const BODY_LIMIT = 256 << 10;
 
 interface Tool {
   name: string;
@@ -113,23 +117,59 @@ type Reply = { status: number; body: Frame } | null;
 const rpcError = (id: unknown, code: number, message: string, data?: Record<string, unknown>): Frame =>
   ({ jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data ? { data } : {}) } });
 
-function tokenModeFix(context: MCPContext): string {
-  const file = context.tokenFile || '~/.maw-herdr-token';
-  return `  claude mcp add --transport http herdr ${context.base}/mcp --header "Authorization: Bearer $(cat ${file})"`;
+/*
+ * Fix commands. Every value interpolated into one is either a fixed literal or a
+ * server-side path passed through sh(); caller-controlled input (a target, a
+ * tool name) never is, because an agent client is built to run what it is told
+ * fixes an error, and a target can come from prompt-injected pane text.
+ */
+
+/** POSIX single-quoting; left bare only when nothing in it is special to a shell. */
+export const sh = (value: string): string => /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`;
+
+/** Token file as a shell word: a real path is quoted, the default keeps its ~ unquoted so it expands. */
+const tokenWord = (context: MCPContext) => context.tokenFile ? sh(context.tokenFile) : '~/.maw-herdr-token';
+
+/**
+ * curl's Authorization header in token mode, read from the token file through a
+ * process substitution: printf is a builtin, so the token never lands in argv.
+ */
+const curlAuth = (context: MCPContext) => context.insecure ? '' : ` -H @<(printf 'Authorization: Bearer %s\\n' "$(cat ${tokenWord(context)})")`;
+
+const TOOLS_LIST = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+
+/** A runnable POST of one well-formed frame to this listener. The frames are fixed literals with no single quote. */
+function curlFix(context: MCPContext, frame: Frame = TOOLS_LIST, version?: string): string {
+  return `  curl -s -X POST ${context.base}/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream'`
+    + `${version ? ` -H 'MCP-Protocol-Version: ${version}'` : ''}${curlAuth(context)} -d '${JSON.stringify(frame)}'`;
 }
+
+/** The serve-shaped targets (session:window) herdr_capture/send take, as herdr_agents lists them. */
+const listTargetsFix = (context: MCPContext) => `  curl -s${curlAuth(context)} ${context.base}/api/agents`;
+
+/** Re-register the client with the token. remove first: a stale 'herdr' entry is the likeliest cause of this 401. */
+const registerFix = (context: MCPContext, file: string) =>
+  `  claude mcp remove herdr 2>/dev/null; claude mcp add --transport http herdr ${context.base}/mcp --header "Authorization: Bearer $(cat ${file})"`;
+
+const tokenModeFix = (context: MCPContext) => registerFix(context, tokenWord(context));
 
 function demoWriteFix(context: MCPContext): string {
   const listen = context.base.replace(/^http:\/\//, '');
+  // This demo still holds the port, so stop it first; register the client
+  // before starting, so the next write does not fail again on the header.
   return '  test -e ~/.maw-herdr-token || (umask 077; openssl rand -hex 32 > ~/.maw-herdr-token)\n'
+    + `  kill ${process.pid}\n`
+    + `${registerFix(context, '~/.maw-herdr-token')}\n`
     + `  maw herdr serve --mcp --token-file ~/.maw-herdr-token --listen ${listen}`;
 }
 
-function toolFix(code: string, args: Record<string, unknown>, context: MCPContext): string {
+function toolFix(code: string, context: MCPContext): string {
   switch (code) {
-    case 'herdr_unavailable': return `  ${context.binary} workspace list`;
-    case 'worktrees_unavailable': return `  git -C ${context.worktreeRoot} worktree list`;
-    case 'capture_unavailable': return typeof args.target === 'string' ? `  maw herdr peek ${JSON.stringify(args.target)}` : '  maw herdr ls --agents';
-    default: return '  maw herdr ls --agents';
+    case 'herdr_unavailable': return `  ${sh(context.binary)} workspace list`;
+    case 'worktrees_unavailable': return `  git -C ${sh(context.worktreeRoot)} worktree list`;
+    // Either the target is not in the roster, or herdr could not read the pane.
+    case 'capture_unavailable': return `${listTargetsFix(context)}\n  ${sh(context.binary)} workspace list`;
+    default: return listTargetsFix(context);
   }
 }
 
@@ -149,11 +189,11 @@ function validateArguments(tool: Tool, args: unknown): string | undefined {
 
 async function callTool(id: unknown, params: unknown, context: MCPContext): Promise<Reply> {
   if (!params || typeof params !== 'object' || Array.isArray(params) || typeof (params as Frame).name !== 'string') {
-    return { status: 200, body: rpcError(id, -32602, 'tools/call needs params.name\n  list the tools with {"jsonrpc":"2.0","id":1,"method":"tools/list"}') };
+    return { status: 200, body: rpcError(id, -32602, `tools/call needs params.name; list the tools\n${curlFix(context)}`) };
   }
   const { name, arguments: rawArgs } = params as { name: string; arguments?: unknown };
   const tool = TOOLS.find(candidate => candidate.name === name);
-  if (!tool) return { status: 200, body: rpcError(id, -32602, `unknown tool ${JSON.stringify(name)}; tools: ${TOOLS.map(t => t.name).join(', ')}`) };
+  if (!tool) return { status: 200, body: rpcError(id, -32602, `unknown tool ${JSON.stringify(name)}; tools: ${TOOLS.map(t => t.name).join(', ')}\n${curlFix(context)}`) };
   // Auth before argument validation: a refused caller learns nothing else.
   if (tool.write && !context.authenticated) {
     const message = context.insecure
@@ -166,7 +206,7 @@ async function callTool(id: unknown, params: unknown, context: MCPContext): Prom
   }
   const invalid = validateArguments(tool, rawArgs);
   const args = (rawArgs ?? {}) as Record<string, unknown>;
-  if (invalid) return { status: 200, body: rpcError(id, -32602, `${tool.name}: ${invalid}\n  list the tools with {"jsonrpc":"2.0","id":1,"method":"tools/list"}`) };
+  if (invalid) return { status: 200, body: rpcError(id, -32602, `${tool.name}: ${invalid}; the input schemas are in tools/list\n${curlFix(context)}`) };
   try {
     const value = await tool.call(args, context.route);
     return { status: 200, body: { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }], isError: false } } };
@@ -178,12 +218,12 @@ async function callTool(id: unknown, params: unknown, context: MCPContext): Prom
     else if (error instanceof BackendError && error.code === 'target_not_agent') { status = 409; code = 'target_not_agent'; }
     if (context.signal.aborted) { status = 503; code = 'request_timeout'; }
     const detail = JSON.stringify(body ?? { error: code });
-    return { status: 200, body: { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `error ${status} ${code}: ${detail}\n${toolFix(code, args, context)}` }], isError: true } } };
+    return { status: 200, body: { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: `error ${status} ${code}: ${detail}\n${toolFix(code, context)}` }], isError: true } } };
   }
 }
 
 async function handleFrame(frame: unknown, context: MCPContext): Promise<Reply> {
-  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return { status: 400, body: rpcError(null, -32600, 'invalid request: expected a JSON-RPC 2.0 object\n  {"jsonrpc":"2.0","id":1,"method":"tools/list"}') };
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return { status: 400, body: rpcError(null, -32600, `invalid request: expected a JSON-RPC 2.0 object\n${curlFix(context)}`) };
   const { jsonrpc, method, params } = frame as Frame;
   const hasId = Object.hasOwn(frame, 'id');
   const id = (frame as Frame).id;
@@ -191,13 +231,14 @@ async function handleFrame(frame: unknown, context: MCPContext): Promise<Reply> 
   // A client POSTing a response or an error back: accepted, nothing to answer.
   if (method === undefined && jsonrpc === '2.0' && validId && (Object.hasOwn(frame, 'result') || Object.hasOwn(frame, 'error'))) return null;
   if (jsonrpc !== '2.0' || typeof method !== 'string' || (hasId && !validId)) {
-    return { status: 400, body: rpcError(validId ? id : null, -32600, 'invalid request: needs jsonrpc "2.0", a string method, and a string or number id\n  {"jsonrpc":"2.0","id":1,"method":"tools/list"}') };
+    return { status: 400, body: rpcError(validId ? id : null, -32600, `invalid request: needs jsonrpc "2.0", a string method, and a string or number id\n${curlFix(context)}`) };
   }
   if (!hasId) return null; // Notification, including notifications/initialized: never answered.
   switch (method) {
     case 'initialize': {
       const requested = params && typeof params === 'object' && !Array.isArray(params) ? (params as Frame).protocolVersion : undefined;
-      if (typeof requested !== 'string') return { status: 200, body: rpcError(id, -32602, `initialize needs params.protocolVersion; supported: ${MCP_PROTOCOL_VERSIONS.join(', ')}\n  {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"${MCP_PROTOCOL_VERSIONS[0]}","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}`) };
+      if (typeof requested !== 'string') return { status: 200, body: rpcError(id, -32602, `initialize needs params.protocolVersion; supported: ${MCP_PROTOCOL_VERSIONS.join(', ')}\n`
+        + curlFix(context, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: MCP_PROTOCOL_VERSIONS[0], capabilities: {}, clientInfo: { name: 'curl', version: '0' } } })) };
       const protocolVersion = MCP_PROTOCOL_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSIONS[0];
       return { status: 200, body: { jsonrpc: '2.0', id, result: { protocolVersion, capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'maw-herdr', title: 'maw herdr', version: 'herdr-core-dev' }, instructions: INSTRUCTIONS } } };
@@ -205,10 +246,11 @@ async function handleFrame(frame: unknown, context: MCPContext): Promise<Reply> 
     case 'ping': return { status: 200, body: { jsonrpc: '2.0', id, result: {} } };
     case 'tools/list': return { status: 200, body: { jsonrpc: '2.0', id, result: { tools: TOOLS.map(tool => ({
       name: tool.name, title: tool.title, description: tool.description, inputSchema: tool.inputSchema,
-      annotations: { title: tool.title, readOnlyHint: !tool.write, destructiveHint: false, idempotentHint: !tool.write, openWorldHint: false },
+      // A write types into a live agent or starts one: never advertise it as harmless.
+      annotations: { title: tool.title, readOnlyHint: !tool.write, destructiveHint: tool.write, idempotentHint: !tool.write, openWorldHint: false },
     })) } } };
     case 'tools/call': return callTool(id, params, context);
-    default: return { status: 200, body: rpcError(id, -32601, `method not found: ${method}; this server offers initialize, ping, tools/list, tools/call\n  {"jsonrpc":"2.0","id":1,"method":"tools/list"}`) };
+    default: return { status: 200, body: rpcError(id, -32601, `method not found: ${JSON.stringify(method)}; this server offers initialize, ping, tools/list, tools/call\n${curlFix(context)}`) };
   }
 }
 
@@ -216,26 +258,40 @@ export async function serveMCP(request: Request, context: MCPContext, headers: H
   const respond = (body: unknown, status: number) => Response.json(body, { status, headers });
   // Token mode: /mcp is a route like any other, and every route needs the token.
   if (!context.insecure && !context.authenticated) {
+    // A refused POST /api/send lands in the delivery feed as auth-reject; so does
+    // a refused herdr_send. Only a bounded body is read, and never acted on.
+    if (request.method === 'POST' && context.onSendRefused) {
+      try {
+        const payload = await readJSON(request, BODY_LIMIT, context.signal);
+        const frames = Array.isArray(payload) ? payload : [payload];
+        const isSend = (frame: unknown) => !!frame && typeof frame === 'object' && (frame as Frame).method === 'tools/call'
+          && ((frame as { params?: { name?: unknown } }).params?.name === 'herdr_send');
+        if (frames.some(isSend)) context.onSendRefused();
+      } catch { /* unreadable body: nothing to record, still 401 */ }
+    }
     return respond(rpcError(null, MCP_UNAUTHORIZED, `operator_token_required\n${tokenModeFix(context)}`, { status: 401, error: 'operator_token_required' }), 401);
   }
   if (request.method !== 'POST') {
     // No server-initiated SSE stream and no sessions to DELETE: POST only.
     headers.set('Allow', 'POST');
-    return respond(rpcError(null, -32600, `method_not_allowed: /mcp takes JSON-RPC over POST\n  curl -s -X POST ${context.base}/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'`), 405);
+    return respond(rpcError(null, -32600, `method_not_allowed: /mcp takes JSON-RPC over POST\n${curlFix(context, { jsonrpc: '2.0', id: 1, method: 'ping' })}`), 405);
   }
   const version = request.headers.get('mcp-protocol-version');
   if (version !== null && !MCP_PROTOCOL_VERSIONS.includes(version)) {
-    return respond(rpcError(null, -32600, `unsupported MCP-Protocol-Version ${JSON.stringify(version)}; supported: ${MCP_PROTOCOL_VERSIONS.join(', ')}\n  re-run initialize and send the protocolVersion it returns`), 400);
+    return respond(rpcError(null, -32600, `unsupported MCP-Protocol-Version ${JSON.stringify(version)}; supported: ${MCP_PROTOCOL_VERSIONS.join(', ')}\n${curlFix(context, TOOLS_LIST, MCP_PROTOCOL_VERSIONS[0])}`), 400);
   }
   let payload: unknown;
-  try { payload = await readJSON(request, 256 << 10, context.signal); }
+  try { payload = await readJSON(request, BODY_LIMIT, context.signal); }
   catch (error) {
-    if (error instanceof HTTPError && error.status === 400) return respond(rpcError(null, -32700, 'parse error: body is not JSON\n  {"jsonrpc":"2.0","id":1,"method":"tools/list"}'), 400);
+    // Every body failure stays inside the JSON-RPC envelope, with a fix.
+    if (error instanceof BodyTooLargeError) return respond(rpcError(null, -32600, `body over ${BODY_LIMIT >> 10} KiB; send one frame per POST\n${curlFix(context)}`), 413);
+    if (error instanceof HTTPError && error.status === 415) return respond(rpcError(null, -32600, `Content-Type must be application/json\n${curlFix(context)}`), 415);
+    if (error instanceof HTTPError && error.status === 400) return respond(rpcError(null, -32700, `parse error: body is not JSON\n${curlFix(context)}`), 400);
     throw error;
   }
   if (Array.isArray(payload)) {
     // Batches were dropped from MCP in 2025-06-18; older clients may still send them.
-    if (payload.length === 0 || payload.length > 16) return respond(rpcError(null, -32600, 'invalid request: a batch holds 1..16 frames\n  send one JSON-RPC object per POST'), 400);
+    if (payload.length === 0 || payload.length > 16) return respond(rpcError(null, -32600, `invalid request: a batch holds 1..16 frames; send one JSON-RPC object per POST\n${curlFix(context)}`), 400);
     const replies = [];
     for (const frame of payload) { const reply = await handleFrame(frame, context); if (reply) replies.push(reply.body); }
     return replies.length ? respond(replies, 200) : new Response(null, { status: 202, headers });

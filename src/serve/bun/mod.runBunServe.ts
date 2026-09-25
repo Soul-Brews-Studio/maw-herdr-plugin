@@ -93,6 +93,8 @@ export async function runBunServe(args: string[]): Promise<number> {
           return failure(400, 'websocket_request_invalid');
         }
         const WRITE_ROUTES = new Set(['/api/send', '/api/wake', '/api/worktrees/cleanup']);
+        // A send refused for want of the token, over POST /api/send or MCP herdr_send.
+        const recordAuthReject = () => deliveryHistory.append({ timestamp: Math.floor(Date.now() / 1000), kind: 'message', direction: 'inbound', state: 'failed', route: 'auth', event: 'auth-reject', decision: 'operator_token_required', source: 'herdr', from: '', to: '', target: '', text: '', oracle: '' });
         const isWrite = path !== '/api/auth/ws-ticket' && (request.method === 'POST' || WRITE_ROUTES.has(path));
         const authorization = request.headers.get('authorization') || '';
         const authenticated = tokenConfigured && authorization.startsWith('Bearer ')
@@ -103,7 +105,7 @@ export async function runBunServe(args: string[]): Promise<number> {
         if (config.mcp && !config.engine && path === '/mcp') {
           const display = config.hostname.includes(':') ? `[${config.hostname}]` : config.hostname;
           return await serveMCP(request, { authenticated, insecure: !!config.insecure, signal, base: `http://${display}:${server.port}`,
-            tokenFile: config.tokenFile, binary: config.binary, worktreeRoot: config.worktreeRoot,
+            tokenFile: config.tokenFile, binary: config.binary, worktreeRoot: config.worktreeRoot, onSendRefused: recordAuthReject,
             route: (route, init) => {
               const url = new URL(route, 'http://127.0.0.1');
               for (const [key, value] of Object.entries(init?.query ?? {})) url.searchParams.set(key, value);
@@ -117,7 +119,7 @@ export async function runBunServe(args: string[]): Promise<number> {
           else if (config.insecure && isWrite) {
             return failure(401, 'operator_token_required_for_writes');
           } else if (!authenticated) {
-            if (path === '/api/send' && request.method === 'POST') deliveryHistory.append({ timestamp: Math.floor(Date.now() / 1000), kind: 'message', direction: 'inbound', state: 'failed', route: 'auth', event: 'auth-reject', decision: 'operator_token_required', source: 'herdr', from: '', to: '', target: '', text: '', oracle: '' });
+            if (path === '/api/send' && request.method === 'POST') recordAuthReject();
             return failure(401, 'operator_token_required');
           }
         }
