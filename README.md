@@ -44,6 +44,9 @@ maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
+maw herdr watch [<target>]      # be told when that agent finishes [--every] [--stop] [--list]
+maw herdr inbox                 # notes addressed to this pane (watch results, replies); read-only
+maw herdr reply <target> <text> # file an answer in that pane's inbox, signed by this pane
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
 
@@ -167,6 +170,48 @@ $ maw herdr peek neo-oracle
 scrollback. herdr's own default (`recent`) drives the pane's real mouse-scroll
 to fetch it, which is slow (13.8s vs ~0.1s, measured) and visibly hijacks the
 operator's terminal. `--lines` (default 40) only trims what's already in view.
+
+### Watch and inbox — the return path for hey
+
+`hey` sends; `watch` is how an answer comes back. `maw herdr watch <target>`
+(default `self`) files a note in **this pane's** inbox when that agent next
+finishes — busy (working, or blocked mid-task) to idle/done. It fires exactly
+once per completion: herdr re-sends the same status on title changes and
+follows idle with done, and none of that fires. `--every` keeps watching,
+one note per completion; `watch <target> --stop` ends it; `watch --list`
+shows what this pane watches (`--all`: everyone's).
+
+```bash
+maw herdr hey feat-one "run the suite and fix what fails"
+maw herdr watch feat-one        # returns at once; the note arrives later
+maw herdr inbox                 # ● 14:02:11  finished  feat-one (wB:p2)  working → idle
+maw herdr inbox --since <id>    # only what is new; the last line prints the id
+```
+
+The agent that was asked answers with `maw herdr reply <asker's pane> "…"`: a
+note of kind `reply` in the asker's inbox, signed with the answering pane's
+address. It writes one local file and types nothing into anyone's pane.
+
+It learns from herdr's **pushed** `pane.agent_status_changed` events, never a
+scan. A CLI verb exits, so each watch is one small detached watcher process
+holding one `events.subscribe` connection; it files the note and exits. (Not
+`serve`: that is optional and token-gated, and a CLI verb must not depend on
+it. Not `herdr agent wait`: it matches the current status, so "working, then
+not" would race.) A watch on a pane that closes or whose session stops cleans
+itself up and leaves a `vanished` note instead of firing forever. A pane herdr
+moves to another workspace gets a new id; the watch follows it (herdr's
+`pane.moved` carries the terminal id, which is how a replayed move of some
+older pane with the same id is told apart). A watcher killed outright is swept
+by the next `watch --list`. Pane ids repeat across sessions, so when one id is
+watched in two, `--stop` needs `--session` and says so.
+
+Notes are addressed to a pane (session + pane id), not a person, and live in
+`<config>/maw-herdr/inbox/` (`~/Library/Application Support` on macOS,
+`$XDG_CONFIG_HOME` or `~/.config` elsewhere) — never in an oracle's `ψ/`.
+`inbox` shows this pane's notes only and never marks or deletes anything, so
+reading is idempotent. Each note carries the last visible lines of the
+finished pane. The implementation is `src/cli/mod.watch.mjs` and
+`src/cli/mod.inbox.mjs`.
 
 ### Federation map
 
