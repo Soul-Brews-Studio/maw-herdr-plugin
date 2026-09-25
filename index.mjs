@@ -6,10 +6,11 @@ import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { cmdClose, cmdKill, cmdRestart, cmdResume } from './src/cli/mod.lifecycle.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
@@ -22,6 +23,12 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
                                        read what an agent's pane is showing
   resolve [<target>] [--json]          what a target resolves to, and how; never acts
   resolve --list [--json]              every worktree and space a target can name
+  restart [<target>] [--channel <entry>|--no-channel] [--dry]
+                                       quit the agent, relaunch it in the same pane and
+                                       name with the argv read from its running process
+  resume [<target>] [--dry]            start the agent on its worktree's newest transcript
+  kill [<target>] [--dry]              ctrl+c the agent until it exits; the pane stays
+  close [<target>] [--force] [--dry]   close the target's herdr space; worktree stays
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
@@ -1061,6 +1068,10 @@ try {
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
+  else if (command === 'restart') await cmdRestart(args, { UsageError });
+  else if (command === 'resume') await cmdResume(args, { UsageError });
+  else if (command === 'kill') await cmdKill(args, { UsageError });
+  else if (command === 'close') await cmdClose(args, { UsageError });
   else throw new UsageError(`unknown command: ${command}`);
 } catch (err) {
   console.error(`maw herdr: ${err.message}`);

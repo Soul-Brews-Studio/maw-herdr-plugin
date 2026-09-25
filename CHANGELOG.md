@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Add the lifecycle verbs `restart`, `resume`, `kill` and `close`, all on the
+  shared target grammar and all honouring `--dry` (#62). `restart` reads argv
+  from the running process in the pane (herdr's process-info for the pid, then
+  `/proc` or `ps`), quits it with Ctrl-C until the pid is gone, and relaunches it
+  in the same pane with the same herdr name, deduplicated and with the claude or
+  codex session pinned to the one herdr reports; on a target with no live agent it
+  fails and prints the `resume` command. `restart self` / `kill self` from inside
+  the agent hand off to a detached worker logging to `~/.maw/herdr/lifecycle.log`.
+  `resume` starts the agent on the worktree's newest Claude or Codex transcript,
+  opening the space through `herdr worktree open --cwd <repo>` when needed. `close`
+  refuses a space with a live agent unless `--force`. New modules:
+  `src/cli/mod.lifecycle.mjs`, `mod.agentArgv.mjs`, and a minimal
+  `mod.resumeLookup.mjs` with the #60 provider interface (to be replaced by #60's
+  `mod.resumeProviders.mjs` on merge). Smoke: `utils/smoke-lifecycle.mjs`, a fake
+  herdr hosting real fake-agent processes.
+
 - Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
   takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
   name (exact label, then a repo's main worktree, then a unique substring).

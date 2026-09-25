@@ -16,7 +16,7 @@
   ],
   "cli": {
     "command": "herdr",
-    "help": "maw herdr <ls|a|wake|hey|peek|resolve|federation|serve> [--json] [--print] [--dry]",
+    "help": "maw herdr <ls|a|wake|hey|peek|resolve|restart|resume|kill|close|federation|serve> [--json] [--print] [--dry]",
     "interactive": true
   },
   "engine": {
