@@ -44,6 +44,10 @@ maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
+maw herdr restart [<target>]    # quit the agent, relaunch it in the same pane and name
+maw herdr resume [<target>]     # start the agent on its worktree's newest transcript
+maw herdr kill [<target>]       # ctrl+c the agent until it exits; the pane stays
+maw herdr close [<target>]      # close the herdr space; the worktree stays [--force]
 maw herdr watch [<target>]      # be told when that agent finishes [--every] [--stop] [--list]
 maw herdr inbox                 # notes addressed to this pane (watch results, replies); read-only
 maw herdr reply <target> <text> # file an answer in that pane's inbox, signed by this pane
@@ -144,6 +148,50 @@ nothing is picked for you. `--dry` (alias `--dry-run`) prints the resolution
 and does nothing. `maw herdr resolve <target>` shows what any target means,
 including worktrees with no open space; `resolve --list` shows everything it
 can name. The resolver is `src/cli/mod.target.mjs`.
+
+### Lifecycle — restart, resume, kill, close
+
+All four take the target grammar above and honour `--dry`, which prints what the
+target resolved to and the exact herdr commands, then does nothing. restart, kill
+and close stop work, so they take an exact name, a path, a pane id or `self` only —
+never a substring match — and a name or path that covers several agents is refused
+with one command per pane, whichever pane has focus.
+
+- **restart** reads the agent's argv from its *running process* — the pane's
+  foreground pid from `herdr pane process-info`, argv from `/proc/<pid>/cmdline`
+  (Linux) or `ps -p <pid>` (macOS, split as herdr reports it and only when the two
+  agree) — quits it with Ctrl-C until the pid is gone, and relaunches it in the same
+  pane under the same herdr name with `herdr agent start … -- <argv>`, where `<argv>`
+  is everything after the agent's executable (after `claude` for a native agent,
+  after the script for one run by its runtime, like `bun ~/.bun/bin/omp`). Repeated flags
+  are dropped (a shell alias re-adds them on every relaunch) and, for claude and
+  codex, the session is pinned to the one herdr reports for the pane. Any other kind
+  is relaunched with its argv as read. `--channel <entry>` / `--no-channel` add or
+  drop a claude development channel; the startup warning is accepted. A target with
+  no live agent has no argv to read: restart fails and prints the `resume` command.
+  Refused up front, before anything is stopped, with the commands to do it by hand:
+  an agent under a wrapper (`omx` leading the process group around `codex` — herdr
+  can relaunch the kind, not the wrapper), and an argv holding a control character
+  (herdr refuses those). A relaunch herdr turns away as busy is retried for 5 s;
+  one that still fails ends with the `resume` command. Secret-looking flag values
+  (`--api-key`, `-c …api_key=…`) are redacted in every printed line and in the log.
+- **restart self** from an agent's own `!` prompt, or any restart/kill whose target
+  process is an ancestor of the command, hands off to a detached worker and returns
+  at once; the worker logs to `~/.maw/herdr/lifecycle.log` (maw's state dir). With two
+  agents in one worktree, `self` is exactly your pane; a name lists both panes.
+- **resume** finds the newest transcript for the worktree through the resume
+  providers (Claude and Codex, `MAW_HERDR_RESUME_PROVIDERS`, `MAW_HERDR_CLAUDE_ROOTS`,
+  `MAW_HERDR_CODEX_ROOTS`), opens the worktree's space with
+  `herdr worktree open --cwd <repo> --path <worktree>` if it has none, and starts the
+  agent on that session, under a name no live agent holds (`name-2` otherwise). It
+  refuses a target that already runs an agent, except a pane id (or `self`) at its
+  shell prompt: that is how one of two agents in a worktree comes back, and kill
+  prints exactly that command when a neighbour still runs. A session a live agent
+  holds — anywhere — is never resumed a second time; the next newest is used.
+- **kill** stops the agent; the pane and space stay, so `resume` can bring it back.
+- **close** closes the space; the worktree and transcript stay. A space with a live
+  agent, or a pane running any other job (a dev server, a test run), needs `--force`
+  (the refusal lists the `kill` for each agent and a `pane read` for each job).
 
 ### Hey and peek — targeting
 

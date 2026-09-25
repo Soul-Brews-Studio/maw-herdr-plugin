@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { cmdClose, cmdKill, cmdRestart, cmdResume } from './src/cli/mod.lifecycle.mjs';
 import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
 import { cmdInbox, cmdReply } from './src/cli/mod.inbox.mjs';
 import { checkoutLine } from './src/cli/mod.checkoutLine.mjs';
@@ -18,7 +19,7 @@ import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } 
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|watch|inbox|reply|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|watch|inbox|reply|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -34,6 +35,12 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|watch|inbox|reply|ser
                                        read what an agent's pane is showing
   resolve [<target>] [--json]          what a target resolves to, and how; never acts
   resolve --list [--json]              every worktree and space a target can name
+  restart [<target>] [--channel <entry>|--no-channel] [--dry]
+                                       quit the agent, relaunch it in the same pane and
+                                       name with the argv read from its running process
+  resume [<target>] [--dry]            start the agent on its worktree's newest transcript
+  kill [<target>] [--dry]              ctrl+c the agent until it exits; the pane stays
+  close [<target>] [--force] [--dry]   close the target's herdr space; worktree stays
   watch [<target>] [--every] [--dry]   be told when that agent finishes: a note lands
                                        in this pane's inbox (from herdr's pushed events)
   watch --list [--all] [--json]        what this pane watches (--all: every pane's)
@@ -1098,6 +1105,10 @@ try {
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
+  else if (command === 'restart') await cmdRestart(args, { UsageError });
+  else if (command === 'resume') await cmdResume(args, { UsageError });
+  else if (command === 'kill') await cmdKill(args, { UsageError });
+  else if (command === 'close') await cmdClose(args, { UsageError });
   else if (command === 'watch') await cmdWatch(args, { UsageError, entry: fileURLToPath(import.meta.url) });
   else if (command === 'inbox') await cmdInbox(args, { UsageError });
   else if (command === 'reply') await cmdReply(args, { UsageError });
