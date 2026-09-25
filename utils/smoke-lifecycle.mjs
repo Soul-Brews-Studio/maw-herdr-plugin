@@ -208,7 +208,7 @@ else if (verb === 'agent start') {
   if (!s.panes.some(p => p.pane_id === pane)) die('fake herdr: no pane ' + pane);
   if (live(pane)) die(JSON.stringify({ error: { code: 'agent_pane_busy', message: 'agent target pane ' + pane + ' is not an available shell' } }));
   // herdr's own refusals, in its order
-  if (extra.some(x => /[\x00-\x1f\x7f]/.test(x)) && !process.env.FAKE_ALLOW_CTRL) die(JSON.stringify({ error: { code: 'invalid_agent_argument' } }));
+  if (extra.some(x => /[\\x00-\\x1f\\x7f]/.test(x)) && !process.env.FAKE_ALLOW_CTRL) die(JSON.stringify({ error: { code: 'invalid_agent_argument' } }));
   if (Object.entries(s.names).some(([p, n]) => n === name && p !== pane && live(p))) die(JSON.stringify({ error: { code: 'agent_name_taken', message: 'agent name ' + name + ' is already used' } }));
   if (process.env.FAKE_BUSY_FILE) {
     const left = Number(readFileSync(process.env.FAKE_BUSY_FILE, 'utf8'));
