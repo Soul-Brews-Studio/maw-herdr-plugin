@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+- `maw herdr ls [running|open|resumable|cold]`: every git worktree in one of
+  four states, including the ones with no open herdr space, which `ls` could
+  not show before (#60). Plain `ls` gains a line counting all four; `--json`
+  keeps its shape, adds `state`/`agents` to each workspace, and adds
+  `worktrees`, `states` and `providers`. "Resumable" comes from resume
+  providers — Claude and Codex built in, roots configurable, all switchable
+  off with `MAW_HERDR_RESUME_PROVIDERS=none` — rather than from a vendor path
+  in the plugin. A herdr session whose snapshot fails, or a repo git cannot
+  list, is a stderr warning ending in the command to check it, and
+  `incomplete` / `unreadable` in `--json` — never a silently wrong state. The
+  tally line counts "checkouts", so it no longer reuses the tree footer's
+  "worktrees" for a different number.
+- `ls --json` larger than 64 KB is no longer cut at 65,536 bytes when piped
+  under Bun.
+
+- `maw herdr ls --path` prints each workspace's checkout beneath its row, as a
+  full absolute path that pastes straight into `cd` (#56). The data was already
+  in `--json` as `checkout`; only the human-facing view lacked it.
+- `--help` / `-h` after any verb prints the usage instead of `unknown argument`,
+  and runs nothing. A usage error with no fix line of its own now ends with
+  `maw herdr <verb> --help`. A verb that does not exist is still
+  `unknown command` (exit 2) with `--help` after it, so probing for a verb
+  cannot get a false yes. `wake <oracle> --kind -h` is now a help request: it
+  used to take `-h` as the engine, create a workspace, and fail on
+  `agent start`, leaving the workspace behind.
+- `maw herdr ls` groups workspaces by herdr's `repo_key` (the shared git dir)
+  instead of the repo name. Two same-named checkouts from different orgs are
+  now two groups, and a group prints every mother workspace, where before the
+  second one was dropped from the tree without notice.
+- Add `maw herdr watch <target>` / `watch --list` / `watch <target> --stop` and
+  `maw herdr inbox`, the return path for `hey` (#63). A watch learns completion
+  from herdr's pushed `pane.agent_status_changed` events (no polling), fires
+  exactly once per busy→idle/done transition (`--every`: once per completion),
+  and is held by one detached watcher process per watch with a record under
+  `<config>/maw-herdr/watches/`. Watches on panes that close or whose herdr
+  session stops clean themselves up with a `vanished` note; a pane that herdr
+  moves (a new pane id) keeps its watch, recognised by its terminal id; orphaned
+  records are swept by `watch --list` (and only there — `--dry` deletes
+  nothing). `--stop` is scoped by `--session`, since pane ids repeat across
+  sessions. Notes are addressed to a pane and read with `inbox`, which is
+  read-only and shows this pane's notes only. `maw herdr reply <target> <text>`
+  files an answer in another pane's inbox, signed with this pane's address.
 - Add the lifecycle verbs `restart`, `resume`, `kill` and `close`, all on the
   shared target grammar and all honouring `--dry` (#62). `restart` reads argv
   from the running process in the pane (herdr's process-info for the pid, then
@@ -38,6 +80,34 @@
   sessions (a pane id held in two sessions is now listed, not narrowed to the
   focused copy). New read-only `maw herdr resolve [<target>]` /
   `resolve --list` (#59).
+- `POST /api/send` restores the legacy delivery semantics (#42): a `[node:oracle]`
+  sender tag from `X-Maw-From` or the server's identity (slash commands
+  untagged), a read of the agent's input box that refuses someone's draft,
+  a roster re-read right before submitting, refusal of blocked agents, and a
+  receipt that says `delivered`, `queued` or only `accepted` according to what
+  the box showed, with one Enter retry when our own text stayed in it.
+  Refusals return `ok/error/target/detail/state` plus a `hint` command, and
+  lifecycle records carry `error` or `lastLine`. Dim placeholder text is not a
+  draft. `force` stays unsupported; empty or whitespace-only text without
+  attachments stays `400`, and text that the sender tag pushes past herdr's
+  64 KiB prompt limit is `413 text_too_large`. Once herdr has taken the prompt
+  nothing afterwards (abort, timeout, failed Enter retry) can report it
+  failed or release its idempotency key; an input box that cannot be read
+  before submit refuses the send. An unreadable config layer falls back to
+  `local:pane/unknown` for the tag instead of refusing.
+- Fix: roster targets use the decimal window index the dashboard shows. herdr
+  pane ids count in base 36, so dashboard target `:12` (pane `pC`) used to
+  resolve to pane `p12` on send, capture and terminal attach.
+- Add `maw herdr serve --mcp` (#61): MCP over Streamable HTTP at `/mcp` on the
+  dashboard listener, hand-written JSON-RPC with no new dependency. Read tools
+  (`herdr_sessions`, `herdr_agents`, `herdr_capture`, `herdr_worktrees`) call
+  the same routes as their HTTP twins and follow the mode; write tools
+  (`herdr_send`, `herdr_wake`) require the operator token in every mode,
+  including `--insecure-no-token`. Refused under `--engine`. Every MCP error,
+  including a wrong Content-Type (415) and an over-limit frame (413), stays
+  inside the JSON-RPC envelope and ends with a runnable fix command. Paths are
+  shell-quoted, and caller input is never echoed into one.
+
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
   packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no

@@ -12,6 +12,8 @@ bun-check:
     MAW_TARGET_ENTRY="$output/index.js" bun utils/smoke-target-grammar.mjs
     bun utils/smoke-lifecycle.mjs
     MAW_LIFECYCLE_ENTRY="$output/index.js" bun utils/smoke-lifecycle.mjs
+    bun utils/smoke-watch-inbox.mjs
+    MAW_WATCH_ENTRY="$output/index.js" bun utils/smoke-watch-inbox.mjs
     bun utils/smoke-bun-serve.mjs
     bun utils/smoke-federation-config.ts
     node utils/smoke-federation-serve.mjs
@@ -46,6 +48,16 @@ bun-check:
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
     bun utils/smoke-terminal-limits.ts
+    node utils/smoke-mcp-serve.mjs
+    MAW_MCP_ENTRY="$output/index.js" node utils/smoke-mcp-serve.mjs
+    bun utils/smoke-send-composer.ts
+    bun utils/smoke-send-watch.ts
+    node utils/smoke-send-delivery.mjs
+    MAW_SEND_ENTRY="$output/index.js" node utils/smoke-send-delivery.mjs
+    node utils/smoke-ls-path-help.mjs
+    MAW_LS_ENTRY="$output/index.js" node utils/smoke-ls-path-help.mjs
+    node utils/smoke-ls-states.mjs
+    MAW_STATES_ENTRY="$output/index.js" node utils/smoke-ls-states.mjs
 
 # The server is TypeScript on Bun; check is the Bun suite.
 check: bun-check

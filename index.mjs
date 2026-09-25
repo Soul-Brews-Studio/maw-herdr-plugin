@@ -3,15 +3,27 @@ import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
 import { cmdClose, cmdKill, cmdRestart, cmdResume } from './src/cli/mod.lifecycle.mjs';
+import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
+import { cmdInbox, cmdReply } from './src/cli/mod.inbox.mjs';
+import { checkoutLine } from './src/cli/mod.checkoutLine.mjs';
+import { wantsHelp } from './src/cli/mod.wantsHelp.mjs';
+import { repoGroups } from './src/cli/mod.repoGroups.mjs';
+import { configuredProviders } from './src/cli/mod.resumeProviders.mjs';
+import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.mjs';
+import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } from './src/cli/mod.lsStateView.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|watch|inbox|reply|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
+  ls --path                            ...with each workspace's checkout path beneath it
+  ls <running|open|resumable|cold>     every worktree in that state, open space or not
+                                       (also --state <s>; combines with --path, --json)
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
   a <session> [--print]                attach to a herdr session (alias: attach)
@@ -29,9 +41,17 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|c
   resume [<target>] [--dry]            start the agent on its worktree's newest transcript
   kill [<target>] [--dry]              ctrl+c the agent until it exits; the pane stays
   close [<target>] [--force] [--dry]   close the target's herdr space; worktree stays
+  watch [<target>] [--every] [--dry]   be told when that agent finishes: a note lands
+                                       in this pane's inbox (from herdr's pushed events)
+  watch --list [--all] [--json]        what this pane watches (--all: every pane's)
+  watch [<target>] --stop              stop watching it
+  inbox [--since <id>] [--all] [--json]
+                                       notes addressed to this pane; reading never consumes
+  reply <target> <text> [--dry]        file an answer in that pane's inbox, signed by this pane
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
+        [--mcp]                       also serve MCP at /mcp (writes always need the token)
   federation [--json]                  the mesh: who federates with whom (alias: fed)
 
 Mirrors 'maw ls', 'maw a', 'maw wake' and 'maw hey' against the herdr multiplexer.
@@ -50,7 +70,14 @@ hey and peek also take an agent name or a workspace/tab label, as they always ha
 An ambiguous target lists its candidates and does nothing. --dry (alias --dry-run)
 prints what a target resolves to and exits. Most herdr agents are unnamed until
 someone runs 'herdr agent rename', so the workspace label is the handle that always
-exists. Scope to one session with --session <name> when two sessions share a label.`;
+exists. Scope to one session with --session <name> when two sessions share a label.
+
+A worktree is running (agent in a pane), open (space, no agent), resumable (no
+space, but a resume provider found a transcript) or cold. Providers: claude, codex;
+MAW_HERDR_RESUME_PROVIDERS=none turns them off, MAW_HERDR_CLAUDE_ROOTS and
+MAW_HERDR_CODEX_ROOTS move them. Worktrees are found under $GHQ_ROOT / ghq root.
+
+--help / -h after any verb prints this text; 'serve --help' has its own.`;
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', blue: '\x1b[94m', green: '\x1b[32m', red: '\x1b[31m', warnTag: '\x1b[33m', off: '\x1b[0m' }
@@ -165,21 +192,24 @@ function plural(n, word) {
  * session held 22 workspaces across 7 repos. Same data herdr renders; this is the
  * shape it renders it in.
  */
-async function workspaceTree() {
+async function workspaceTree(failed = []) {
   const sessions = sessionIndex().filter(s => s.status === 'active');
   const rows = await Promise.all(sessions.map(async s => {
     let snapshot;
     try {
       snapshot = unwrapSnapshot(await herdrJsonAsync(['api', 'snapshot'], s.session));
-    } catch {
+    } catch (err) {
+      failed.push(snapshotFailure(s.session, err));   // ls says so; its spaces are missing
       return [];
     }
     // A workspace only carries a `worktree` block when herdr recognised a repo
     // there; a plain shell space has none, and its branch has to come from the
     // pane's own cwd — which is how the sidebar still shows one for them.
     const cwdOf = new Map();
+    const agentsIn = new Map();   // agent panes per space: running vs open
     for (const pane of snapshot.panes ?? []) {
       if (pane.workspace_id && pane.cwd && !cwdOf.has(pane.workspace_id)) cwdOf.set(pane.workspace_id, pane.cwd);
+      if (pane.agent) agentsIn.set(pane.workspace_id, (agentsIn.get(pane.workspace_id) ?? 0) + 1);
     }
     return (snapshot.workspaces ?? []).map(w => {
       const wt = w.worktree ?? {};
@@ -193,8 +223,10 @@ async function workspaceTree() {
         status: w.agent_status ?? 'unknown',
         focused: !!w.focused,
         repo: wt.repo_name ?? null,
+        repoKey: wt.repo_key ?? wt.repo_root ?? null,
         checkout: wt.checkout_path ?? cwdOf.get(w.workspace_id) ?? null,
         linked: !!wt.is_linked_worktree,
+        agents: agentsIn.get(w.workspace_id) ?? 0,
       };
     });
   }));
@@ -401,7 +433,12 @@ async function cmdLsSessions(json) {
 
 async function cmdLs(args) {
   const json = args.includes('--json');
-  const rest = args.filter(a => a !== '--json');
+  const path = args.includes('--path');
+  const rest = args.filter(a => a !== '--json' && a !== '--path');
+  let state = takeStateFlag(rest, UsageError);
+  // only the workspace tree has a checkout; --agents --json already carries cwd.
+  // Anything else left over is an unknown argument, reported as one below.
+  if (path && ['--agents', '--sessions', '--federation', '--fed'].includes(rest[0])) throw new UsageError(`--path applies to the workspace listing, not ${rest[0]}\n  maw herdr ls --path`);
   if (rest[0] === '--agents') {
     rest.shift();
     if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
@@ -418,16 +455,18 @@ async function cmdLs(args) {
     if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
     return cmdLsFederation(json, agentsOnly);
   }
+  if (!state && STATES.includes(rest[0])) state = rest.shift();
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
 
-  const spaces = await workspaceTree();
-  if (json) {
-    console.log(JSON.stringify({ command: 'ls', mode: 'workspaces', scope: 'herdr', json: true, workspaces: spaces }));
-    return;
-  }
+  const providers = configuredProviders();   // a bad provider name fails before herdr is asked
+  const failed = [];
+  const found = await worktreeStates({ spaces: await workspaceTree(failed), roots: ghqRoots(process.env, readOracleRegistry().ghqRoot), providers });
+  if (await showWorktreeStates(found, { state, json, path, providers, failed, C })) return;
+  const spaces = found.spaces;
   if (!spaces.length) {
     console.log(`${C.dim}no workspaces in any running herdr session${C.off}`);
     console.log(`  ${C.dim}servers, running or not: maw herdr ls --sessions${C.off}`);
+    console.log(stateSummaryLine(found, providers, C));
     return;
   }
 
@@ -435,12 +474,7 @@ async function cmdLs(args) {
 
   // repo groups, mother first, its linked worktrees beneath — the sidebar's shape.
   // A workspace with no worktree metadata (a plain shell space) is its own group.
-  const groups = new Map();
-  for (const w of spaces) {
-    const key = w.repo ?? `\u0000${w.id}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(w);
-  }
+  const groups = repoGroups(spaces);
 
   const dot = w => (w.status === 'working' ? `${C.green}●${C.off}` : w.status === 'blocked' ? `${C.red}●${C.off}` : `${C.dim}○${C.off}`);
   const meta = w => {
@@ -456,20 +490,21 @@ async function cmdLs(args) {
   };
 
   console.log(`  ${C.blue}Local${C.off}`);
-  for (const items of groups.values()) {
-    const mothers = items.filter(w => !w.linked);
-    const links = items.filter(w => w.linked);
-    const head = mothers[0] ?? links[0];
-    const children = head === mothers[0] ? links : links.slice(1);
-    console.log(`    ${dot(head)} ${C.cyan}${head.label}${C.off}  ${meta(head)}`);
+  for (const { heads, children } of groups) {
+    for (const head of heads) {
+      console.log(`    ${dot(head)} ${C.cyan}${head.label}${C.off}  ${meta(head)}`);
+      if (path) console.log(checkoutLine(head.checkout, 'head', C));
+    }
     children.forEach((w, i) => {
-      const tee = i === children.length - 1 ? '└─' : '├─';
-      console.log(`      ${C.dim}${tee}${C.off} ${dot(w)} ${w.label}  ${meta(w)}`);
+      const last = i === children.length - 1;
+      console.log(`      ${C.dim}${last ? '└─' : '├─'}${C.off} ${dot(w)} ${w.label}  ${meta(w)}`);
+      if (path) console.log(checkoutLine(w.checkout, last ? 'last' : 'child', C));
     });
   }
 
   const linked = spaces.filter(w => w.linked).length;
-  console.log(`  ${C.dim}${plural(spaces.length, 'workspace')} · ${groups.size} repos · ${linked} worktrees · agents: maw herdr ls --agents${C.off}`);
+  console.log(`  ${C.dim}${plural(spaces.length, 'workspace')} · ${groups.length} repos · ${linked} worktrees · agents: maw herdr ls --agents${C.off}`);
+  console.log(stateSummaryLine(found, providers, C));
 
   // Remote machines are separate herdr servers reached over SSH; this listing is
   // local only, so say so rather than imply the fleet is one machine.
@@ -981,7 +1016,8 @@ function cmdWake(args) {
     else throw new UsageError(`unexpected argument: ${arg}`);
   }
   if (!target) throw new UsageError('wake needs an oracle: maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]');
-  if (!opts.engine) throw new UsageError('--engine needs a value (herdr agent kind, e.g. claude, codex, gemini)');
+  // an engine is a herdr agent kind; one that looks like a flag is a missing value
+  if (!opts.engine || opts.engine.startsWith('-')) throw new UsageError('--engine needs a value (herdr agent kind, e.g. claude, codex, gemini)');
 
   const oracle = resolveOracle(target);
 
@@ -1060,6 +1096,7 @@ const args = process.argv.slice(2);
 const command = args.shift() || 'help';
 try {
   if (['help', '--help', '-h'].includes(command)) console.log(HELP);
+  else if (wantsHelp(command, args)) console.log(HELP);
   else if (command === 'serve') process.exitCode = await runServe(args);
   else if (command === 'ls' || command === 'list') await cmdLs(args);
   else if (command === 'a' || command === 'attach') cmdAttach(args);
@@ -1072,8 +1109,14 @@ try {
   else if (command === 'resume') await cmdResume(args, { UsageError });
   else if (command === 'kill') await cmdKill(args, { UsageError });
   else if (command === 'close') await cmdClose(args, { UsageError });
-  else throw new UsageError(`unknown command: ${command}`);
+  else if (command === 'watch') await cmdWatch(args, { UsageError, entry: fileURLToPath(import.meta.url) });
+  else if (command === 'inbox') await cmdInbox(args, { UsageError });
+  else if (command === 'reply') await cmdReply(args, { UsageError });
+  else if (command === '__watch-run') process.exit(await runWatcher(args[0]));   // spawned by watch, detached; exits when the watch ends
+  else throw new UsageError(`unknown command: ${command}\n  maw herdr help`);
 } catch (err) {
-  console.error(`maw herdr: ${err.message}`);
+  // A usage error with no fix line of its own gets the one that now always works.
+  const fix = err instanceof UsageError && !err.message.includes('\n') ? `\n  maw herdr ${command} --help` : '';
+  console.error(`maw herdr: ${err.message}${fix}`);
   process.exitCode = err instanceof UsageError ? 2 : 1;
 }
