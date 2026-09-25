@@ -44,6 +44,7 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|watch|inbox|reply|ser
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
+        [--mcp]                       also serve MCP at /mcp (writes always need the token)
   federation [--json]                  the mesh: who federates with whom (alias: fed)
 
 Mirrors 'maw ls', 'maw a', 'maw wake' and 'maw hey' against the herdr multiplexer.

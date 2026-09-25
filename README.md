@@ -253,6 +253,7 @@ Coverage vs. the legacy `maw serve`/God UI contract — not full parity:
 | Inbox delivery | `POST /api/send {"inbox":true}` → `ψ/inbox`, `queued` |
 | Prompt delivery | `POST /api/send` → `[node:oracle]` sender tag, literal attachments, draft/blocked/changed-pane refusal, `delivered`/`queued`/`accepted` receipt |
 | Fleet wake | `POST /api/wake` with a `task` → new/reused worktree |
+| MCP | `--mcp` → `/mcp` on the same listener (see below) |
 | Not included | full lifecycle control, inbound pairing, config mutation |
 
 `POST /api/send` receipts name what was observed, never that the agent read
@@ -261,6 +262,43 @@ empty afterwards, `queued` is the agent showing it queued. A draft already in
 the box, a blocked agent, or a pane that changed under the request is refused
 with `409` and a `hint` holding the herdr command that shows why. If the
 input box cannot be read first, nothing is typed (`503`).
+
+### MCP at `/mcp` (`--mcp`)
+
+`maw herdr serve --mcp` mounts an MCP endpoint (Streamable HTTP, JSON-RPC 2.0,
+stateless, no SSE) on the same port. No second listener, no second process.
+
+```bash
+maw herdr serve --mcp --token-file "$HOME/.maw-herdr-token" --listen 127.0.0.1:3457
+claude mcp add --transport http herdr http://127.0.0.1:3457/mcp \
+  --header "Authorization: Bearer $(cat "$HOME/.maw-herdr-token")"
+```
+
+| Tool | HTTP twin | Auth |
+|---|---|---|
+| `herdr_sessions` | `GET /api/sessions` | follows the mode |
+| `herdr_agents` | `GET /api/agents` | follows the mode |
+| `herdr_capture` | `GET /api/capture?target=` | follows the mode |
+| `herdr_worktrees` | `GET /api/worktrees` | follows the mode |
+| `herdr_send` | `POST /api/send` | operator token, always |
+| `herdr_wake` | `POST /api/wake` | operator token, always |
+
+Token mode refuses every `/mcp` request without the token (HTTP 401), like
+every other route. `--insecure-no-token` answers the read tools on loopback;
+a write tool there answers JSON-RPC error `-32001` with `data.status: 401`
+inside an HTTP 200, so an MCP client keeps its session for reads instead of
+starting an OAuth flow. Host and Origin checks are the same as for `/api/*`.
+`--mcp` is refused under `--engine`. Negotiated protocol versions:
+2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05.
+
+Every MCP error ends with a command that fixes it: usually a `curl` against
+this listener, which reads the token from the token file through
+`-H @<(printf …)` so the token never appears in argv. Caller-supplied text,
+such as a target, is never copied into a suggested command. Paths are
+shell-quoted. Write tools are annotated `destructiveHint: true`. A refused
+`herdr_send` in token mode lands in `/api/feed` as `auth-reject`, like a
+refused `POST /api/send`. A frame over 256 KiB answers 413. Bun rejects a body
+over 257 KiB before the handler runs, with an empty 413.
 
 Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for

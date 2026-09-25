@@ -46,6 +46,8 @@ bun-check:
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
     bun utils/smoke-terminal-limits.ts
+    node utils/smoke-mcp-serve.mjs
+    MAW_MCP_ENTRY="$output/index.js" node utils/smoke-mcp-serve.mjs
     bun utils/smoke-send-composer.ts
     bun utils/smoke-send-watch.ts
     node utils/smoke-send-delivery.mjs

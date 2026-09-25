@@ -73,6 +73,15 @@
 - Fix: roster targets use the decimal window index the dashboard shows. herdr
   pane ids count in base 36, so dashboard target `:12` (pane `pC`) used to
   resolve to pane `p12` on send, capture and terminal attach.
+- Add `maw herdr serve --mcp` (#61): MCP over Streamable HTTP at `/mcp` on the
+  dashboard listener, hand-written JSON-RPC with no new dependency. Read tools
+  (`herdr_sessions`, `herdr_agents`, `herdr_capture`, `herdr_worktrees`) call
+  the same routes as their HTTP twins and follow the mode; write tools
+  (`herdr_send`, `herdr_wake`) require the operator token in every mode,
+  including `--insecure-no-token`. Refused under `--engine`. Every MCP error,
+  including a wrong Content-Type (415) and an over-limit frame (413), stays
+  inside the JSON-RPC envelope and ends with a runnable fix command. Paths are
+  shell-quoted, and caller input is never echoed into one.
 
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
