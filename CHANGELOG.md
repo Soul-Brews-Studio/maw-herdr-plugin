@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
+  takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
+  name (exact label, then a repo's main worktree, then a unique substring).
+  Ambiguity lists runnable candidates and exits 1; `--dry` is accepted wherever
+  a target is. `hey` and `peek` now resolve through it with unchanged output and
+  exit codes, and gain `self`, paths and `--dry`. New read-only
+  `maw herdr resolve [<target>]` / `resolve --list` (#59).
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
   packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no

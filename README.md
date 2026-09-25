@@ -41,6 +41,7 @@ maw herdr a <session>           # attach (alias: attach)
 maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
+maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
 
@@ -68,10 +69,25 @@ maw herdr wake laris-co/neo-oracle --engine codex
 maw herdr wake neo --prompt "recap the last session" --attach
 ```
 
+### Targets — one grammar for every verb
+
+| form | meaning |
+|---|---|
+| `self` | the pane you are typing in (from `HERDR_PANE_ID` + `HERDR_SOCKET_PATH`); the default where a target is optional |
+| `/abs/path`, `.`, `../x` | a worktree path, or a directory inside one (deepest worktree wins) |
+| `w5D:p1` | a herdr pane id |
+| `digger-oracle` | a name: exact label → a repo's main worktree → unique substring |
+
+An ambiguous target lists every candidate as a runnable command and exits 1;
+nothing is picked for you. `--dry` (alias `--dry-run`) prints the resolution
+and does nothing. `maw herdr resolve <target>` shows what any target means,
+including worktrees with no open space; `resolve --list` shows everything it
+can name. The resolver is `src/cli/mod.target.mjs`.
+
 ### Hey and peek — targeting
 
-`<target>` resolves: pane id → agent name → workspace label → tab label →
-unique prefix/substring. Workspace label is the handle that always
+hey and peek take the grammar above, and keep their own agent tiers after it:
+pane id → agent name → workspace label → tab label → unique prefix/substring. Workspace label is the handle that always
 exists (agents are unnamed until `herdr agent rename`). Ambiguous matches are
 listed, never guessed:
 
