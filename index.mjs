@@ -10,7 +10,7 @@ import { wantsHelp } from './src/cli/mod.wantsHelp.mjs';
 import { repoGroups } from './src/cli/mod.repoGroups.mjs';
 import { configuredProviders } from './src/cli/mod.resumeProviders.mjs';
 import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.mjs';
-import { printStateListing, stateSummaryLine, writeJson } from './src/cli/mod.lsStateView.mjs';
+import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } from './src/cli/mod.lsStateView.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -164,13 +164,14 @@ function plural(n, word) {
  * session held 22 workspaces across 7 repos. Same data herdr renders; this is the
  * shape it renders it in.
  */
-async function workspaceTree() {
+async function workspaceTree(failed = []) {
   const sessions = sessionIndex().filter(s => s.status === 'active');
   const rows = await Promise.all(sessions.map(async s => {
     let snapshot;
     try {
       snapshot = unwrapSnapshot(await herdrJsonAsync(['api', 'snapshot'], s.session));
-    } catch {
+    } catch (err) {
+      failed.push(snapshotFailure(s.session, err));   // ls says so; its spaces are missing
       return [];
     }
     // A workspace only carries a `worktree` block when herdr recognised a repo
@@ -447,13 +448,7 @@ async function cmdLs(args) {
   const json = args.includes('--json');
   const path = args.includes('--path');
   const rest = args.filter(a => a !== '--json' && a !== '--path');
-  let state = null;
-  const stateAt = rest.indexOf('--state');
-  if (stateAt !== -1) {
-    state = rest.splice(stateAt, 2)[1];
-    if (!STATES.includes(state)) throw new UsageError(`--state needs one of ${STATES.join(', ')}\n  maw herdr ls resumable`);
-    if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
-  }
+  let state = takeStateFlag(rest, UsageError);
   // only the workspace tree has a checkout; --agents --json already carries cwd.
   // Anything else left over is an unknown argument, reported as one below.
   if (path && ['--agents', '--sessions', '--federation', '--fed'].includes(rest[0])) throw new UsageError(`--path applies to the workspace listing, not ${rest[0]}\n  maw herdr ls --path`);
@@ -477,17 +472,10 @@ async function cmdLs(args) {
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
 
   const providers = configuredProviders();   // a bad provider name fails before herdr is asked
-  const found = await worktreeStates({ spaces: await workspaceTree(), roots: ghqRoots(process.env, readOracleRegistry().ghqRoot), providers });
-  const pick = list => (state ? list.filter(r => r.state === state) : list);
+  const failed = [];
+  const found = await worktreeStates({ spaces: await workspaceTree(failed), roots: ghqRoots(process.env, readOracleRegistry().ghqRoot), providers });
+  if (await showWorktreeStates(found, { state, json, path, providers, failed, C })) return;
   const spaces = found.spaces;
-  if (json) {
-    return writeJson({
-      command: 'ls', mode: 'workspaces', scope: 'herdr', json: true, ...(state ? { state } : {}),
-      workspaces: pick(spaces), worktrees: pick(found.rows), states: found.counts,
-      providers: providers.map(p => ({ name: p.name, roots: p.roots })),
-    });
-  }
-  if (state) return printStateListing(found, state, providers, { C, path });
   if (!spaces.length) {
     console.log(`${C.dim}no workspaces in any running herdr session${C.off}`);
     console.log(`  ${C.dim}servers, running or not: maw herdr ls --sessions${C.off}`);

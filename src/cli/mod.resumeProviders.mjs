@@ -18,7 +18,8 @@
 //                                          // session this provider can resume.
 //   Session = {
 //     provider: 'claude',
-//     id:       '9c77f5f5-…',              // what the agent's own resume takes
+//     id:       '9c77f5f5-…',              // what the agent's own resume takes;
+//                                          // must match SAFE_ID, it goes in `command`
 //     file:     '/…/9c77f5f5-….jsonl',     // the transcript itself
 //     at:       1790000000000,             // its mtime, ms since epoch
 //     bytes:    48213,
@@ -56,6 +57,13 @@ export const MIN_BYTES = 1024;
 // full base instructions after the cwd, so it can run to tens of KB; the cwd
 // and the subagent marker sit in the first few hundred bytes.
 const HEAD_BYTES = 16 * 1024;
+
+// What a session id may look like before it is put in a shell command. Claude
+// and Codex ids are UUIDs. The id comes from a file name (Claude) or from inside
+// the file (Codex) and ends up in `command`, which is printed to paste and
+// which resume runs, so anything else — `a$(touch x)` — is skipped, not quoted:
+// a transcript with such a name was not written by the agent.
+export const SAFE_ID = /^[A-Za-z0-9._-]+$/;
 
 const list = value => (value ?? '').split(delimiter).map(s => s.trim()).filter(Boolean);
 
@@ -103,7 +111,7 @@ export function claudeProvider(roots) {
         for (const root of roots) {
           const dir = join(root, encodeClaudeDir(path));
           for (const e of entries(dir)) {
-            if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
+            if (!e.isFile() || !e.name.endsWith('.jsonl') || !SAFE_ID.test(basename(e.name, '.jsonl'))) continue;
             const file = join(dir, e.name);
             const s = stat(file);
             if (!s || s.size < MIN_BYTES) continue;
@@ -198,6 +206,7 @@ export function codexProvider(roots) {
           if (seen && seen.at >= s.mtimeMs) continue;
           // the uuid at the end of the name is the id `codex resume` takes
           const id = meta.id ?? e.name.slice(0, -'.jsonl'.length).slice(-36);
+          if (!SAFE_ID.test(id)) continue;
           best.set(key, { provider: 'codex', id, file: full, at: s.mtimeMs, bytes: s.size, command: `cd ${shellQuote(meta.cwd)} && codex resume ${id}` });
         }
       };

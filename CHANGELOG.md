@@ -9,7 +9,11 @@
   `worktrees`, `states` and `providers`. "Resumable" comes from resume
   providers — Claude and Codex built in, roots configurable, all switchable
   off with `MAW_HERDR_RESUME_PROVIDERS=none` — rather than from a vendor path
-  in the plugin.
+  in the plugin. A herdr session whose snapshot fails, or a repo git cannot
+  list, is a stderr warning ending in the command to check it, and
+  `incomplete` / `unreadable` in `--json` — never a silently wrong state. The
+  tally line counts "checkouts", so it no longer reuses the tree footer's
+  "worktrees" for a different number.
 - `ls --json` larger than 64 KB is no longer cut at 65,536 bytes when piped
   under Bun.
 

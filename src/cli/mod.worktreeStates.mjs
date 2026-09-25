@@ -97,23 +97,45 @@ export function parsePorcelain(text) {
   }).filter(Boolean);
 }
 
+/** A repo's worktrees. Throws when git cannot list them; the caller reports it. */
 async function gitWorktrees(repo) {
-  try {
-    const { stdout } = await execFileP('git', ['-C', repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', timeout: 10_000 });
-    // the main worktree comes first; its path, as git spells it, names the repo
-    const all = parsePorcelain(stdout);
-    const main = stdout.match(/^worktree (.*)$/m)?.[1] ?? repo;
-    return all.map(w => ({ ...w, repoRoot: main, linked: w.path !== main }));
-  } catch {
-    return [];
-  }
+  const { stdout } = await execFileP('git', ['-C', repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', timeout: 10_000 });
+  // the main worktree comes first; its path, as git spells it, names the repo
+  const all = parsePorcelain(stdout);
+  const main = stdout.match(/^worktree (.*)$/m)?.[1] ?? repo;
+  return all.map(w => ({ ...w, repoRoot: main, linked: w.path !== main }));
+}
+
+// How many `git worktree list` run at once. Unbounded, a machine with ~70
+// worktree repos started ~70 gits together, and under load some hit the 10 s
+// timeout — a repo lost that way would have dropped out of the counts.
+export const GIT_CONCURRENCY = 8;
+
+/** Every repo's worktrees, a few gits at a time; repos git could not list come back in `unreadable`. */
+async function listAll(repos) {
+  const queue = [...repos];
+  const listed = [];
+  const unreadable = [];
+  const worker = async () => {
+    for (let repo = queue.shift(); repo !== undefined; repo = queue.shift()) {
+      try {
+        listed.push(...await gitWorktrees(repo));
+      } catch {
+        unreadable.push(repo);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(GIT_CONCURRENCY, queue.length) }, worker));
+  return { listed, unreadable: unreadable.sort() };
 }
 
 // herdr's repo_key is the shared git dir (/code/x/.git); the repo is its parent.
 const repoRootOf = w => (w.repoKey ? (basename(w.repoKey) === '.git' ? dirname(w.repoKey) : w.repoKey) : null);
 
 /**
- * Every worktree with its state, plus each open space's state.
+ * Every worktree with its state, plus each open space's state, plus the repos
+ * git could not list (`unreadable`) — their closed worktrees are missing from
+ * `rows`, and the caller has to say so.
  *
  * spaces:    rows from the workspace tree, each with `checkout` and `agents`
  *            (the number of agent panes in it).
@@ -126,7 +148,7 @@ export async function worktreeStates({ spaces, roots, providers }) {
     const key = real(r);
     if (!repos.has(key)) repos.set(key, r);
   }
-  const listed = (await Promise.all([...repos.values()].map(gitWorktrees))).flat();
+  const { listed, unreadable } = await listAll(repos.values());
 
   // one row per checkout on disk, however many repos (ghq alias symlinks) or
   // nested checkouts list it
@@ -208,5 +230,6 @@ export async function worktreeStates({ spaces, roots, providers }) {
     counts,
     spaces: spaces.map(w => ({ ...w, state: spaceState(w) })),
     scanned: { roots, repos: repos.size },
+    unreadable,
   };
 }

@@ -6,7 +6,7 @@
 // MAW_STATES_ENTRY=<bundle> runs the same checks against a built index.js.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,12 +41,24 @@ const wt = name => join(repo, 'wt', name);
 for (const name of ['run-one', 'open-one', 'claude-one', 'codex-one', 'cold-one', 'tiny', 'sub', 'gone']) git(repo, 'worktree', 'add', '-q', '-b', `b/${name}`, wt(name));
 // a worktree whose directory was deleted behind git's back: prunable, not listed
 rmSync(wt('gone'), { recursive: true, force: true });
-// a clone that never used a worktree, and a non-host directory that looks like
-// a repo with worktrees: neither is a place work lives, neither is listed
+// a clone that never used a worktree, and a real repo with a real linked
+// worktree under a non-host directory (datasets/, no dot): neither is a place
+// work lives, neither is listed. The second is a working repo on purpose — a
+// fake one would drop out anyway when git failed on it, and prove nothing.
 const plain = join(ghq, 'github.com', 'org', 'plain');
 mkdirSync(plain, { recursive: true });
 git(plain, 'init', '-q');
-mkdirSync(join(ghq, 'datasets', 'x', 'y', '.git', 'worktrees', 'z'), { recursive: true });
+const dataset = join(ghq, 'datasets', 'x', 'y');
+mkdirSync(dataset, { recursive: true });
+git(dataset, 'init', '-q');
+writeFileSync(join(dataset, 'README'), 'y\n');
+git(dataset, 'add', 'README');
+git(dataset, 'commit', '-q', '-m', 'init');
+git(dataset, 'worktree', 'add', '-q', '-b', 'z', join(dataset, 'wt', 'z'));
+// a directory that claims linked worktrees but is no repo git can read: it is
+// scanned, git fails on it, and ls says so rather than dropping it in silence
+const broken = join(ghq, 'github.com', 'org', 'broken');
+mkdirSync(join(broken, '.git', 'worktrees', 'z'), { recursive: true });
 
 // --- transcripts ---------------------------------------------------------------
 // Claude keys by the resolved cwd (process.cwd() on macOS is /private/var/…);
@@ -64,6 +76,12 @@ writeFileSync(join(claudeRoot, enc(realpathSync(wt('tiny'))), 'aaaaaaaa-0000-400
 // the running worktree also has a transcript; running still wins
 mkdirSync(join(claudeRoot, enc(realpathSync(wt('run-one')))), { recursive: true });
 writeFileSync(join(claudeRoot, enc(realpathSync(wt('run-one'))), 'bbbbbbbb-0000-4000-8000-000000000000.jsonl'), big);
+// a newer transcript whose name is not a session id a shell can take safely:
+// never offered, so the older real one is still the one to resume
+const future = new Date(Date.now() + 3_600_000);
+const hostileClaude = join(claudeRoot, enc(realpathSync(wt('claude-one'))), 'a$(touch pwned).jsonl');
+writeFileSync(hostileClaude, big);
+utimesSync(hostileClaude, future, future);
 
 const codexId = '01a0d5fd-c656-78e2-a436-82d136350c71';
 const codexDay = join(codexRoot, '2026', '09', '25');
@@ -73,6 +91,10 @@ writeFileSync(join(codexDay, `rollout-2026-09-25T07-36-13-${codexId}.jsonl`), me
 // a subagent thread is resumed through its parent, never on its own: still cold
 const subId = '01a0d5fd-0000-7000-8000-000000000000';
 writeFileSync(join(codexDay, `rollout-2026-09-25T07-40-00-${subId}.jsonl`), meta(subId, wt('sub'), { subagent: { thread_spawn: { depth: 1 } } }) + big);
+// the same, for a Codex rollout whose recorded id carries shell syntax
+const hostileCodex = join(codexDay, 'rollout-2026-09-25T08-00-00-01a0d5fd-9999-7000-8000-000000000000.jsonl');
+writeFileSync(hostileCodex, meta('abc$(touch pwned2)', wt('codex-one'), 'cli') + big);
+utimesSync(hostileCodex, future, future);
 
 // --- the fake herdr --------------------------------------------------------------
 const tree = (checkout, linked) => ({ repo_name: 'alpha', repo_key: join(repo, '.git'), repo_root: repo, checkout_path: checkout, is_linked_worktree: linked });
@@ -100,6 +122,8 @@ const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
 const verb = args[0] === '--session' ? args.slice(2) : args;
 if (verb.join(' ') === 'session list --json') console.log(JSON.stringify({ sessions: [{ name: 'default', running: true, default: true }] }));
+else if (verb.join(' ') === 'api snapshot' && process.env.FAKE_SNAPSHOT === 'fail') { console.error('fake herdr: socket refused'); process.exit(1); }
+else if (verb.join(' ') === 'api snapshot' && process.env.FAKE_SNAPSHOT === 'garbage') console.log('not json');
 else if (verb.join(' ') === 'api snapshot') console.log(JSON.stringify({ result: { snapshot: JSON.parse(readFileSync(${JSON.stringify(snapshotFile)}, 'utf8')) } }));
 else if (verb[0] === 'machine') process.exit(1);
 else { console.error('fake herdr: unexpected', args); process.exit(8); }
@@ -139,6 +163,8 @@ try {
     assert.ok(!out.worktrees.some(r => r.path.endsWith('/gone')), 'a prunable worktree (directory gone) is not listed');
     assert.ok(!out.worktrees.some(r => r.path.startsWith(plain)), 'a repo with no worktrees is not listed');
     assert.ok(!out.worktrees.some(r => r.path.includes('datasets')), 'a non-host directory under the root is never walked');
+    assert.deepEqual(out.incomplete, [], 'every herdr session answered');
+    assert.deepEqual(out.unreadable, [broken], 'the repo git cannot read is named, not dropped');
     assert.equal(out.worktrees.length, 9);   // main + 7 live worktrees + the scratch space
     assert.deepEqual(out.states, { running: 1, open: 2, resumable: 2, cold: 4 });
     checks++;
@@ -150,6 +176,7 @@ try {
     assert.equal(codex.provider, 'codex');
     assert.equal(codex.id, codexId);
     assert.equal(codex.command, `cd ${wt('codex-one')} && codex resume ${codexId}`);
+    assert.ok(!out.worktrees.some(r => r.resume && /[$`()]/.test(r.resume.id + r.resume.command)), 'a session id with shell syntax is never offered');
     checks++;
     // --json keeps its shape: the workspace rows, each now with a state
     assert.equal(out.command, 'ls');
@@ -176,7 +203,7 @@ try {
     assert.match(cold.out, /Local · · cold/);
     assert.match(cold.out, /cold-one/);
     assert.ok(!cold.out.includes('claude-one') && !cold.out.includes('run-one'), cold.out);
-    assert.match(cold.out, /4 cold of 9 worktrees · 1 running · 2 open · 2 resumable · 4 cold/);
+    assert.match(cold.out, /4 cold of 9 checkouts · 1 running · 2 open · 2 resumable · 4 cold/);
     const res = run(['ls', 'resumable', '--path']);
     assert.equal(res.code, 0, res.err);
     assert.match(res.out, /◐ claude-one {2}b\/claude-one {2}claude \d+[smhd] ago/);
@@ -191,7 +218,7 @@ try {
     const plainLs = run(['ls']);
     assert.equal(plainLs.code, 0, plainLs.err);
     assert.match(plainLs.out, /3 workspaces · 2 repos · 2 worktrees · agents: maw herdr ls --agents\n/);
-    assert.match(plainLs.out, /9 worktrees · 1 running · 2 open · 2 resumable · 4 cold · list one: maw herdr ls resumable\n/);
+    assert.match(plainLs.out, /9 checkouts · 1 running · 2 open · 2 resumable · 4 cold · list one: maw herdr ls resumable\n/);
     assert.ok(!plainLs.out.includes(repo), 'plain ls still prints no paths');
     checks++;
     console.log('PASS ls <state> / --state <s> filter JSON and the listing; plain ls adds one tally line');
@@ -210,7 +237,7 @@ try {
     assert.deepEqual(out.providers, []);
     checks++;
     const plainLs = run(['ls'], off);
-    assert.match(plainLs.out, /9 worktrees · 1 running · 2 open · resumable off · 6 cold · no resume provider enabled: MAW_HERDR_RESUME_PROVIDERS=claude,codex maw herdr ls\n/);
+    assert.match(plainLs.out, /9 checkouts · 1 running · 2 open · resumable off · 6 cold · no resume provider enabled: MAW_HERDR_RESUME_PROVIDERS=claude,codex maw herdr ls\n/);
     const res = run(['ls', 'resumable'], off);
     assert.equal(res.code, 0, res.err);
     assert.match(res.out, /every resume provider is off\n {2}MAW_HERDR_RESUME_PROVIDERS=claude,codex maw herdr ls resumable\n$/);
@@ -248,6 +275,40 @@ try {
     assert.equal(out.worktrees.length, 9);
     checks++;
     console.log('PASS without a ghq root, the repos of open spaces are still scanned whole');
+  }
+
+  // --- a herdr session that does not answer: said so, never silently cold -----------------
+  {
+    const warning = /maw herdr: warning: herdr session 'default' did not return a snapshot \((.+)\); its spaces are missing, so worktrees they sit on may show as resumable or cold\n {2}herdr --session default api snapshot\n/;
+    for (const how of ['fail', 'garbage']) {
+      const env = { FAKE_SNAPSHOT: how };
+      const r = run(['ls', '--json'], env);
+      assert.equal(r.code, 0, r.err);
+      const out = JSON.parse(r.out);
+      assert.deepEqual(out.incomplete, ['default'], `${how}: --json flags the session it could not read`);
+      assert.match(r.err, warning, `${how}:\n${r.err}`);
+      if (how === 'fail') assert.equal(r.err.match(warning)[1], 'fake herdr: socket refused');
+      for (const args of [['ls'], ['ls', 'cold']]) {
+        const text = run(args, env);
+        assert.equal(text.code, 0, text.err);
+        assert.match(text.err, warning, `${args.join(' ')} warns too:\n${text.err}`);
+      }
+      checks++;
+    }
+    const ok = run(['ls']);
+    assert.ok(!ok.err.includes('did not return a snapshot'), ok.err);
+    console.log('PASS a failing or unparseable herdr snapshot is a warning ending in the command to check it, and incomplete in --json');
+  }
+
+  // --- a repo git cannot read: named, with the command, counts not silently short ----------
+  {
+    const r = run(['ls']);
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.err, new RegExp(`maw herdr: warning: git could not list the worktrees of 1 repo; its closed worktrees are missing from the counts\\n {2}git -C ${broken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} worktree list\\n`), r.err);
+    const cold = run(['ls', 'cold']);
+    assert.match(cold.err, /git could not list the worktrees of 1 repo/);
+    checks++;
+    console.log('PASS a repo git fails on is a warning ending in its git command, and unreadable in --json');
   }
 
   // --- a document past one pipe buffer arrives whole ---------------------------------

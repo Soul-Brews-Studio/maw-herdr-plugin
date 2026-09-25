@@ -7,6 +7,7 @@
 
 import { checkoutLine } from './mod.checkoutLine.mjs';
 import { STATES } from './mod.worktreeStates.mjs';
+import { shellQuote } from './mod.resumeProviders.mjs';
 
 /**
  * One JSON document on stdout, resolved once it is actually written.
@@ -19,6 +20,80 @@ import { STATES } from './mod.worktreeStates.mjs';
  */
 export function writeJson(value) {
   return new Promise(resolve => process.stdout.write(`${JSON.stringify(value)}\n`, () => resolve()));
+}
+
+/**
+ * `--state <s>`, taken out of `rest` in place. The positional `ls <state>` is
+ * read later, after the other listing flags have had their turn.
+ * UsageError is index.mjs's own class, so a bad value still exits 2.
+ */
+export function takeStateFlag(rest, UsageError) {
+  const at = rest.indexOf('--state');
+  if (at === -1) return null;
+  const state = rest.splice(at, 2)[1];
+  if (!STATES.includes(state)) throw new UsageError(`--state needs one of ${STATES.join(', ')}\n  maw herdr ls resumable`);
+  if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+  return state;
+}
+
+/**
+ * One line on why a session's snapshot did not come back: herdr's own last
+ * stderr line when it said something, "timed out" when execFile killed it,
+ * else the parse error.
+ */
+export function snapshotFailure(session, err) {
+  const said = String(err?.stderr ?? '').split('\n').map(l => l.trim()).filter(Boolean).pop();
+  const reason = err?.killed ? 'timed out' : said ?? String(err?.message ?? err).split('\n')[0];
+  return { session, reason: reason.length > 200 ? `${reason.slice(0, 199)}…` : reason };
+}
+
+/**
+ * Why a listing may be short, one warning per cause, each ending in the command
+ * that shows the cause. On stderr, so `ls --json | jq` still gets one document.
+ *
+ * failed:     [{ session, reason }] — herdr sessions whose snapshot did not
+ *             come back. Their spaces are absent, so a worktree with a live
+ *             agent in one of them falls through to resumable or cold; nothing
+ *             here can tell which, so the listing says it is incomplete instead.
+ * unreadable: repos `git worktree list` failed on; their closed worktrees are absent.
+ */
+export function scanWarnings(failed, unreadable) {
+  const lines = [];
+  for (const { session, reason } of failed) {
+    lines.push(`maw herdr: warning: herdr session '${session}' did not return a snapshot (${reason}); its spaces are missing, so worktrees they sit on may show as resumable or cold`);
+    lines.push(`  herdr --session ${session} api snapshot`);
+  }
+  if (unreadable.length) {
+    lines.push(`maw herdr: warning: git could not list the worktrees of ${count(unreadable.length, 'repo')}; its closed worktrees are missing from the counts`);
+    for (const repo of unreadable.slice(0, 5)) lines.push(`  git -C ${shellQuote(repo)} worktree list`);
+    if (unreadable.length > 5) lines.push(`  maw herdr ls --json | jq -r '.unreadable[]'   # ${unreadable.length - 5} more`);
+  }
+  return lines;
+}
+
+/**
+ * The state part of `ls`: warnings, then --json or `ls <state>`. Returns true
+ * when it printed the whole answer; false leaves plain `ls` to draw its tree.
+ */
+export async function showWorktreeStates(found, { state, json, path, providers, failed, C }) {
+  const warnings = scanWarnings(failed, found.unreadable);
+  if (warnings.length) process.stderr.write(`${warnings.join('\n')}\n`);
+  if (json) {
+    const pick = list => (state ? list.filter(r => r.state === state) : list);
+    await writeJson({
+      command: 'ls', mode: 'workspaces', scope: 'herdr', json: true, ...(state ? { state } : {}),
+      workspaces: pick(found.spaces), worktrees: pick(found.rows), states: found.counts,
+      providers: providers.map(p => ({ name: p.name, roots: p.roots })),
+      incomplete: failed.map(f => f.session),
+      unreadable: found.unreadable,
+    });
+    return true;
+  }
+  if (state) {
+    printStateListing(found, state, providers, { C, path });
+    return true;
+  }
+  return false;
 }
 
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -36,10 +111,17 @@ export function stateDot(state, C) {
   return `${C.dim}·${C.off}`;
 }
 
-/** "142 worktrees · 23 running · 1 open · 26 resumable · 92 cold" (resumable says "off" with no provider). */
+/**
+ * "142 checkouts · 23 running · 1 open · 26 resumable · 92 cold" (resumable says "off" with no provider).
+ *
+ * "checkouts", not "worktrees": plain `ls` already ends its tree with
+ * "… · 20 worktrees · …", counting linked worktrees that have a space open, and
+ * this line sits right under it counting every checkout on disk. One noun for
+ * two numbers on adjacent lines cannot be read, by a person or by a script.
+ */
 export function stateTally(result, providers, C) {
   const parts = STATES.map(s => (s === 'resumable' && !providers.length ? `resumable off` : `${result.counts[s]} ${s}`));
-  return `${count(result.rows.length, 'worktree')} · ${parts.join(' · ')}`;
+  return `${count(result.rows.length, 'checkout')} · ${parts.join(' · ')}`;
 }
 
 /** The one line plain `ls` adds under its tree. */

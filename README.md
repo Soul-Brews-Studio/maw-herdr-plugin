@@ -72,12 +72,27 @@ A worktree is in one of four states, whether or not a herdr space is open on it:
 | resumable | no space, but a transcript exists to resume from | a resume provider |
 | cold | nothing | — |
 
-Plain `ls` adds one line counting every worktree by state; `ls <state>` (or
-`--state <state>`) lists the worktrees in that state, repo → worktree, and
+Plain `ls` adds one line counting every checkout on disk by state
+(`290 checkouts · 28 running · …` — "checkouts" because the tree's own footer
+already says "worktrees" for linked worktrees with a space open); `ls <state>`
+(or `--state <state>`) lists the worktrees in that state, repo → worktree, and
 combines with `--path` and `--json`. `--json` keeps the `workspaces` array
 (each row now carries `state` and `agents`) and adds `worktrees`, `states`
 (the counts) and `providers`. A resumable row carries `resume.command`, the
-agent's own resume line, runnable as printed.
+agent's own resume line, runnable as printed; a transcript whose session id is
+not a plain `[A-Za-z0-9._-]` token is never offered.
+
+A listing can be short, and then it says so on stderr, each warning ending in
+the command that shows the cause, and `--json` names what is missing:
+
+- `incomplete`: herdr sessions whose `api snapshot` failed or did not parse.
+  Their spaces are absent, so a worktree with a live agent in one of them shows
+  as resumable or cold. Check with `herdr --session <name> api snapshot`.
+- `unreadable`: repos `git worktree list` failed on (dubious ownership, a
+  corrupt `.git/worktrees` entry). Their closed worktrees are absent from the
+  counts. Check with `git -C <repo> worktree list`.
+
+Both are empty arrays on a complete listing. The scan runs at most 8 gits at once.
 
 Worktrees come from git: every repo under the ghq root (`$GHQ_ROOT`, else
 `ghq root --all`, else `ghq_root` in `~/.maw/oracles.json`) with at least one
