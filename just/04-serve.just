@@ -58,6 +58,10 @@ bun-check:
     MAW_MCP_ENTRY="$output/index.js" node utils/smoke-mcp-serve.mjs
     node utils/smoke-ls-states.mjs
     MAW_STATES_ENTRY="$output/index.js" node utils/smoke-ls-states.mjs
+    node utils/smoke-audit-clean-sync.mjs
+    MAW_CLEANUP_ENTRY="$output/index.js" node utils/smoke-audit-clean-sync.mjs
+    node utils/smoke-cleanup-safety.mjs
+    MAW_CLEANUP_ENTRY="$output/index.js" node utils/smoke-cleanup-safety.mjs
 
 # The server is TypeScript on Bun; check is the Bun suite.
 check: bun-check

@@ -1,5 +1,5 @@
 {
-  "ref": "4c30beb9eb1d2161f344468f1ecd74e6e61cccd6",
+  "ref": "2001b9beedd2ba7a69a12b5363325a47cd80cbef",
   "cases": [
     {
       "args": [
@@ -104,7 +104,7 @@
       ],
       "rc": 2,
       "out": "",
-      "err": "maw herdr: --lines needs a positive integer\n  maw herdr peek --help\n"
+      "err": "maw herdr: --lines needs a positive integer\n"
     },
     {
       "args": [
@@ -132,7 +132,7 @@
       ],
       "rc": 2,
       "out": "",
-      "err": "maw herdr: hey needs a message: maw herdr hey omp \"<message>\"\n  maw herdr hey --help\n"
+      "err": "maw herdr: hey needs a message: maw herdr hey omp \"<message>\"\n"
     },
     {
       "args": [

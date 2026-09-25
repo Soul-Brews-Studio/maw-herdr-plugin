@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+
+- `maw herdr audit`, `clean` and `sync` (#64). `audit` reports worktrees whose
+  folder is gone, herdr spaces pointing at nothing, agents idle past `--idle`
+  (herdr's idle status plus a resume provider's transcript age), checkouts only
+  behind their upstream, and merged worktrees — and never changes anything.
+  `clean` removes gone and merged worktrees; `sync` prunes gone ones, closes
+  orphan spaces, fast-forwards behind checkouts and, with `--idle-agents`,
+  closes the spaces of idle, resumable agents. Both are plan-only until `--go`
+  or `--pick` (asks before each action, re-checking it first). A worktree with
+  gitignored data is kept (rebuildable dirs excepted), as is anything with an
+  agent, uncommitted work, a lock, or local-only commits. Removals go through
+  herdr when a space is open, and herdr and `git worktree list` are re-read
+  afterwards to prove they agree. A herdr session whose snapshot fails stops
+  `clean`/`sync` from acting. Panes count by their cwd, whatever space holds
+  them, so an agent in a plain space or one cd'd in from another checkout keeps
+  the worktree; a bare shell keeps it too unless `--idle-shells`. An idle agent
+  is judged by its own transcript (its provider, and herdr's `agent_session`
+  id), and `.envrc` counts as data. Removal never uses `--force`.
+
+- Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
+  takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
+  name (exact label, then a repo's main worktree, then a unique substring).
+  Ambiguity lists runnable candidates and exits 1; `--dry` is accepted wherever
+  a target is. `hey` and `peek` now resolve through it with unchanged output and
+  exit codes, and gain `self`, paths and `--dry`. A path means the worktree
+  containing it in every verb; `self` and paths never fall through to name
+  matching; focus picks a pane only within one space, never across spaces or
+  sessions (a pane id held in two sessions is now listed, not narrowed to the
+  focused copy). New read-only `maw herdr resolve [<target>]` /
+  `resolve --list` (#59).
 - `maw herdr ls [running|open|resumable|cold]`: every git worktree in one of
   four states, including the ones with no open herdr space, which `ls` could
   not show before (#60). Plain `ls` gains a line counting all four; `--json`

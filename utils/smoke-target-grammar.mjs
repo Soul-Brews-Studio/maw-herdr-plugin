@@ -249,11 +249,10 @@ else { console.error('fake herdr: unexpected', JSON.stringify(args)); process.ex
   eq(mutating.length, 0, `resolve only ever read from herdr: ${JSON.stringify(mutating)}`);
 
   // --- hey / peek: byte-for-byte against the pre-#59 index.mjs -----------------
-  // Recorded from commit LEGACY_REF (main + #56 on the integration branch, so the
-  // `<verb> --help` fix line #56 adds is baseline) against this exact fixture, with the temp
+  // Recorded once from commit LEGACY_REF against this exact fixture, with the temp
   // dir normalised to <TMP>. The case list must match the recording, so editing a
   // case without re-recording fails here instead of silently comparing less.
-  const LEGACY_REF = '4c30beb9eb1d2161f344468f1ecd74e6e61cccd6';
+  const LEGACY_REF = '2001b9beedd2ba7a69a12b5363325a47cd80cbef';
   const FIXTURE = join(root, 'utils', 'target-grammar-legacy.json');
   const norm = res => JSON.parse(JSON.stringify(res).split(tmp).join('<TMP>'));
   const cases = [
@@ -297,8 +296,12 @@ else { console.error('fake herdr: unexpected', JSON.stringify(args)); process.ex
   const legacy = JSON.parse(readFileSync(FIXTURE, 'utf8'));
   eq(legacy.ref, LEGACY_REF);
   assert.deepEqual(legacy.cases.map(c => c.args), cases, `the case list changed; re-record: bun utils/smoke-target-grammar.mjs --record`); checks++;
+  // #56 (merged alongside) appends `maw herdr <verb> --help` to every one-line
+  // usage error. The fixture predates it, so apply that one rule to what it expects.
+  const with56 = (verb, w) => (w.rc === 2 && /^maw herdr: [^\n]*\n$/.test(w.err) ? { ...w, err: `${w.err}  maw herdr ${verb} --help\n` } : w);
   for (const c of legacy.cases) {
-    const { args, ...want } = c;
+    const { args, ...recorded } = c;
+    const want = with56(args[0], recorded);
     assert.deepEqual(norm(run(args)), want, `hey/peek changed for: ${args.join(' ')}`);
     checks++; compared++;
   }
