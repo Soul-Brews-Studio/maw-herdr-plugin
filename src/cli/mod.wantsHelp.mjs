@@ -10,7 +10,7 @@ const HELP_FLAGS = new Set(['--help', '-h']);
 // `pek alpha -h` prints the usage without saying the verb is wrong. A new verb
 // joins this set in the same change that adds its dispatch line. `serve` is
 // absent on purpose: it parses its own --help.
-export const HELP_VERBS = new Set(['ls', 'list', 'a', 'attach', 'wake', 'hey', 'peek', 'read', 'federation', 'fed']);
+export const HELP_VERBS = new Set(['ls', 'list', 'a', 'attach', 'wake', 'hey', 'peek', 'read', 'federation', 'fed', 'resolve']);
 
 // Flags whose next argv element is a value, not a flag. `wake --prompt -h`
 // prompts the agent with "-h"; it is not a request for usage.
@@ -52,6 +52,6 @@ export function wantsHelp(verb, args) {
     else words.push(arg);
   }
   if (!asked) return false;
-  if (verb === 'hey') return words.filter(w => w !== '--dry-run').length <= 1;
+  if (verb === 'hey') return words.filter(w => w !== '--dry-run' && w !== '--dry').length <= 1;
   return true;
 }

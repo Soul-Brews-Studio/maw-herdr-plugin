@@ -8,10 +8,11 @@ import { runServe } from './src/serve/mod.runServe.mjs';
 import { checkoutLine } from './src/cli/mod.checkoutLine.mjs';
 import { wantsHelp } from './src/cli/mod.wantsHelp.mjs';
 import { repoGroups } from './src/cli/mod.repoGroups.mjs';
+import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls --agents [--json]                 every agent pane across all sessions
@@ -20,8 +21,11 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|serve> [args]
   wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
        [--own-session]                 start an oracle's agent as a workspace in the
                                        running session (--own-session: its own server)
-  hey <target> <message> [--dry-run]   submit a prompt to an agent (herdr's 'maw hey')
-  peek <target> [--lines N] [--json]   read what an agent's pane is showing
+  hey <target> <message> [--dry]       submit a prompt to an agent (herdr's 'maw hey')
+  peek <target> [--lines N] [--json] [--dry]
+                                       read what an agent's pane is showing
+  resolve [<target>] [--json]          what a target resolves to, and how; never acts
+  resolve --list [--json]              every worktree and space a target can name
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
@@ -34,10 +38,16 @@ A herdr SESSION is a server process, not a workspace. The thing that plays a tmu
 session's role — the place work lives — is a WORKSPACE, and one session holds many.
 'ls' therefore lists workspaces; 'ls --sessions' lists the servers.
 
-<target> is an agent name, a pane id, or a workspace label (the oracle name).
-Most herdr agents are unnamed until someone runs 'herdr agent rename', so the
-workspace label is the handle that always exists. Name one to address it directly.
-Scope to one session with --session <name> when two sessions share a label.
+<target> is one grammar, shared by every verb that takes one:
+  self           the pane you are typing in (the default where a target is optional)
+  /abs/path  .   the worktree containing that path (a directory inside one works)
+  w5D:p1         a herdr pane id
+  digger-oracle  a name: exact label, then a repo's main worktree, then a unique substring
+hey and peek also take an agent name or a workspace/tab label, as they always have.
+An ambiguous target lists its candidates and does nothing. --dry (alias --dry-run)
+prints what a target resolves to and exits. Most herdr agents are unnamed until
+someone runs 'herdr agent rename', so the workspace label is the handle that always
+exists. Scope to one session with --session <name> when two sessions share a label.
 
 --help / -h after any verb prints this text; 'serve --help' has its own.`;
 
@@ -273,49 +283,8 @@ async function roster() {
   return rows.flat();
 }
 
-// A tab keeps its number as its label until someone renames it, and "digger-oracle/1"
-// says less than "digger-oracle". Only a real name earns the suffix.
-const named = t => t && t !== '' && !/^\d+$/.test(t);
-const label = a => `${a.workspace}${named(a.tabLabel) && a.tabLabel !== a.workspace ? `/${a.tabLabel}` : ''}`;
-
-// A workspace commonly holds several agent panes (a split tab, or several tabs),
-// so an exact label match is routinely plural. Prefer the pane the operator is
-// looking at, then the workspace's own active tab. Anything left is genuinely
-// ambiguous and is reported rather than guessed.
-function narrow(hits) {
-  const focused = hits.filter(a => a.focused);
-  if (focused.length === 1) return { pick: focused[0], why: 'focused pane' };
-  const active = hits.filter(a => a.tab && a.tab === a.activeTab);
-  if (active.length === 1) return { pick: active[0], why: 'active tab' };
-  return null;
-}
-
-function resolveAgent(all, target, verb) {
-  if (!all.length) throw new Error('no agent panes in any running herdr session');
-  // Pane ids are colon-shaped too (wD:p4), so scoping is a flag, never a prefix.
-  const tiers = [
-    ['pane', a => a.pane === target],
-    ['agent name', a => a.name === target],
-    ['workspace', a => a.workspace === target],
-    ['tab', a => a.tabLabel === target],
-    ['prefix', a => a.workspace.startsWith(target)],
-    ['substring', a => a.workspace.includes(target) || (a.name ?? '').includes(target)],
-  ];
-  for (const [how, test] of tiers) {
-    const hits = all.filter(test);
-    if (hits.length === 1) return { ...hits[0], how };
-    if (hits.length > 1) {
-      const narrowed = narrow(hits);
-      if (narrowed) return { ...narrowed.pick, how: `${how}, ${narrowed.why}` };
-      const lines = hits.map(a => `    ${a.pane.padEnd(8)} ${label(a).padEnd(22)} ${a.agent} (${a.status})`);
-      throw new Error(
-        `'${target}' matches ${hits.length} agent panes and none is focused:\n${lines.join('\n')}\n  target one by pane id: maw herdr ${verb} ${hits[0].pane}${verb === 'hey' ? ' "…"' : ''}`,
-      );
-    }
-  }
-  const known = [...new Set(all.map(a => a.workspace))].sort();
-  throw new Error(`no agent '${target}'. workspaces: ${known.join(', ') || '(none)'}\n  see them all: maw herdr ls --agents`);
-}
+// label(), narrow() and resolveAgent() live in src/cli/mod.target.mjs, the one
+// resolver every target-taking verb shares.
 
 function statusDot(status) {
   if (status === 'working') return `${C.green}●${C.off}`;
@@ -809,8 +778,7 @@ async function poolFor(args, verb) {
 async function cmdHey(args) {
   // --dry-run mirrors wake's: prompting a live agent is not free, so show the
   // resolution and the exact herdr call before committing to it.
-  const dryRun = args.includes('--dry-run');
-  if (dryRun) args.splice(args.indexOf('--dry-run'), 1);
+  const dryRun = takeDry(args);
   // `<node>:<target>` — deliver on another machine, through the federation.
   // Same resolver peek uses, so the two can never disagree about what a colon
   // means. Routing is the node's job: a direct peer gets an authenticated
@@ -842,7 +810,7 @@ async function cmdHey(args) {
   const message = args.join(' ').trim();
   if (!message) throw new UsageError(`hey needs a message: maw herdr hey ${target} "<message>"`);
 
-  const hit = resolveAgent(pool, target, verb);
+  const hit = resolveAgent(pool, target, verb, { message });
   console.log(`  ${statusDot(hit.status)} ${C.cyan}${label(hit)}${C.off} ${C.dim}${hit.pane} · ${hit.agent} · ${hit.status} · ${hit.session}${C.off}`);
   if (dryRun) {
     console.log(`  ${C.dim}would run:${C.off} herdr --session ${hit.session} agent prompt ${hit.pane} ${JSON.stringify(message)}`);
@@ -859,6 +827,7 @@ async function cmdHey(args) {
 async function cmdPeek(args) {
   const json = args.includes('--json');
   const rest = args.filter(a => a !== '--json');
+  const dry = takeDry(rest);
   let lines = 40;
   const at = rest.indexOf('--lines');
   if (at !== -1) {
@@ -870,6 +839,12 @@ async function cmdPeek(args) {
   if (fleetHit) {
     rest.shift();
     if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+    if (dry) {
+      console.log(`  ${C.cyan}${fleetHit.node}${C.off}${fleetHit.via ? ` ${C.dim}via ${fleetHit.via}${C.off}` : ''} ${C.dim}${fleetHit.pane}${fleetHit.handle ? ` · ${fleetHit.handle}` : ''}${C.off}`);
+      console.log(`  ${C.dim}would POST ${FED_URL}/api/fleet/pane ${JSON.stringify({ node: fleetHit.node, pane: fleetHit.pane, lines })}${C.off}`);
+      console.log(`  ${C.dim}nothing was read${C.off}`);
+      return;
+    }
     const out = await fedPost('/api/fleet/pane', { node: fleetHit.node, pane: fleetHit.pane, lines });
     if (json) {
       console.log(JSON.stringify({ command: 'peek', node: out.node, pane: out.pane, via: fleetHit.via, source: 'visible', lines: out.lines, text: out.text }));
@@ -887,6 +862,16 @@ async function cmdPeek(args) {
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
 
   const hit = resolveAgent(pool, target, verb);
+  if (dry) {
+    if (json) {
+      console.log(JSON.stringify({ command: 'peek', dry: true, pane: hit.pane, session: hit.session, workspace: hit.workspace, agent: hit.agent, status: hit.status, how: hit.how }));
+      return;
+    }
+    console.log(`  ${statusDot(hit.status)} ${C.cyan}${label(hit)}${C.off} ${C.dim}${hit.pane} · ${hit.agent} · ${hit.status} · ${hit.session}${C.off}`);
+    console.log(`  ${C.dim}would run:${C.off} herdr --session ${hit.session} pane read ${hit.pane} --source visible --lines ${lines} --format text`);
+    console.log(`  ${C.dim}matched by ${hit.how} · nothing was read${C.off}`);
+    return;
+  }
 
   // --source visible, ALWAYS. herdr's own default is `recent`, which asks for
   // scrollback — and on an idle agent herdr gathers that by driving the pane's
@@ -988,7 +973,7 @@ function cmdWake(args) {
     if (arg === '--engine' || arg === '--kind') opts.engine = args.shift() ?? '';
     else if (arg === '--prompt') opts.prompt = args.shift() ?? '';
     else if (arg === '--attach' || arg === '-a') opts.attach = true;
-    else if (arg === '--dry-run') opts.dryRun = true;
+    else if (arg === '--dry-run' || arg === '--dry') opts.dryRun = true;
     else if (arg === '--own-session') opts.ownSession = true;
     else if (arg.startsWith('-')) throw new UsageError(`unknown argument: ${arg}`);
     else if (target === undefined) target = arg;
@@ -1083,6 +1068,7 @@ try {
   else if (command === 'hey') await cmdHey(args);
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
+  else if (command === 'resolve') await cmdResolve(args, { UsageError });
   else throw new UsageError(`unknown command: ${command}\n  maw herdr help`);
 } catch (err) {
   // A usage error with no fix line of its own gets the one that now always works.
