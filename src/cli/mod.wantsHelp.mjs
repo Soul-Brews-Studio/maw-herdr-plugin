@@ -4,10 +4,23 @@
 
 const HELP_FLAGS = new Set(['--help', '-h']);
 
+// The verbs this gate answers for. A verb that does not exist stays an
+// "unknown command" even with --help after it: otherwise a script probing
+// `maw herdr restart --help` reads exit 0 as "restart exists", and a typo like
+// `pek alpha -h` prints the usage without saying the verb is wrong. A new verb
+// joins this set in the same change that adds its dispatch line. `serve` is
+// absent on purpose: it parses its own --help.
+export const HELP_VERBS = new Set(['ls', 'list', 'a', 'attach', 'wake', 'hey', 'peek', 'read', 'federation', 'fed']);
+
 // Flags whose next argv element is a value, not a flag. `wake --prompt -h`
 // prompts the agent with "-h"; it is not a request for usage.
+//
+// wake's --engine/--kind are deliberately NOT here. No herdr agent kind starts
+// with "-", so `wake <oracle> --kind -h` can only mean help. Treating "-h" as
+// the engine instead created a workspace in the live session before
+// `agent start --kind -h` failed, and left it behind.
 const VALUE_FLAGS = {
-  wake: new Set(['--prompt', '--engine', '--kind']),
+  wake: new Set(['--prompt']),
   peek: new Set(['--lines', '--session']),
   hey: new Set(['--session']),
 };
@@ -24,6 +37,7 @@ const VALUE_FLAGS = {
  * Every other verb stops at a `--` terminator, the POSIX convention.
  */
 export function wantsHelp(verb, args) {
+  if (!HELP_VERBS.has(verb)) return false;
   const values = VALUE_FLAGS[verb];
   const words = [];
   let asked = false;
