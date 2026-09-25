@@ -2,7 +2,7 @@ export async function runServe(args) {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`maw herdr serve --token-file PATH [--listen 127.0.0.1:3457]
                 [--herdr PATH] [--data-dir PATH] [--wake-engine KIND]
-                [--insecure-no-token [--demo-minutes N]]
+                [--insecure-no-token [--demo-minutes N]] [--mcp]
                 [--allow-origin ORIGIN]... [--access-log | --no-access-log]
 
 Core dashboard API: sessions, live pane output and prompt submission.
@@ -17,6 +17,11 @@ exact scheme://host[:port], no wildcards. An allowed origin can read every pane.
 --access-log prints an nginx-style line per request to stderr, flushed as it
 happens. It is on by default with --insecure-no-token, since that is the server
 whose traffic you want to watch. Tokens and tickets are never logged.
+--mcp mounts an MCP endpoint (Streamable HTTP, JSON-RPC) at /mcp on the same
+listener. Read tools (herdr_sessions, herdr_agents, herdr_capture, herdr_worktrees)
+follow the mode; write tools (herdr_send, herdr_wake) always require the operator
+token, even with --insecure-no-token. Not available under --engine.
+  claude mcp add --transport http herdr http://127.0.0.1:3457/mcp --header "Authorization: Bearer $(cat ~/.maw-herdr-token)"
 The server is TypeScript on Bun; there is no native runtime and no compiler step.
 Host-managed serving is declared separately by plugin.json engine.serve.`);
     return 0;

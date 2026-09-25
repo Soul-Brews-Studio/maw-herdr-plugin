@@ -3,6 +3,10 @@ export interface ServeConfig {
   hostname: string;
   port: number;
   token: string;
+  /** Absolute token-file path (never its contents), for fix commands. */
+  tokenFile?: string;
+  /** Mount MCP at /mcp on this listener (serve --mcp). */
+  mcp?: boolean;
   insecure?: boolean;
   accessLog?: boolean;
   allowOrigins?: string[];
