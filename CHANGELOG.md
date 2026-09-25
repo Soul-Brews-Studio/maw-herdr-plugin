@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- `POST /api/send` restores the legacy delivery semantics (#42): a `[node:oracle]`
+  sender tag from `X-Maw-From` or the server's identity (slash commands
+  untagged), a read of the agent's input box that refuses someone's draft,
+  a roster re-read right before submitting, refusal of blocked agents, and a
+  receipt that says `delivered`, `queued` or only `accepted` according to what
+  the box showed, with one Enter retry when our own text stayed in it.
+  Refusals return `ok/error/target/detail/state` plus a `hint` command, and
+  lifecycle records carry `error` or `lastLine`. Dim placeholder text is not a
+  draft. `force` stays unsupported; empty text without attachments stays `400`.
+
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
   packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no
