@@ -34,6 +34,7 @@ forever. Measured: 3.5 GB written before kill, plugin left with no
 
 ```bash
 maw herdr ls                    # workspaces, grouped machine → repo → worktree
+maw herdr ls --path             # ...each workspace's checkout path beneath it
 maw herdr ls --sessions         # herdr server instances
 maw herdr ls --agents           # every agent pane, every session
 maw herdr ls --json             # any of the above, as JSON
@@ -43,6 +44,10 @@ maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
+
+`--help` or `-h` after any verb prints the usage instead of failing as an
+unknown argument. For `hey` it counts only when no message follows the target,
+so `maw herdr hey neo why does -h fail` still sends.
 
 ### Session vs. workspace
 
