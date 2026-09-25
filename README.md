@@ -34,6 +34,8 @@ forever. Measured: 3.5 GB written before kill, plugin left with no
 
 ```bash
 maw herdr ls                    # workspaces, grouped machine → repo → worktree
+maw herdr ls --path             # ...each workspace's checkout path beneath it
+maw herdr ls resumable          # every worktree in one state: running|open|resumable|cold
 maw herdr ls --sessions         # herdr server instances
 maw herdr ls --agents           # every agent pane, every session
 maw herdr ls --json             # any of the above, as JSON
@@ -48,6 +50,10 @@ maw herdr reply <target> <text> # file an answer in that pane's inbox, signed by
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
 
+`--help` or `-h` after any verb prints the usage instead of failing as an
+unknown argument. For `hey` it counts only when no message follows the target,
+so `maw herdr hey neo why does -h fail` still sends.
+
 ### Session vs. workspace
 
 herdr's "session" is a server process (one socket); the tmux-session role —
@@ -58,6 +64,58 @@ keeps the raw server listing if you need it.
 
 `●` working, `○` idle. Branch/`↑↓` come from a local git read only — never a
 fetch, never blocks on network.
+
+### Worktree states
+
+A worktree is in one of four states, whether or not a herdr space is open on it:
+
+| state | meaning | who knows |
+|---|---|---|
+| running | an agent is live in a pane | herdr |
+| open | a space is open, no agent | herdr |
+| resumable | no space, but a transcript exists to resume from | a resume provider |
+| cold | nothing | — |
+
+Plain `ls` adds one line counting every checkout on disk by state
+(`290 checkouts · 28 running · …` — "checkouts" because the tree's own footer
+already says "worktrees" for linked worktrees with a space open); `ls <state>`
+(or `--state <state>`) lists the worktrees in that state, repo → worktree, and
+combines with `--path` and `--json`. `--json` keeps the `workspaces` array
+(each row now carries `state` and `agents`) and adds `worktrees`, `states`
+(the counts) and `providers`. A resumable row carries `resume.command`, the
+agent's own resume line, runnable as printed; a transcript whose session id is
+not a plain `[A-Za-z0-9._-]` token is never offered.
+
+A listing can be short, and then it says so on stderr, each warning ending in
+the command that shows the cause, and `--json` names what is missing:
+
+- `incomplete`: herdr sessions whose `api snapshot` failed or did not parse.
+  Their spaces are absent, so a worktree with a live agent in one of them shows
+  as resumable or cold. Check with `herdr --session <name> api snapshot`.
+- `unreadable`: repos `git worktree list` failed on (dubious ownership, a
+  corrupt `.git/worktrees` entry). Their closed worktrees are absent from the
+  counts. Check with `git -C <repo> worktree list`.
+
+Both are empty arrays on a complete listing. The scan runs at most 8 gits at once.
+
+Worktrees come from git: every repo under the ghq root (`$GHQ_ROOT`, else
+`ghq root --all`, else `ghq_root` in `~/.maw/oracles.json`) with at least one
+linked worktree, plus the repo of every open space. A repo that never used a
+worktree and has no space open is a clone, not a workspace, and is not listed.
+
+"Resumable" is the only state herdr cannot answer, so it comes from providers,
+not from a path baked into the plugin. Two ship built in:
+
+| provider | looks in | default root | override |
+|---|---|---|---|
+| `claude` | `<root>/<cwd with every non-alphanumeric as ->/*.jsonl` | `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects` | `MAW_HERDR_CLAUDE_ROOTS` |
+| `codex` | `<root>/YYYY/MM/DD/rollout-*.jsonl`, matched on the `cwd` in the first line | `$CODEX_HOME/sessions`, else `~/.codex/sessions` | `MAW_HERDR_CODEX_ROOTS` |
+
+Root lists are `:`-separated. A transcript under 1 KiB, or a Codex subagent
+thread, is not counted as resumable. `MAW_HERDR_RESUME_PROVIDERS=claude` runs
+only one; `MAW_HERDR_RESUME_PROVIDERS=none` runs none, and `ls` then reports
+running, open and cold and never calls anything resumable. The interface a new
+provider implements is documented at the top of `src/cli/mod.resumeProviders.mjs`.
 
 ### Wake
 
@@ -193,8 +251,16 @@ Coverage vs. the legacy `maw serve`/God UI contract — not full parity:
 | Interactive terminal | `/ws/pty` — attach to a real herdr pane, resize, ANSI |
 | Federation status | reads `peers.json`, probes each peer's `/api/sessions` |
 | Inbox delivery | `POST /api/send {"inbox":true}` → `ψ/inbox`, `queued` |
+| Prompt delivery | `POST /api/send` → `[node:oracle]` sender tag, literal attachments, draft/blocked/changed-pane refusal, `delivered`/`queued`/`accepted` receipt |
 | Fleet wake | `POST /api/wake` with a `task` → new/reused worktree |
 | Not included | full lifecycle control, inbound pairing, config mutation |
+
+`POST /api/send` receipts name what was observed, never that the agent read
+the prompt: `accepted` is herdr taking it, `delivered` is the input box seen
+empty afterwards, `queued` is the agent showing it queued. A draft already in
+the box, a blocked agent, or a pane that changed under the request is refused
+with `409` and a `hint` holding the herdr command that shows why. If the
+input box cannot be read first, nothing is typed (`503`).
 
 Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for
@@ -227,3 +293,28 @@ just serve check                  # Bun build, API/process smokes
 
 Skips with a `SKIP:` line (exit 0) when `maw`/`herdr` isn't on `PATH` — safe
 in CI.
+
+## Serving a dashboard
+
+```bash
+# read-only demo: no token, stops itself, logs every request
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60
+
+# a dashboard on another origin must be named, or it gets 403 origin_not_allowed
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60 \
+  --allow-origin https://village.buildwithoracle.com \
+  --allow-origin https://bridge.buildwithoracle.com
+
+# writes — send, wake, cleanup — need the token file
+maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457
+```
+
+Loopback pages and `god.buildwithoracle.com` are allowed built-in. Everything
+else is opt-in per origin: an allowed origin can read every pane this server can
+see, so there are no wildcards.
+
+`--access-log` prints an nginx-style line per request to stderr as it happens,
+and is on by default under `--insecure-no-token`. Tokens and tickets never reach
+it. A page that sits on "offline" with nothing in the log was blocked by the
+browser before the request left — usually Private Network Access on an HTTPS
+page reaching loopback.
