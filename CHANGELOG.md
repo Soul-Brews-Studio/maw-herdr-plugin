@@ -31,6 +31,35 @@
   instead of the repo name. Two same-named checkouts from different orgs are
   now two groups, and a group prints every mother workspace, where before the
   second one was dropped from the tree without notice.
+- Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
+  takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
+  name (exact label, then a repo's main worktree, then a unique substring).
+  Ambiguity lists runnable candidates and exits 1; `--dry` is accepted wherever
+  a target is. `hey` and `peek` now resolve through it with unchanged output and
+  exit codes, and gain `self`, paths and `--dry`. A path means the worktree
+  containing it in every verb; `self` and paths never fall through to name
+  matching; focus picks a pane only within one space, never across spaces or
+  sessions (a pane id held in two sessions is now listed, not narrowed to the
+  focused copy). New read-only `maw herdr resolve [<target>]` /
+  `resolve --list` (#59).
+- `POST /api/send` restores the legacy delivery semantics (#42): a `[node:oracle]`
+  sender tag from `X-Maw-From` or the server's identity (slash commands
+  untagged), a read of the agent's input box that refuses someone's draft,
+  a roster re-read right before submitting, refusal of blocked agents, and a
+  receipt that says `delivered`, `queued` or only `accepted` according to what
+  the box showed, with one Enter retry when our own text stayed in it.
+  Refusals return `ok/error/target/detail/state` plus a `hint` command, and
+  lifecycle records carry `error` or `lastLine`. Dim placeholder text is not a
+  draft. `force` stays unsupported; empty or whitespace-only text without
+  attachments stays `400`, and text that the sender tag pushes past herdr's
+  64 KiB prompt limit is `413 text_too_large`. Once herdr has taken the prompt
+  nothing afterwards (abort, timeout, failed Enter retry) can report it
+  failed or release its idempotency key; an input box that cannot be read
+  before submit refuses the send. An unreadable config layer falls back to
+  `local:pane/unknown` for the tag instead of refusing.
+- Fix: roster targets use the decimal window index the dashboard shows. herdr
+  pane ids count in base 36, so dashboard target `:12` (pane `pC`) used to
+  resolve to pane `p12` on send, capture and terminal attach.
 
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,

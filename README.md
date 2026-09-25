@@ -43,6 +43,7 @@ maw herdr a <session>           # attach (alias: attach)
 maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
+maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
 
@@ -126,12 +127,33 @@ maw herdr wake laris-co/neo-oracle --engine codex
 maw herdr wake neo --prompt "recap the last session" --attach
 ```
 
+### Targets — one grammar for every verb
+
+| form | meaning |
+|---|---|
+| `self` | the pane you are typing in (from `HERDR_PANE_ID` + `HERDR_SOCKET_PATH`); the default where a target is optional |
+| `/abs/path`, `.`, `../x` | the git worktree containing that path (a linked worktree, never its main checkout, when you are inside one) |
+| `w5D:p1` | a herdr pane id |
+| `digger-oracle` | a name: exact label → a repo's main worktree → unique substring |
+
+An ambiguous target lists every candidate as a runnable command and exits 1;
+nothing is picked for you. `--dry` (alias `--dry-run`) prints the resolution
+and does nothing. `maw herdr resolve <target>` shows what any target means,
+including worktrees with no open space; `resolve --list` shows everything it
+can name. The resolver is `src/cli/mod.target.mjs`.
+
 ### Hey and peek — targeting
 
-`<target>` resolves: pane id → agent name → workspace label → tab label →
-unique prefix/substring. Workspace label is the handle that always
-exists (agents are unnamed until `herdr agent rename`). Ambiguous matches are
-listed, never guessed:
+hey and peek take the grammar above. `self` is the agent in your own pane; a
+path is the agent(s) whose cwd belongs to the worktree containing that path.
+Neither ever falls back to name matching — a miss is an error, so `hey self`
+from a bare shell cannot land in a workspace that merely has "self" in its
+label. Names keep hey/peek's own agent tiers: pane id → agent name → workspace
+label → tab label → unique prefix/substring. Workspace label is the handle that
+always exists (agents are unnamed until `herdr agent rename`). Within one space
+the focused pane, then the active tab, picks among that space's agents; across
+two spaces or sessions nothing is picked. Ambiguous matches are listed, never
+guessed:
 
 ```bash
 $ maw herdr peek neo-oracle
@@ -184,8 +206,16 @@ Coverage vs. the legacy `maw serve`/God UI contract — not full parity:
 | Interactive terminal | `/ws/pty` — attach to a real herdr pane, resize, ANSI |
 | Federation status | reads `peers.json`, probes each peer's `/api/sessions` |
 | Inbox delivery | `POST /api/send {"inbox":true}` → `ψ/inbox`, `queued` |
+| Prompt delivery | `POST /api/send` → `[node:oracle]` sender tag, literal attachments, draft/blocked/changed-pane refusal, `delivered`/`queued`/`accepted` receipt |
 | Fleet wake | `POST /api/wake` with a `task` → new/reused worktree |
 | Not included | full lifecycle control, inbound pairing, config mutation |
+
+`POST /api/send` receipts name what was observed, never that the agent read
+the prompt: `accepted` is herdr taking it, `delivered` is the input box seen
+empty afterwards, `queued` is the agent showing it queued. A draft already in
+the box, a blocked agent, or a pane that changed under the request is refused
+with `409` and a `hint` holding the herdr command that shows why. If the
+input box cannot be read first, nothing is typed (`503`).
 
 Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for
@@ -218,3 +248,28 @@ just serve check                  # Bun build, API/process smokes
 
 Skips with a `SKIP:` line (exit 0) when `maw`/`herdr` isn't on `PATH` — safe
 in CI.
+
+## Serving a dashboard
+
+```bash
+# read-only demo: no token, stops itself, logs every request
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60
+
+# a dashboard on another origin must be named, or it gets 403 origin_not_allowed
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60 \
+  --allow-origin https://village.buildwithoracle.com \
+  --allow-origin https://bridge.buildwithoracle.com
+
+# writes — send, wake, cleanup — need the token file
+maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457
+```
+
+Loopback pages and `god.buildwithoracle.com` are allowed built-in. Everything
+else is opt-in per origin: an allowed origin can read every pane this server can
+see, so there are no wildcards.
+
+`--access-log` prints an nginx-style line per request to stderr as it happens,
+and is on by default under `--insecure-no-token`. Tokens and tickets never reach
+it. A page that sits on "offline" with nothing in the log was blocked by the
+browser before the request left — usually Private Network Access on an HTTPS
+page reaching loopback.

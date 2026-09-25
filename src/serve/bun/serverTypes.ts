@@ -4,6 +4,8 @@ export interface ServeConfig {
   port: number;
   token: string;
   insecure?: boolean;
+  accessLog?: boolean;
+  allowOrigins?: string[];
   demoMinutes?: number;
   dataDir: string;
   binary: string;
