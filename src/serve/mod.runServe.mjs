@@ -3,6 +3,7 @@ export async function runServe(args) {
     console.log(`maw herdr serve --token-file PATH [--listen 127.0.0.1:3457]
                 [--herdr PATH] [--data-dir PATH] [--wake-engine KIND]
                 [--insecure-no-token [--demo-minutes N]] [--mcp]
+                [--allow-origin ORIGIN]... [--access-log | --no-access-log]
 
 Core dashboard API: sessions, live pane output and prompt submission.
 Dashboard wake supports existing panes and registered repositories/tasks (default codex).
@@ -10,6 +11,12 @@ The token file is required, including on loopback.
 --insecure-no-token opens READS only (sessions, panes, captures) with no token,
 for a quick demo; writes still require --token-file and the server stops itself
 after --demo-minutes (default 30). Loopback is not a boundary against a browser. Help needs no Herdr.
+--allow-origin names another site that may read this fleet from a browser;
+loopback pages and god.buildwithoracle.com are allowed already. Repeatable,
+exact scheme://host[:port], no wildcards. An allowed origin can read every pane.
+--access-log prints an nginx-style line per request to stderr, flushed as it
+happens. It is on by default with --insecure-no-token, since that is the server
+whose traffic you want to watch. Tokens and tickets are never logged.
 --mcp mounts an MCP endpoint (Streamable HTTP, JSON-RPC) at /mcp on the same
 listener. Read tools (herdr_sessions, herdr_agents, herdr_capture, herdr_worktrees)
 follow the mode; write tools (herdr_send, herdr_wake) always require the operator

@@ -8,6 +8,8 @@ export interface ServeConfig {
   /** Mount MCP at /mcp on this listener (serve --mcp). */
   mcp?: boolean;
   insecure?: boolean;
+  accessLog?: boolean;
+  allowOrigins?: string[];
   demoMinutes?: number;
   dataDir: string;
   binary: string;

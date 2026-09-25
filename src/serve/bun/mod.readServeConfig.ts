@@ -3,19 +3,22 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { readMawConfig, projectMawConfig } from './mod.readMawConfig.ts';
 import { loopbackHost } from './mod.loopbackHost.ts';
+import { parseAllowedOrigin } from './mod.requestOrigin.ts';
 import type { ServeConfig } from './serverTypes.ts';
 
 export function readServeConfig(args: string[]): ServeConfig {
   const flags = new Map<string, string>();
+  const allowOrigins: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const [key, ...inline] = args[i].split('=');
-    const BARE = ['--engine', '--insecure-no-token', '--mcp'];
-    if (![...BARE, '--listen', '--token-file', '--herdr', '--data-dir', '--wake-engine', '--demo-minutes'].includes(key) || flags.has(key)) {
+    const BARE = ['--engine', '--insecure-no-token', '--access-log', '--no-access-log', '--mcp'];
+    if (![...BARE, '--listen', '--token-file', '--herdr', '--data-dir', '--wake-engine', '--demo-minutes', '--allow-origin'].includes(key) || (flags.has(key) && key !== '--allow-origin')) {
       throw new Error(`serve: unknown or duplicate option ${key}`);
     }
     const value = BARE.includes(key) ? 'true' : inline.length ? inline.join('=') : args[++i];
     if (!value || (BARE.includes(key) && inline.length)) throw new Error(`serve: invalid ${key}`);
-    flags.set(key, value);
+    if (key === '--allow-origin') allowOrigins.push(parseAllowedOrigin(value));
+    else flags.set(key, value);
   }
   const wakeEngine = flags.get('--wake-engine') || 'codex';
   if (!['pi', 'claude', 'codex', 'gemini', 'cursor', 'devin', 'agy', 'cline', 'omp', 'mastracode', 'opencode', 'copilot', 'kimi', 'kiro', 'droid', 'amp', 'grok', 'hermes', 'kilo', 'qodercli', 'qwen', 'maki', 'muse'].includes(wakeEngine)) throw new Error('--wake-engine must be a supported Herdr agent kind');
@@ -68,7 +71,11 @@ export function readServeConfig(args: string[]): ServeConfig {
   // A tokenless listener that outlives the demo is the actual hazard, so it
   // always expires; the flag only moves the deadline.
   const demoMinutes = insecure ? Number(rawMinutes ?? 30) : 0;
+  if (flags.has('--access-log') && flags.has('--no-access-log')) throw new Error('--access-log and --no-access-log cannot both be given');
+  // A tokenless server is exactly the one whose traffic you want to see, so it
+  // logs by default; everything else opts in.
+  const accessLog = flags.has('--no-access-log') ? false : flags.has('--access-log') ? true : insecure;
   const tokenFile = flags.has('--token-file') ? resolve(flags.get('--token-file')!) : undefined;
-  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, tokenFile, mcp: flags.has('--mcp'), engine, insecure, demoMinutes, wakeEngine, explicitWakeEngine: flags.get('--wake-engine'), ...projectMawConfig(readMawConfig()),
+  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, tokenFile, mcp: flags.has('--mcp'), engine, insecure, demoMinutes, accessLog, allowOrigins, wakeEngine, explicitWakeEngine: flags.get('--wake-engine'), ...projectMawConfig(readMawConfig()),
     binary: flags.get('--herdr') || 'herdr', dataDir: flags.get('--data-dir') || join(configHome, 'maw-herdr', 'serve') };
 }
