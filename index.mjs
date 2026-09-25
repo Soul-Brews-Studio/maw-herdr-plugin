@@ -6,11 +6,15 @@ import { basename, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { checkoutLine } from './src/cli/mod.checkoutLine.mjs';
+import { wantsHelp } from './src/cli/mod.wantsHelp.mjs';
+import { repoGroups } from './src/cli/mod.repoGroups.mjs';
 
 const execFileP = promisify(execFile);
 
 const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
+  ls --path                            ...with each workspace's checkout path beneath it
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
   a <session> [--print]                attach to a herdr session (alias: attach)
@@ -43,7 +47,9 @@ hey and peek also take an agent name or a workspace/tab label, as they always ha
 An ambiguous target lists its candidates and does nothing. --dry (alias --dry-run)
 prints what a target resolves to and exits. Most herdr agents are unnamed until
 someone runs 'herdr agent rename', so the workspace label is the handle that always
-exists. Scope to one session with --session <name> when two sessions share a label.`;
+exists. Scope to one session with --session <name> when two sessions share a label.
+
+--help / -h after any verb prints this text; 'serve --help' has its own.`;
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', blue: '\x1b[94m', green: '\x1b[32m', red: '\x1b[31m', warnTag: '\x1b[33m', off: '\x1b[0m' }
@@ -186,6 +192,7 @@ async function workspaceTree() {
         status: w.agent_status ?? 'unknown',
         focused: !!w.focused,
         repo: wt.repo_name ?? null,
+        repoKey: wt.repo_key ?? wt.repo_root ?? null,
         checkout: wt.checkout_path ?? cwdOf.get(w.workspace_id) ?? null,
         linked: !!wt.is_linked_worktree,
       };
@@ -394,7 +401,11 @@ async function cmdLsSessions(json) {
 
 async function cmdLs(args) {
   const json = args.includes('--json');
-  const rest = args.filter(a => a !== '--json');
+  const path = args.includes('--path');
+  const rest = args.filter(a => a !== '--json' && a !== '--path');
+  // only the workspace tree has a checkout; --agents --json already carries cwd.
+  // Anything else left over is an unknown argument, reported as one below.
+  if (path && ['--agents', '--sessions', '--federation', '--fed'].includes(rest[0])) throw new UsageError(`--path applies to the workspace listing, not ${rest[0]}\n  maw herdr ls --path`);
   if (rest[0] === '--agents') {
     rest.shift();
     if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
@@ -428,12 +439,7 @@ async function cmdLs(args) {
 
   // repo groups, mother first, its linked worktrees beneath — the sidebar's shape.
   // A workspace with no worktree metadata (a plain shell space) is its own group.
-  const groups = new Map();
-  for (const w of spaces) {
-    const key = w.repo ?? `\u0000${w.id}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(w);
-  }
+  const groups = repoGroups(spaces);
 
   const dot = w => (w.status === 'working' ? `${C.green}●${C.off}` : w.status === 'blocked' ? `${C.red}●${C.off}` : `${C.dim}○${C.off}`);
   const meta = w => {
@@ -449,20 +455,20 @@ async function cmdLs(args) {
   };
 
   console.log(`  ${C.blue}Local${C.off}`);
-  for (const items of groups.values()) {
-    const mothers = items.filter(w => !w.linked);
-    const links = items.filter(w => w.linked);
-    const head = mothers[0] ?? links[0];
-    const children = head === mothers[0] ? links : links.slice(1);
-    console.log(`    ${dot(head)} ${C.cyan}${head.label}${C.off}  ${meta(head)}`);
+  for (const { heads, children } of groups) {
+    for (const head of heads) {
+      console.log(`    ${dot(head)} ${C.cyan}${head.label}${C.off}  ${meta(head)}`);
+      if (path) console.log(checkoutLine(head.checkout, 'head', C));
+    }
     children.forEach((w, i) => {
-      const tee = i === children.length - 1 ? '└─' : '├─';
-      console.log(`      ${C.dim}${tee}${C.off} ${dot(w)} ${w.label}  ${meta(w)}`);
+      const last = i === children.length - 1;
+      console.log(`      ${C.dim}${last ? '└─' : '├─'}${C.off} ${dot(w)} ${w.label}  ${meta(w)}`);
+      if (path) console.log(checkoutLine(w.checkout, last ? 'last' : 'child', C));
     });
   }
 
   const linked = spaces.filter(w => w.linked).length;
-  console.log(`  ${C.dim}${plural(spaces.length, 'workspace')} · ${groups.size} repos · ${linked} worktrees · agents: maw herdr ls --agents${C.off}`);
+  console.log(`  ${C.dim}${plural(spaces.length, 'workspace')} · ${groups.length} repos · ${linked} worktrees · agents: maw herdr ls --agents${C.off}`);
 
   // Remote machines are separate herdr servers reached over SSH; this listing is
   // local only, so say so rather than imply the fleet is one machine.
@@ -974,7 +980,8 @@ function cmdWake(args) {
     else throw new UsageError(`unexpected argument: ${arg}`);
   }
   if (!target) throw new UsageError('wake needs an oracle: maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]');
-  if (!opts.engine) throw new UsageError('--engine needs a value (herdr agent kind, e.g. claude, codex, gemini)');
+  // an engine is a herdr agent kind; one that looks like a flag is a missing value
+  if (!opts.engine || opts.engine.startsWith('-')) throw new UsageError('--engine needs a value (herdr agent kind, e.g. claude, codex, gemini)');
 
   const oracle = resolveOracle(target);
 
@@ -1053,6 +1060,7 @@ const args = process.argv.slice(2);
 const command = args.shift() || 'help';
 try {
   if (['help', '--help', '-h'].includes(command)) console.log(HELP);
+  else if (wantsHelp(command, args)) console.log(HELP);
   else if (command === 'serve') process.exitCode = await runServe(args);
   else if (command === 'ls' || command === 'list') await cmdLs(args);
   else if (command === 'a' || command === 'attach') cmdAttach(args);
@@ -1061,8 +1069,10 @@ try {
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
-  else throw new UsageError(`unknown command: ${command}`);
+  else throw new UsageError(`unknown command: ${command}\n  maw herdr help`);
 } catch (err) {
-  console.error(`maw herdr: ${err.message}`);
+  // A usage error with no fix line of its own gets the one that now always works.
+  const fix = err instanceof UsageError && !err.message.includes('\n') ? `\n  maw herdr ${command} --help` : '';
+  console.error(`maw herdr: ${err.message}${fix}`);
   process.exitCode = err instanceof UsageError ? 2 : 1;
 }

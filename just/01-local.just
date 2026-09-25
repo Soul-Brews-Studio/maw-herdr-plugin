@@ -16,6 +16,7 @@ default:
 check:
     @node --check index.mjs && echo "ok: index.mjs parses"
     @node --check src/serve/mod.runServe.mjs && echo "ok: serve launcher parses"
+    @for f in src/cli/*.mjs; do node --check "$f" || exit 1; done && echo "ok: cli modules parse"
     @bash -n smoke.sh && echo "ok: smoke.sh parses"
     @python3 -c "import json;d=json.load(open('plugin.json'));print('ok: plugin.json valid, version',d['version'])"
 
@@ -55,7 +56,7 @@ _stage:
     from pathlib import Path
     import shutil, sys
     stage = Path(sys.argv[1])
-    for root, suffixes in [(Path('src/serve'), {'.mjs', '.ts'})]:
+    for root, suffixes in [(Path('src/serve'), {'.mjs', '.ts'}), (Path('src/cli'), {'.mjs'})]:
         if root.is_symlink():
             raise SystemExit(f"refusing source symlink: {root}")
         if not root.exists():

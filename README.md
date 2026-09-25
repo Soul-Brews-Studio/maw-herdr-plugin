@@ -34,6 +34,7 @@ forever. Measured: 3.5 GB written before kill, plugin left with no
 
 ```bash
 maw herdr ls                    # workspaces, grouped machine → repo → worktree
+maw herdr ls --path             # ...each workspace's checkout path beneath it
 maw herdr ls --sessions         # herdr server instances
 maw herdr ls --agents           # every agent pane, every session
 maw herdr ls --json             # any of the above, as JSON
@@ -44,6 +45,10 @@ maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
+
+`--help` or `-h` after any verb prints the usage instead of failing as an
+unknown argument. For `hey` it counts only when no message follows the target,
+so `maw herdr hey neo why does -h fail` still sends.
 
 ### Session vs. workspace
 
@@ -182,3 +187,28 @@ just serve check                  # Bun build, API/process smokes
 
 Skips with a `SKIP:` line (exit 0) when `maw`/`herdr` isn't on `PATH` — safe
 in CI.
+
+## Serving a dashboard
+
+```bash
+# read-only demo: no token, stops itself, logs every request
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60
+
+# a dashboard on another origin must be named, or it gets 403 origin_not_allowed
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60 \
+  --allow-origin https://village.buildwithoracle.com \
+  --allow-origin https://bridge.buildwithoracle.com
+
+# writes — send, wake, cleanup — need the token file
+maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457
+```
+
+Loopback pages and `god.buildwithoracle.com` are allowed built-in. Everything
+else is opt-in per origin: an allowed origin can read every pane this server can
+see, so there are no wildcards.
+
+`--access-log` prints an nginx-style line per request to stderr as it happens,
+and is on by default under `--insecure-no-token`. Tokens and tickets never reach
+it. A page that sits on "offline" with nothing in the log was blocked by the
+browser before the request left — usually Private Network Access on an HTTPS
+page reaching loopback.
