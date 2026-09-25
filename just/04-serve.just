@@ -44,6 +44,8 @@ bun-check:
     bun utils/smoke-terminal-limits.ts
     node utils/smoke-ls-path-help.mjs
     MAW_LS_ENTRY="$output/index.js" node utils/smoke-ls-path-help.mjs
+    node utils/smoke-ls-states.mjs
+    MAW_STATES_ENTRY="$output/index.js" node utils/smoke-ls-states.mjs
 
 # The server is TypeScript on Bun; check is the Bun suite.
 check: bun-check

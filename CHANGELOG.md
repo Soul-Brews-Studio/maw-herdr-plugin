@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- `maw herdr ls [running|open|resumable|cold]`: every git worktree in one of
+  four states, including the ones with no open herdr space, which `ls` could
+  not show before (#60). Plain `ls` gains a line counting all four; `--json`
+  keeps its shape, adds `state`/`agents` to each workspace, and adds
+  `worktrees`, `states` and `providers`. "Resumable" comes from resume
+  providers — Claude and Codex built in, roots configurable, all switchable
+  off with `MAW_HERDR_RESUME_PROVIDERS=none` — rather than from a vendor path
+  in the plugin.
+- `ls --json` larger than 64 KB is no longer cut at 65,536 bytes when piped
+  under Bun.
+
 - `maw herdr ls --path` prints each workspace's checkout beneath its row, as a
   full absolute path that pastes straight into `cd` (#56). The data was already
   in `--json` as `checkout`; only the human-facing view lacked it.

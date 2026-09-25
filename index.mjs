@@ -8,12 +8,17 @@ import { runServe } from './src/serve/mod.runServe.mjs';
 import { checkoutLine } from './src/cli/mod.checkoutLine.mjs';
 import { wantsHelp } from './src/cli/mod.wantsHelp.mjs';
 import { repoGroups } from './src/cli/mod.repoGroups.mjs';
+import { configuredProviders } from './src/cli/mod.resumeProviders.mjs';
+import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.mjs';
+import { printStateListing, stateSummaryLine, writeJson } from './src/cli/mod.lsStateView.mjs';
 
 const execFileP = promisify(execFile);
 
 const HELP = `maw herdr <ls|a|attach|wake|hey|peek|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
+  ls <running|open|resumable|cold>     every worktree in that state, open space or not
+                                       (also --state <s>; combines with --path, --json)
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
   a <session> [--print]                attach to a herdr session (alias: attach)
@@ -38,6 +43,11 @@ session's role — the place work lives — is a WORKSPACE, and one session hold
 Most herdr agents are unnamed until someone runs 'herdr agent rename', so the
 workspace label is the handle that always exists. Name one to address it directly.
 Scope to one session with --session <name> when two sessions share a label.
+
+A worktree is running (agent in a pane), open (space, no agent), resumable (no
+space, but a resume provider found a transcript) or cold. Providers: claude, codex;
+MAW_HERDR_RESUME_PROVIDERS=none turns them off, MAW_HERDR_CLAUDE_ROOTS and
+MAW_HERDR_CODEX_ROOTS move them. Worktrees are found under $GHQ_ROOT / ghq root.
 
 --help / -h after any verb prints this text; 'serve --help' has its own.`;
 
@@ -167,8 +177,10 @@ async function workspaceTree() {
     // there; a plain shell space has none, and its branch has to come from the
     // pane's own cwd — which is how the sidebar still shows one for them.
     const cwdOf = new Map();
+    const agentsIn = new Map();   // agent panes per space: running vs open
     for (const pane of snapshot.panes ?? []) {
       if (pane.workspace_id && pane.cwd && !cwdOf.has(pane.workspace_id)) cwdOf.set(pane.workspace_id, pane.cwd);
+      if (pane.agent) agentsIn.set(pane.workspace_id, (agentsIn.get(pane.workspace_id) ?? 0) + 1);
     }
     return (snapshot.workspaces ?? []).map(w => {
       const wt = w.worktree ?? {};
@@ -185,6 +197,7 @@ async function workspaceTree() {
         repoKey: wt.repo_key ?? wt.repo_root ?? null,
         checkout: wt.checkout_path ?? cwdOf.get(w.workspace_id) ?? null,
         linked: !!wt.is_linked_worktree,
+        agents: agentsIn.get(w.workspace_id) ?? 0,
       };
     });
   }));
@@ -434,6 +447,13 @@ async function cmdLs(args) {
   const json = args.includes('--json');
   const path = args.includes('--path');
   const rest = args.filter(a => a !== '--json' && a !== '--path');
+  let state = null;
+  const stateAt = rest.indexOf('--state');
+  if (stateAt !== -1) {
+    state = rest.splice(stateAt, 2)[1];
+    if (!STATES.includes(state)) throw new UsageError(`--state needs one of ${STATES.join(', ')}\n  maw herdr ls resumable`);
+    if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+  }
   // only the workspace tree has a checkout; --agents --json already carries cwd.
   // Anything else left over is an unknown argument, reported as one below.
   if (path && ['--agents', '--sessions', '--federation', '--fed'].includes(rest[0])) throw new UsageError(`--path applies to the workspace listing, not ${rest[0]}\n  maw herdr ls --path`);
@@ -453,16 +473,25 @@ async function cmdLs(args) {
     if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
     return cmdLsFederation(json, agentsOnly);
   }
+  if (!state && STATES.includes(rest[0])) state = rest.shift();
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
 
-  const spaces = await workspaceTree();
+  const providers = configuredProviders();   // a bad provider name fails before herdr is asked
+  const found = await worktreeStates({ spaces: await workspaceTree(), roots: ghqRoots(process.env, readOracleRegistry().ghqRoot), providers });
+  const pick = list => (state ? list.filter(r => r.state === state) : list);
+  const spaces = found.spaces;
   if (json) {
-    console.log(JSON.stringify({ command: 'ls', mode: 'workspaces', scope: 'herdr', json: true, workspaces: spaces }));
-    return;
+    return writeJson({
+      command: 'ls', mode: 'workspaces', scope: 'herdr', json: true, ...(state ? { state } : {}),
+      workspaces: pick(spaces), worktrees: pick(found.rows), states: found.counts,
+      providers: providers.map(p => ({ name: p.name, roots: p.roots })),
+    });
   }
+  if (state) return printStateListing(found, state, providers, { C, path });
   if (!spaces.length) {
     console.log(`${C.dim}no workspaces in any running herdr session${C.off}`);
     console.log(`  ${C.dim}servers, running or not: maw herdr ls --sessions${C.off}`);
+    console.log(stateSummaryLine(found, providers, C));
     return;
   }
 
@@ -500,6 +529,7 @@ async function cmdLs(args) {
 
   const linked = spaces.filter(w => w.linked).length;
   console.log(`  ${C.dim}${plural(spaces.length, 'workspace')} · ${groups.length} repos · ${linked} worktrees · agents: maw herdr ls --agents${C.off}`);
+  console.log(stateSummaryLine(found, providers, C));
 
   // Remote machines are separate herdr servers reached over SSH; this listing is
   // local only, so say so rather than imply the fleet is one machine.
