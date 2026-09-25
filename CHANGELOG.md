@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- `maw herdr ls --path` prints each workspace's checkout beneath its row, as a
+  full absolute path that pastes straight into `cd` (#56). The data was already
+  in `--json` as `checkout`; only the human-facing view lacked it.
+- `--help` / `-h` after any verb prints the usage instead of `unknown argument`,
+  and runs nothing. A usage error with no fix line of its own now ends with
+  `maw herdr <verb> --help`. A verb that does not exist is still
+  `unknown command` (exit 2) with `--help` after it, so probing for a verb
+  cannot get a false yes. `wake <oracle> --kind -h` is now a help request: it
+  used to take `-h` as the engine, create a workspace, and fail on
+  `agent start`, leaving the workspace behind.
+- `maw herdr ls` groups workspaces by herdr's `repo_key` (the shared git dir)
+  instead of the repo name. Two same-named checkouts from different orgs are
+  now two groups, and a group prints every mother workspace, where before the
+  second one was dropped from the tree without notice.
+
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
   packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no
