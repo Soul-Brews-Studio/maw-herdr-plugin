@@ -16,10 +16,12 @@ import { repoGroups } from './src/cli/mod.repoGroups.mjs';
 import { configuredProviders } from './src/cli/mod.resumeProviders.mjs';
 import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.mjs';
 import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } from './src/cli/mod.lsStateView.mjs';
+import { cmdAudit } from './src/cli/mod.audit.mjs';
+import { cmdClean, cmdSync } from './src/cli/mod.cleanup.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|watch|inbox|reply|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|watch|inbox|reply|audit|clean|sync|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -48,6 +50,18 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|c
   inbox [--since <id>] [--all] [--json]
                                        notes addressed to this pane; reading never consumes
   reply <target> <text> [--dry]        file an answer in that pane's inbox, signed by this pane
+  audit [<target>...] [--idle 24h] [--min-age 3] [--json]
+                                       report only, never changes anything: worktrees whose
+                                       folder is gone, spaces on nothing, idle agents,
+                                       checkouts only behind, merged worktrees (or why kept)
+  clean [<target>...] [--go|--pick] [--min-age 3] [--idle-shells] [--json]
+                                       plan removing gone + merged worktrees, through herdr;
+                                       a named target is removed if its commits are pushed;
+                                       a pane in it (agent, or shell without --idle-shells) keeps it
+  sync [<target>...] [--idle-agents] [--idle 24h] [--idle-shells] [--go|--pick] [--json]
+                                       plan making herdr and git agree: prune gone worktrees,
+                                       close spaces on nothing, fast-forward behind checkouts;
+                                       --idle-agents also closes idle agents' spaces
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
@@ -76,6 +90,12 @@ A worktree is running (agent in a pane), open (space, no agent), resumable (no
 space, but a resume provider found a transcript) or cold. Providers: claude, codex;
 MAW_HERDR_RESUME_PROVIDERS=none turns them off, MAW_HERDR_CLAUDE_ROOTS and
 MAW_HERDR_CODEX_ROOTS move them. Worktrees are found under $GHQ_ROOT / ghq root.
+
+clean and sync only print a plan until given --go (run it all) or --pick (ask
+before each action, re-checking it first). A worktree holding gitignored data is
+kept — gitignored is not worthless, and no commit brings it back; node_modules and
+other rebuildable directories do not count. "Idle" is herdr's idle/done status
+plus a transcript older than --idle, so a closed agent can always be resumed.
 
 --help / -h after any verb prints this text; 'serve --help' has its own.`;
 
@@ -1113,6 +1133,9 @@ try {
   else if (command === 'inbox') await cmdInbox(args, { UsageError });
   else if (command === 'reply') await cmdReply(args, { UsageError });
   else if (command === '__watch-run') process.exit(await runWatcher(args[0]));   // spawned by watch, detached; exits when the watch ends
+  else if (command === 'audit') process.exitCode = await cmdAudit(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
+  else if (command === 'clean') process.exitCode = await cmdClean(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
+  else if (command === 'sync') process.exitCode = await cmdSync(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
   else throw new UsageError(`unknown command: ${command}\n  maw herdr help`);
 } catch (err) {
   // A usage error with no fix line of its own gets the one that now always works.

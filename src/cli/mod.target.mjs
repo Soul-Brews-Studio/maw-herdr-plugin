@@ -350,9 +350,13 @@ async function ghqWorktreeRepos() {
  * `ghq: false` — every ghq repo with a `wt/` directory. A worktree with no open
  * space appears once, as state 'closed'. `roots` replaces all repo discovery.
  *
+ * A session whose snapshot fails is left out quietly, which is right for resolving
+ * a name; a caller that must not act on a partial picture passes `skipped: []`
+ * and gets one { session, reason } per session left out, from this same pass.
+ *
  * Read-only: session list, api snapshot, git worktree list. Nothing else.
  */
-export async function loadTargets({ session = null, cwd = process.cwd(), paths = [], roots = null, ghq = true } = {}) {
+export async function loadTargets({ session = null, cwd = process.cwd(), paths = [], roots = null, ghq = true, skipped = null } = {}) {
   let index;
   try {
     index = (await herdrJson(['session', 'list', '--json'])).sessions ?? [];
@@ -376,9 +380,15 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
   const targets = [];
   await Promise.all(scope.map(async s => {
     let snap;
-    try { snap = unwrapSnapshot(await herdrJson(['api', 'snapshot'], s)); } catch { return; }
+    try {
+      snap = unwrapSnapshot(await herdrJson(['api', 'snapshot'], s));
+    } catch (err) {
+      skipped?.push({ session: s, reason: err?.killed ? 'snapshot timed out' : String(err?.stderr || err?.message || err).trim().split('\n')[0] || 'snapshot failed' });
+      return;
+    }
     const [spaces, allPanes, agents] = [snap?.workspaces ?? [], snap?.panes ?? [], snap?.agents ?? []];
     if (![spaces, allPanes, agents].every(Array.isArray)) {
+      skipped?.push({ session: s, reason: 'snapshot has no workspaces/panes/agents arrays' });
       process.stderr.write(`maw herdr: skipped herdr session ${s} — its api snapshot has no workspaces/panes/agents arrays\n  see what it returned: herdr --session ${shq(s)} api snapshot\n`);
       return;
     }
@@ -388,6 +398,10 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
       const panes = allPanes.filter(p => p.workspace_id === w.workspace_id).map(p => ({
         pane: p.pane_id, agent: p.agent ?? null, name: names.get(p.pane_id) ?? null,
         status: p.agent_status ?? 'unknown', focused: !!p.focused, tab: p.tab_id ?? null, cwd: p.cwd ?? null,
+        // where the pane's foreground process sits (a `cd` after launch moves it),
+        // and the agent's own session as herdr knows it: { agent, id } or null
+        foregroundCwd: p.foreground_cwd ?? null,
+        agentSession: p.agent_session?.value ? { agent: p.agent_session.agent ?? p.agent ?? null, id: String(p.agent_session.value) } : null,
       }));
       const wt = w.worktree;
       const where = wt?.checkout_path ?? panes.find(p => p.cwd)?.cwd ?? null;

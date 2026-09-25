@@ -14,8 +14,10 @@
 //     name:  'claude',                     // what MAW_HERDR_RESUME_PROVIDERS lists
 //     roots: ['/home/me/.claude/projects'],// where it looks; reported in ls --json
 //     find(paths) -> Map<path, Session>    // paths: absolute worktree paths.
-//   }                                      // A path absent from the map has no
+//                                          // A path absent from the map has no
 //                                          // session this provider can resume.
+//     sessions(paths) -> Map<path, Session[]>  // optional: every session per
+//   }                                      // path, newest first (see findAllSessions)
 //   Session = {
 //     provider: 'claude',
 //     id:       '9c77f5f5-…',              // what the agent's own resume takes;
@@ -101,31 +103,30 @@ function entries(dir) {
 export const encodeClaudeDir = path => path.replace(/[^a-zA-Z0-9]/g, '-');
 
 export function claudeProvider(roots) {
-  return {
-    name: 'claude',
-    roots,
-    find(paths) {
-      const out = new Map();
-      for (const path of paths) {
-        let best = null;
-        for (const root of roots) {
-          const dir = join(root, encodeClaudeDir(path));
-          for (const e of entries(dir)) {
-            if (!e.isFile() || !e.name.endsWith('.jsonl') || !SAFE_ID.test(basename(e.name, '.jsonl'))) continue;
-            const file = join(dir, e.name);
-            const s = stat(file);
-            if (!s || s.size < MIN_BYTES) continue;
-            if (!best || s.mtimeMs > best.at) best = { file, at: s.mtimeMs, bytes: s.size };
-          }
+  const sessions = paths => {
+    const out = new Map();
+    for (const path of paths) {
+      const all = [];
+      for (const root of roots) {
+        const dir = join(root, encodeClaudeDir(path));
+        for (const e of entries(dir)) {
+          const id = basename(e.name, '.jsonl');
+          if (!e.isFile() || !e.name.endsWith('.jsonl') || !SAFE_ID.test(id)) continue;
+          const file = join(dir, e.name);
+          const s = stat(file);
+          if (!s || s.size < MIN_BYTES) continue;
+          all.push({ provider: 'claude', id, file, at: s.mtimeMs, bytes: s.size, command: `cd ${shellQuote(path)} && claude --resume ${id}` });
         }
-        if (!best) continue;
-        const id = basename(best.file, '.jsonl');
-        out.set(path, { provider: 'claude', id, ...best, command: `cd ${shellQuote(path)} && claude --resume ${id}` });
       }
-      return out;
-    },
+      if (all.length) out.set(path, all.sort((a, b) => b.at - a.at));
+    }
+    return out;
   };
+  return { name: 'claude', roots, sessions, find: paths => newestOf(sessions(paths)) };
 }
+
+/** Map<path, Session[]> (newest first) to Map<path, Session>: the newest only. */
+const newestOf = all => new Map([...all].map(([path, list]) => [path, list[0]]));
 
 // --- codex -------------------------------------------------------------------
 
@@ -171,49 +172,46 @@ export function codexMeta(head) {
  * Only the head of each file is read. Measured on m5: 1,896 rollouts, 12 GB.
  */
 export function codexProvider(roots) {
-  return {
-    name: 'codex',
-    roots,
-    find(paths) {
-      const wanted = new Set(paths);
-      const best = new Map();
-      // A rollout may record a symlinked spelling of the directory (/var vs
-      // /private/var on macOS, a ghq alias). Resolve each distinct cwd once.
-      const resolved = new Map();
-      const match = cwd => {
-        if (wanted.has(cwd)) return cwd;
-        if (!resolved.has(cwd)) {
-          let r = null;
-          try { r = realpathSync(cwd); } catch {}
-          resolved.set(cwd, r && wanted.has(r) ? r : null);
+  const sessions = paths => {
+    const wanted = new Set(paths);
+    const all = new Map();
+    // A rollout may record a symlinked spelling of the directory (/var vs
+    // /private/var on macOS, a ghq alias). Resolve each distinct cwd once.
+    const resolved = new Map();
+    const match = cwd => {
+      if (wanted.has(cwd)) return cwd;
+      if (!resolved.has(cwd)) {
+        let r = null;
+        try { r = realpathSync(cwd); } catch {}
+        resolved.set(cwd, r && wanted.has(r) ? r : null);
+      }
+      return resolved.get(cwd);
+    };
+    const walk = (dir, depth) => {
+      for (const e of entries(dir)) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) {
+          if (depth < 4) walk(full, depth + 1);
+          continue;
         }
-        return resolved.get(cwd);
-      };
-      const walk = (dir, depth) => {
-        for (const e of entries(dir)) {
-          const full = join(dir, e.name);
-          if (e.isDirectory()) {
-            if (depth < 4) walk(full, depth + 1);
-            continue;
-          }
-          if (!e.isFile() || !e.name.startsWith('rollout-') || !e.name.endsWith('.jsonl')) continue;
-          const s = stat(full);
-          if (!s || s.size < MIN_BYTES) continue;
-          const meta = codexMeta(readHead(full));
-          const key = meta && match(meta.cwd);
-          if (!key) continue;
-          const seen = best.get(key);
-          if (seen && seen.at >= s.mtimeMs) continue;
-          // the uuid at the end of the name is the id `codex resume` takes
-          const id = meta.id ?? e.name.slice(0, -'.jsonl'.length).slice(-36);
-          if (!SAFE_ID.test(id)) continue;
-          best.set(key, { provider: 'codex', id, file: full, at: s.mtimeMs, bytes: s.size, command: `cd ${shellQuote(meta.cwd)} && codex resume ${id}` });
-        }
-      };
-      for (const root of roots) walk(root, 0);
-      return best;
-    },
+        if (!e.isFile() || !e.name.startsWith('rollout-') || !e.name.endsWith('.jsonl')) continue;
+        const s = stat(full);
+        if (!s || s.size < MIN_BYTES) continue;
+        const meta = codexMeta(readHead(full));
+        const key = meta && match(meta.cwd);
+        if (!key) continue;
+        // the uuid at the end of the name is the id `codex resume` takes
+        const id = meta.id ?? e.name.slice(0, -'.jsonl'.length).slice(-36);
+        if (!SAFE_ID.test(id)) continue;
+        if (!all.has(key)) all.set(key, []);
+        all.get(key).push({ provider: 'codex', id, file: full, at: s.mtimeMs, bytes: s.size, command: `cd ${shellQuote(meta.cwd)} && codex resume ${id}` });
+      }
+    };
+    for (const root of roots) walk(root, 0);
+    for (const list of all.values()) list.sort((a, b) => b.at - a.at);
+    return all;
   };
+  return { name: 'codex', roots, sessions, find: paths => newestOf(sessions(paths)) };
 }
 
 // --- configuration -----------------------------------------------------------
@@ -238,6 +236,26 @@ export function configuredProviders(env = process.env) {
     throw new Error(`unknown resume provider '${unknown[0]}' in MAW_HERDR_RESUME_PROVIDERS; built in: ${Object.keys(BUILT_IN).join(', ')}\n  MAW_HERDR_RESUME_PROVIDERS=${keep.length ? [...new Set(keep)].join(',') : 'claude,codex'} maw herdr ls`);
   }
   return [...new Set(names)].map(n => BUILT_IN[n](env));
+}
+
+/**
+ * Every session per path across every provider, newest first — for a caller
+ * that must find ONE agent's own session, not just the newest in its folder.
+ * A provider without the optional `sessions(paths)` contributes its `find()`.
+ */
+export function findAllSessions(providers, aliases) {
+  const out = new Map();
+  const paths = [...aliases.keys()];
+  for (const p of providers) {
+    const found = p.sessions ? p.sessions(paths) : new Map([...p.find(paths)].map(([k, v]) => [k, [v]]));
+    for (const [path, list] of found) {
+      const key = aliases.get(path) ?? path;
+      const seen = out.get(key) ?? [];
+      for (const t of list) if (!seen.some(x => x.provider === t.provider && x.id === t.id)) seen.push(t);
+      out.set(key, seen.sort((a, b) => b.at - a.at));
+    }
+  }
+  return out;
 }
 
 /**
