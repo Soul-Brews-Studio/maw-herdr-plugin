@@ -5,7 +5,7 @@
 // herdr daemon is contacted; every herdr call is logged and checked.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtempSync,realpathSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,realpathSync,mkdirSync,writeFileSync,readFileSync,rmSync,symlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 
@@ -29,6 +29,7 @@ const s=JSON.parse(fs.readFileSync(file,'utf8'));const save=()=>fs.writeFileSync
 if(a[0]==='session'){console.log(JSON.stringify({result:{sessions:[{name:'main',running:true}]}}));process.exit(0)}
 if(a[0]==='--session')a=a.slice(2);
 if(a[0]==='api'&&a[1]==='snapshot'){console.log(JSON.stringify({result:{snapshot:{protocol:22,workspaces:[{workspace_id:'wD',label:'demo'}],panes:s.panes}}}));if(s.after){s.panes=s.after;delete s.after;save();}process.exit(0)}
+if(s.fail===a[1]&&a[0]==='pane'){console.error('fixture '+a[1]+' failure');process.exit(1)}
 if(a[0]==='pane'&&a[1]==='read'){process.stdout.write(s.screens.length?s.screens.shift():s.screen);save();process.exit(0)}
 if(a[0]==='agent'&&a[1]==='prompt'){if(s.afterPrompt){s.screens=s.afterPrompt;delete s.afterPrompt;save();}console.log('{"ok":true}');process.exit(0)}
 if(a[0]==='pane'&&a[1]==='send-keys'){if(s.afterEnter){s.screens=s.afterEnter;delete s.afterEnter;save();}process.exit(0)}
@@ -47,6 +48,7 @@ async function start(){
  url=await deadline(new Promise((done,fail)=>{child.stderr.on('data',d=>{output+=d;const m=output.match(/http:\/\/[^\s]+/);if(m)done(m[0]);});child.once('error',fail);child.once('exit',()=>fail(Error(output)));}),'startup');
 }
 async function stop(){if(!running)return;const{child,exited}=running;try{child.kill('SIGTERM');assert.equal((await deadline(exited,'shutdown',3000)).code,0);}finally{if(child.exitCode===null){child.kill('SIGKILL');await deadline(exited,'kill',3000);}running=undefined;}}
+const sessions=async()=>(await fetch(url+'/api/sessions',{headers:{Authorization:'Bearer '+token}})).json();
 const send=async(body,{auth=true,from,logical}={})=>{const r=await fetch(url+'/api/send',{method:'POST',headers:{'Content-Type':'application/json',...(auth?{Authorization:'Bearer '+token}:{}),...(from?{'X-Maw-From':from}:{}),...(logical?{'X-Maw-Timestamp':logical}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});return {status:r.status,json:await r.json()};};
 const feed=async()=>(await (await fetch(url+'/api/feed',{headers:{Authorization:'Bearer '+token}})).json()).events;
 const log=()=>readFileSync(calls,'utf8').trim().split('\n').map(JSON.parse);
@@ -58,6 +60,7 @@ const tag='[fixture-node:server-oracle] ';
 const inspect='herdr --session main pane read wD:p4 --source visible';
 try{
  await start();
+ let before;
 
  // Delivered: the box is empty before and after, and the text carries the local sender tag.
  let r=await send({target,text:'hello'});
@@ -79,7 +82,7 @@ try{
  assert.equal(r.json.state,'queued');assert.ok(r.json.receipt.includes('agent shows the prompt as queued'));
 
  // Enter retry: our own text stays in the box, one more Enter clears it.
- reset({afterPrompt:[box(tag+'swallowed enter'),box(tag+'swallowed enter')],afterEnter:[box()]});let before=enters().length;
+ reset({afterPrompt:[box(tag+'swallowed enter'),box(tag+'swallowed enter')],afterEnter:[box()]});before=enters().length;
  r=await send({target,text:'swallowed enter'});assert.equal(r.json.state,'delivered',JSON.stringify(r.json));assert.ok(r.json.receipt.includes('Enter retried once'));
  assert.equal(enters().length,before+1);assert.deepEqual(enters().at(-1),['--session','main','pane','send-keys','wD:p4','enter']);
  // Still stuck after the retry: accepted, explicitly unconfirmed; no second retry.
@@ -105,6 +108,18 @@ try{
  reset();r=await send({target,text:'x'},{auth:false});assert.equal(r.status,401);
  r=await send({target,text:'x',force:true});assert.equal(r.status,501);
  r=await send({target,text:'x'},{from:'x'.repeat(1025)});assert.equal(r.status,400);assert.equal(r.json.error,'invalid_delivery_metadata');
+ assert.equal(r.json.state,'failed');assert.match(r.json.detail,/1025 bytes/);assert.equal(r.json.hint,`curl -sS -X POST '${url}/api/send' -H "Authorization: Bearer $(cat ~/.maw-herdr-token)" -H 'Content-Type: application/json' --data '{"target":"${target}","text":"x"}'`);
+ // Whitespace-only text is empty text: refused before the tag makes it non-blank.
+ before=prompts().length;
+ for(const text of ['','   ','\n\t '])
+  {r=await send({target,text});assert.equal(r.status,400,JSON.stringify(r.json));assert.equal(r.json.error,'target_and_text_required');assert.match(r.json.hint,/^curl -sS -X POST /);}
+ assert.equal(prompts().length,before,'blank text must not prompt');
+ // Text the body limit accepted, overflowing only by the sender tag: a client
+ // error with byte counts, never "herdr unavailable".
+ const longFrom='o'.repeat(500)+':'+'n'.repeat(500);
+ r=await send({target,text:'a'.repeat(65000)},{from:longFrom});assert.equal(r.status,413,JSON.stringify(r.json).slice(0,300));assert.equal(r.json.error,'text_too_large');
+ assert.match(r.json.detail,/^tagged prompt is 66004 bytes; herdr takes at most 65536; send 468 fewer bytes of text$/);assert.ok(r.json.hint.startsWith('head -c 64532 message.txt | jq -Rs --arg target '),r.json.hint);
+ assert.equal(prompts().length,before,'oversize text must not prompt');
 
  // Idempotency keeps the observed state: a retry of a delivered prompt says delivered, not accepted.
  reset();before=prompts().length;
@@ -116,6 +131,26 @@ try{
  reset({screen:box('draft')});r=await send({target,text:'after draft'},{from:'neo:white',logical:'fixture-ts-2'});assert.equal(r.status,409);
  reset();r=await send({target,text:'after draft'},{from:'neo:white',logical:'fixture-ts-2'});assert.equal(r.status,200);assert.equal(r.json.deduped,undefined);assert.equal(r.json.state,'delivered');
 
+ // herdr took the prompt, then the Enter retry failed: the prompt is typed,
+ // so the receipt is accepted, the key is kept, and a retry types nothing.
+ reset({afterPrompt:[box(tag+'enter fails'),box(tag+'enter fails')],fail:'send-keys'});before=prompts().length;
+ r=await send({target,text:'enter fails'},{logical:'fixture-ts-3'});assert.equal(r.status,200,JSON.stringify(r.json));assert.equal(r.json.state,'accepted');
+ assert.equal(r.json.receipt.at(-1),'watch interrupted after submit; delivery not confirmed');
+ reset();r=await send({target,text:'enter fails'},{logical:'fixture-ts-3'});assert.equal(r.json.deduped,true,JSON.stringify(r.json));assert.equal(r.json.state,'accepted');assert.equal(prompts().length,before+1,'a retry must not type the prompt twice');
+ // The box cannot be read before submit: a draft cannot be ruled out, so nothing is typed.
+ await refused({fail:'read'},{target,text:'x'},503,'herdr_unavailable',inspect);
+ // A config layer that turns unreadable after startup (a symlink) must not
+ // block delivery: attribution falls back, the prompt still goes out.
+ const layer=join(configDir,'maw.config.50.json'),saved=readFileSync(layer);rmSync(layer);writeFileSync(join(home,'real.json'),saved);symlinkSync(join(home,'real.json'),layer);
+ reset();r=await send({target,text:'config broke'});assert.equal(r.status,200,JSON.stringify(r.json));assert.equal(r.json.state,'delivered');assert.equal(prompts().at(-1).at(-1),'[local:pane/unknown] config broke');
+ rmSync(layer);writeFileSync(layer,saved);
+ // herdr pane ids are base 36: the dashboard lists pane pC as window 12 and
+ // p12 as window 38, and a send to a listed target reaches that same pane.
+ reset({panes:[{...pane,pane_id:'wD:p12',label:'p12-claude'},{...pane,pane_id:'wD:pC',agent:'codex',label:'pC-codex'}]});
+ const listed=(await sessions()).flatMap(x=>x.windows.map(w=>[x.name+':'+w.index,w.name])).sort();
+ const space=target.replace(/:4$/,'');assert.deepEqual(listed,[[space+':12','pC-codex'],[space+':38','p12-claude']]);
+ for(const [t,name] of listed){r=await send({target:t,text:'to '+name});assert.equal(r.status,200,JSON.stringify(r.json));assert.equal(prompts().at(-1)[4],'wD:'+name.split('-')[0],t+' reached the wrong pane');}
+
  // Lifecycle records: every outcome, with the error code or the last line, and no token.
  const events=await feed();
  const byText=t=>events.filter(e=>e.text===t);
@@ -124,6 +159,8 @@ try{
  assert.deepEqual(byText('while busy').map(e=>e.state),['queued']);
  assert.deepEqual(byText('once only').map(e=>e.state).sort(),['deduped','deduped','delivered']);
  assert.deepEqual(byText('after draft').map(e=>[e.state,e.error]),[['failed','composer_not_empty'],['delivered',undefined]]);
+ // A deduped retry without X-Maw-From records the same local sender the first attempt did.
+ assert.deepEqual(byText('enter fails').map(e=>[e.state,e.from]),[['accepted','fixture-node:server-oracle'],['deduped','fixture-node:server-oracle']]);
  const failed=events.filter(e=>e.state==='failed'&&e.route==='local').map(e=>e.error);
  for(const code of ['composer_not_empty','target_blocked','target_changed','target_not_agent','target_not_found'])assert.ok(failed.includes(code),code+' '+JSON.stringify(failed));
  assert.ok(events.filter(e=>e.state==='failed').every(e=>e.kind==='message'));
@@ -132,5 +169,5 @@ try{
  // Only reads, prompts and the one kind of Enter retry ever reached herdr.
  for(const c of log()){const v=c[0]==='--session'?c.slice(2):c;assert.ok((v[0]==='session'&&v[1]==='list')||(v[0]==='api'&&v[1]==='snapshot')||(v[0]==='pane'&&v[1]==='read')||(v[0]==='agent'&&v[1]==='prompt')||(v[0]==='pane'&&v[1]==='send-keys'&&v[3]==='enter'),'unexpected herdr call '+JSON.stringify(c));}
  await stop();
- console.log('PASS send delivery ('+(process.env.MAW_SEND_ENTRY?'bundle':'source')+'): sender tag, attachment-only, placeholder vs draft, blocked/changed/shell/missing refusals with hints, delivered/queued/accepted receipts, one Enter retry, idempotent state, lifecycle records');
+ console.log('PASS send delivery ('+(process.env.MAW_SEND_ENTRY?'bundle':'source')+'): sender tag, attachment-only, placeholder vs draft, blocked/changed/shell/missing refusals with hints, delivered/queued/accepted receipts, one Enter retry, idempotent state, lifecycle records, blank/oversize text, failed Enter keeps the key, unreadable box refuses, broken config falls back, base-36 pane targets');
 }finally{await stop();rmSync(home,{recursive:true,force:true});}

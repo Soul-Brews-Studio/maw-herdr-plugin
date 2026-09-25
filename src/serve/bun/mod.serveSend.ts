@@ -20,6 +20,38 @@ function targetHint(target: string): string {
   return /^[A-Za-z0-9_.-]{1,128}$/.test(name) && Buffer.from(name).toString('base64url') === session ? `herdr --session ${name} agent list` : 'herdr session list';
 }
 
+/** herdr takes at most this many bytes of prompt text, sender tag included. */
+const PROMPT_LIMIT = 64 * 1024;
+
+const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * A runnable repeat of this POST with the URL the caller actually used and the caller's
+ * target. Short text is inlined; long text is read from the caller's file
+ * through jq, cut to `limit` bytes when it has to shrink.
+ */
+function sendHint(request: Request, target: string, text: string, limit?: number): string {
+  const url = new URL(request.url); url.search = ''; url.hash = '';
+  const curl = `curl -sS -X POST ${quote(url.href)} -H "Authorization: Bearer $(cat ~/.maw-herdr-token)" -H 'Content-Type: application/json'`;
+  if (limit === undefined && Buffer.byteLength(text) <= 200) return `${curl} --data ${quote(JSON.stringify({ target, text }))}`;
+  return `head -c ${limit ?? PROMPT_LIMIT} message.txt | jq -Rs --arg target ${quote(target)} '{target:$target,text:.}' | ${curl} --data-binary @-`;
+}
+
+/** A refused request in the delivery shape: nothing reached herdr. */
+function badRequest(status: number, code: string, target: string, detail: string, hint: string): HTTPError {
+  return new HTTPError(status, code, { ok: false, error: code, target, detail, state: 'failed', hint });
+}
+
+/**
+ * The local sender for the tag. Attribution is display metadata, so a config
+ * layer that cannot be read (symlinked, oversized) falls back rather than
+ * refusing the send, as legacy load_hey_config did.
+ */
+async function localSender(config: ServeConfig, signal: AbortSignal): Promise<string> {
+  try { return await resolveInboxSender('', readMawConfig(config.worktreeRoot), config.worktreeRoot, signal); }
+  catch { return 'local:pane/unknown'; }
+}
+
 /** Legacy-shaped delivery failure: ok/error/target/detail/state, plus the command that shows why. */
 function refusal(error: unknown, target: string): HTTPError | unknown {
   if (!(error instanceof BackendError)) return error;
@@ -49,7 +81,7 @@ export async function serveSend(request: Request, config: ServeConfig, backend: 
     if (!backend.inbox) throw new HTTPError(501, 'send_options_not_supported');
     const claim = await claimDelivery(request, body.target, body.text ?? '', originalText ?? '', 'inbox', config, backend, delivery, signal);
     if (claim.duplicate) {
-      await recordDelivery(history, backend, request, body.target, body.text ?? '', 'inbox', 'deduped', signal);
+      await recordDelivery(history, backend, request, body.target, body.text ?? '', 'inbox', 'deduped', signal, { from: claim.from });
       return claim.duplicate;
     }
     try {
@@ -64,22 +96,33 @@ export async function serveSend(request: Request, config: ServeConfig, backend: 
     } finally { claim.cancel(); }
   }
   // Legacy sends "[sender] " for empty text; an empty turn is not worth a
-  // fabricated prompt, so empty text without attachments stays refused.
-  if (!body.text) throw new HTTPError(400, 'target_and_text_required');
+  // fabricated prompt, so empty or whitespace-only text without attachments
+  // stays refused. The check runs before tagging: a tag is never blank.
+  if (!body.text || /^\p{White_Space}*$/u.test(body.text)) {
+    throw badRequest(400, 'target_and_text_required', body.target, 'text is empty or only whitespace', sendHint(request, body.target, 'hello'));
+  }
   if (body.force) throw new HTTPError(501, 'send_options_not_supported');
   const target = body.target, message = body.text;
   const rawFrom = request.headers.get('X-Maw-From') ?? '';
-  if (Buffer.byteLength(rawFrom) > 1024) throw new HTTPError(400, 'invalid_delivery_metadata');
+  if (Buffer.byteLength(rawFrom) > 1024) {
+    throw badRequest(400, 'invalid_delivery_metadata', target, `X-Maw-From is ${Buffer.byteLength(rawFrom)} bytes; the limit is 1024 (resend without it to use this server's identity)`, sendHint(request, target, message));
+  }
+  const colon = rawFrom.indexOf(':');
+  const local = colon > 0 && colon < rawFrom.length - 1 ? '' : await localSender(config, signal);
+  const prompt = formatSenderMessage(message, rawFrom, local);
+  const size = Buffer.byteLength(prompt, 'utf8');
+  if (size > PROMPT_LIMIT) {
+    const room = Math.max(0, Buffer.byteLength(message, 'utf8') - (size - PROMPT_LIMIT));
+    throw badRequest(413, 'text_too_large', target, `tagged prompt is ${size} bytes; herdr takes at most ${PROMPT_LIMIT}; send ${size - PROMPT_LIMIT} fewer bytes of text`,
+      sendHint(request, target, message, room));
+  }
   const claim = await claimDelivery(request, target, message, message, 'local', config, backend, delivery, signal);
   if (claim.duplicate) {
-    await recordDelivery(history, backend, request, target, message, 'local', 'deduped', signal);
+    await recordDelivery(history, backend, request, target, message, 'local', 'deduped', signal, { from: claim.from || local });
     return claim.duplicate;
   }
-  let local = '';
   try {
-    const colon = rawFrom.indexOf(':');
-    if (!(colon > 0 && colon < rawFrom.length - 1)) local = await resolveInboxSender('', readMawConfig(config.worktreeRoot), config.worktreeRoot, signal);
-    const receipt = await backend.send(target, formatSenderMessage(message, rawFrom, local), signal);
+    const receipt = await backend.send(target, prompt, signal);
     claim.complete(receipt.state);
     await recordDelivery(history, backend, request, target, message, 'local', receipt.state, signal, { from: local, lastLine: receipt.lastLine });
     return { ok: true, target, text: message, source: 'local', lastLine: receipt.lastLine, state: receipt.state, receipt: receipt.evidence,

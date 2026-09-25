@@ -71,13 +71,18 @@ function promptLine(line: string): PromptLine {
   return text ? { kind: 'pending', text } : { kind: 'empty' };
 }
 function isRule(line: string) { return RULE.test(line.trim()); }
+/** An agent status footer line: model name, context meter, status icons. */
+function isFooter(line: string): boolean {
+  const trimmed = line.trim();
+  if (['🖥', '📡', '🟢', '🟡', '🔴', '⏵', '◯', '⧉'].some(icon => trimmed.startsWith(icon))) return true;
+  const lower = trimmed.toLowerCase();
+  return ['gpt-', 'claude', 'opus', 'sonnet', 'haiku', 'fable', '? for shortcuts'].some(prefix => lower.startsWith(prefix)) || lower.includes('context left');
+}
 function isChrome(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed || promptLine(trimmed).kind === 'empty') return true;
   if ([...trimmed].every(ch => /\s/.test(ch) || '─━╌┄┈-—'.includes(ch))) return true;
-  if (['🖥', '📡', '🟢', '🟡', '🔴', '⏵', '◯', '⧉'].some(icon => trimmed.startsWith(icon))) return true;
-  const lower = trimmed.toLowerCase();
-  return ['gpt-', 'claude', 'opus', 'sonnet', 'haiku', 'fable', '? for shortcuts'].some(prefix => lower.startsWith(prefix)) || lower.includes('context left');
+  return isFooter(trimmed);
 }
 
 export function parseComposer(ansi: string): Composer {
@@ -97,6 +102,22 @@ export function parseComposer(ansi: string): Composer {
     const prompt = promptLine(lines[i]);
     if (prompt.kind === 'none' || !lines.slice(i + 1).every(isChrome)) continue;
     return prompt.kind === 'pending' ? { state: 'pending', text: prompt.text } : { state: 'empty' };
+  }
+  // Codex with more than one line in play: a typed prompt line, then indented
+  // lines (draft continuation, or a slash-command popup under a half-typed
+  // `/rev`), then the agent footer. Without the footer this could be any
+  // indented program output, so the footer is required.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const prompt = promptLine(lines[i]);
+    if (prompt.kind !== 'pending') continue;
+    let end = lines.length;
+    while (end > i + 1 && isChrome(lines[end - 1])) end--;
+    const middle = lines.slice(i + 1, end), tail = lines.slice(end);
+    if (!middle.length || !tail.some(line => line.trim() && isFooter(line))) continue;
+    if (!middle.every(line => !line.trim() || /^\s/.test(line))) continue;
+    const continuation: string[] = [];
+    for (const line of middle) { if (!line.trim()) break; continuation.push(line.trim()); }
+    return { state: 'pending', text: [prompt.text, ...continuation].join('\n') };
   }
   return { state: 'unknown' };
 }

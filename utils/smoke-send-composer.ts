@@ -21,6 +21,15 @@ assert.deepEqual(parseComposer(codex(dim('Ask Codex to do anything'))), { state:
 assert.deepEqual(parseComposer(codex('fix the flaky test')), { state: 'pending', text: 'fix the flaky test' });
 // 38;2;R;G;B carries a literal 2 that is a colour component, not SGR dim.
 assert.deepEqual(parseComposer(`${E}[38;2;2;2;2m›${E}[0m ${E}[48;2;39;42;48mreal draft${E}[0m\r\n  gpt-5 · 80% context left`), { state: 'pending', text: 'real draft' });
+// Codex with more than the prompt line: a multi-line draft (continuation lines
+// are indented) and a slash popup under a half-typed command. Both are a
+// human's draft; reading them as `unknown` let a send append to it.
+assert.deepEqual(parseComposer(codex('first line of draft\r\n  second line of draft')), { state: 'pending', text: 'first line of draft\nsecond line of draft' });
+assert.deepEqual(parseComposer(codex('/rev\r\n\r\n  /review   review my current changes\r\n  /resume   resume a saved chat')), { state: 'pending', text: '/rev' });
+// The same indented shape with no agent footer is just program output.
+assert.deepEqual(parseComposer('> quoted line\n  indented output\n  more output\n'), { state: 'unknown' });
+// An empty Codex prompt is still found when a transcript line above echoes `›`.
+assert.deepEqual(parseComposer(`› earlier message\r\n  • ran tests\r\n\r\n${E}[1m›${E}[0m ${dim('Ask Codex to do anything')}\r\n${codexFooter}`), { state: 'empty' });
 assert.deepEqual(parseComposer('build output\n$ \n'), { state: 'empty' });
 assert.deepEqual(parseComposer('build output\n$ make test\n'), { state: 'pending', text: 'make test' });
 assert.deepEqual(parseComposer('just output, no prompt\nmore output'), { state: 'unknown' });
@@ -41,4 +50,4 @@ assert.equal(formatSenderMessage('hello', 'neo:', 'm5:server'), '[m5:server] hel
 assert.equal(formatSenderMessage('/compact', 'neo:white', 'm5:server'), '/compact', 'slash commands pass through');
 assert.equal(formatSenderMessage('/abs/path\nlook', 'neo:white', 'm5:server'), '/abs/path\nlook', 'legacy: an absolute-path first attachment is untagged too');
 assert.equal(formatSenderMessage('', 'neo:white', 'm5:server'), '[white:neo] ');
-console.log('PASS send composer: dim placeholders, ruled Claude box, Codex footer, SGR colour params, shells, unknown; sender tag');
+console.log('PASS send composer: dim placeholders, ruled Claude box, Codex footer, Codex multi-line draft and slash popup, SGR colour params, shells, unknown; sender tag');

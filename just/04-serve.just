@@ -43,6 +43,7 @@ bun-check:
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
     bun utils/smoke-terminal-limits.ts
     bun utils/smoke-send-composer.ts
+    bun utils/smoke-send-watch.ts
     node utils/smoke-send-delivery.mjs
     MAW_SEND_ENTRY="$output/index.js" node utils/smoke-send-delivery.mjs
 

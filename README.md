@@ -134,7 +134,8 @@ Coverage vs. the legacy `maw serve`/God UI contract — not full parity:
 the prompt: `accepted` is herdr taking it, `delivered` is the input box seen
 empty afterwards, `queued` is the agent showing it queued. A draft already in
 the box, a blocked agent, or a pane that changed under the request is refused
-with `409` and a `hint` holding the herdr command that shows why.
+with `409` and a `hint` holding the herdr command that shows why. If the
+input box cannot be read first, nothing is typed (`503`).
 
 Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for
