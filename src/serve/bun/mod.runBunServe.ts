@@ -136,7 +136,7 @@ export async function runBunServe(args: string[]): Promise<number> {
         // Origin were already checked above, exactly as for every other route.
         if (config.mcp && !config.engine && path === '/mcp') {
           const display = config.hostname.includes(':') ? `[${config.hostname}]` : config.hostname;
-          return await serveMCP(request, { authenticated, insecure: !!config.insecure, signal, base: `http://${display}:${server.port}`,
+          return logged(await serveMCP(request, { authenticated, insecure: !!config.insecure, signal, base: `http://${display}:${server.port}`,
             tokenFile: config.tokenFile, binary: config.binary, worktreeRoot: config.worktreeRoot, onSendRefused: recordAuthReject,
             route: (route, init) => {
               const url = new URL(route, 'http://127.0.0.1');
@@ -144,7 +144,7 @@ export async function runBunServe(args: string[]): Promise<number> {
               const body = init?.body === undefined ? undefined : JSON.stringify(init.body);
               const synthetic = new Request(url, body === undefined ? { method: 'GET' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
               return serveAPI(synthetic, route, config, backend, started, signal, delivery, deliveryHistory);
-            } }, headers);
+            } }, headers));
         }
         if (!config.engine) {
           if (config.insecure && !isWrite) { /* read-only demo access */ }

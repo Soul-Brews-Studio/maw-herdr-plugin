@@ -282,7 +282,12 @@ try {
   await readParity(secure.url, token);
   const sent = toolText(await rpc(secure.url, 'tools/call', { name: 'herdr_send', arguments: { target, text: 'hello from mcp' } }, { auth: token }));
   assert.equal(sent.ok, true); assert.equal(sent.state, 'accepted'); assert.equal(sent.target, target);
-  assert.deepEqual(promptCalls().map(args => args.slice(-2)), [['wD:p4', 'hello from mcp']], 'exactly one prompt, to the resolved pane');
+  // herdr_send is POST /api/send's twin, so it carries the same `[node:oracle]`
+  // sender tag that route adds (#42); the text after the tag is the caller's.
+  const prompted = promptCalls().map(args => args.slice(-2));
+  assert.equal(prompted.length, 1, 'exactly one prompt');
+  assert.equal(prompted[0][0], 'wD:p4', 'to the resolved pane');
+  assert.match(prompted[0][1], /^\[[^\]\s]+\] hello from mcp$/, 'sender-tagged like POST /api/send');
   const stale = await rpc(secure.url, 'tools/call', { name: 'herdr_send', arguments: { target: 'bWFpbg/d0Q:77', text: 'x' } }, { auth: token });
   assert.equal(stale.json.result.isError, true);
   assert.match(stale.json.result.content[0].text, /error 404 target_not_found/);
