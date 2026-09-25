@@ -10,6 +10,7 @@ import { loopbackHost } from './mod.loopbackHost.ts';
 import { requestOrigin } from './mod.requestOrigin.ts';
 import { readJSON } from './mod.readJSON.ts';
 import { serveAPI } from './mod.serveAPI.ts';
+import { serveMCP } from './mod.serveMCP.ts';
 import { createPtySession } from './mod.createPtySession.ts';
 import { createSocketSession, type SocketData } from './mod.createSocketSession.ts';
 
@@ -57,11 +58,12 @@ export async function runBunServe(args: string[]): Promise<number> {
             if (!origin || !['GET', 'POST'].includes(request.headers.get('Access-Control-Request-Method') || '')) return failure(403, 'preflight_not_allowed');
             const requested = request.headers.get('Access-Control-Request-Headers');
             const names = requested === null ? [] : requested.split(',').map(name => name.trim().toLowerCase());
-            if (new Set(names).size !== names.length || names.some(name => !['authorization', 'content-type'].includes(name))) return failure(403, 'preflight_not_allowed');
+            const allowedHeaders = config.mcp && path === '/mcp' ? ['authorization', 'content-type', 'mcp-protocol-version'] : ['authorization', 'content-type'];
+            if (new Set(names).size !== names.length || names.some(name => !allowedHeaders.includes(name))) return failure(403, 'preflight_not_allowed');
             const pna = request.headers.get('Access-Control-Request-Private-Network');
             if (pna !== null && pna !== 'true') return failure(403, 'preflight_not_allowed');
             if (pna) headers.set('Access-Control-Allow-Private-Network', 'true');
-            headers.set('Access-Control-Allow-Methods', 'GET, POST'); headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+            headers.set('Access-Control-Allow-Methods', 'GET, POST'); headers.set('Access-Control-Allow-Headers', config.mcp && path === '/mcp' ? 'Authorization, Content-Type, MCP-Protocol-Version' : 'Authorization, Content-Type');
             return new Response(null, { status: 204, headers });
           }
         }
@@ -95,6 +97,21 @@ export async function runBunServe(args: string[]): Promise<number> {
         const authorization = request.headers.get('authorization') || '';
         const authenticated = tokenConfigured && authorization.startsWith('Bearer ')
           && timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash);
+        // /mcp carries reads and writes in one POST, so the per-tool rule lives in
+        // serveMCP: reads follow the mode, writes always need the token. Host and
+        // Origin were already checked above, exactly as for every other route.
+        if (config.mcp && !config.engine && path === '/mcp') {
+          const display = config.hostname.includes(':') ? `[${config.hostname}]` : config.hostname;
+          return await serveMCP(request, { authenticated, insecure: !!config.insecure, signal, base: `http://${display}:${server.port}`,
+            tokenFile: config.tokenFile, binary: config.binary, worktreeRoot: config.worktreeRoot,
+            route: (route, init) => {
+              const url = new URL(route, 'http://127.0.0.1');
+              for (const [key, value] of Object.entries(init?.query ?? {})) url.searchParams.set(key, value);
+              const body = init?.body === undefined ? undefined : JSON.stringify(init.body);
+              const synthetic = new Request(url, body === undefined ? { method: 'GET' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+              return serveAPI(synthetic, route, config, backend, started, signal, delivery, deliveryHistory);
+            } }, headers);
+        }
         if (!config.engine) {
           if (config.insecure && !isWrite) { /* read-only demo access */ }
           else if (config.insecure && isWrite) {
@@ -142,6 +159,7 @@ export async function runBunServe(args: string[]): Promise<number> {
   const hostname = server.hostname || config.hostname;
   const displayHost = hostname.includes(':') ? `[${hostname}]` : hostname;
   console.error(`maw herdr serve: http://${displayHost}:${server.port}${config.engine ? '/api/herdr' : ''} (Bun/TypeScript; ${config.engine ? 'engine child; gateway authenticates remote clients' : config.insecure ? 'INSECURE read-only demo; no token required' : 'operator token required; core dashboard only'})`);
+  if (config.mcp) console.error(`maw herdr serve: MCP at http://${displayHost}:${server.port}/mcp (read tools follow the mode; write tools always require the operator token)`);
   if (config.insecure) {
     // Loopback is not a boundary against a browser: any page the operator
     // visits can reach this port. Reads are open here, so say so plainly and

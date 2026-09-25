@@ -1,6 +1,6 @@
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { readMawConfig, projectMawConfig } from './mod.readMawConfig.ts';
 import { loopbackHost } from './mod.loopbackHost.ts';
 import type { ServeConfig } from './serverTypes.ts';
@@ -9,7 +9,7 @@ export function readServeConfig(args: string[]): ServeConfig {
   const flags = new Map<string, string>();
   for (let i = 0; i < args.length; i++) {
     const [key, ...inline] = args[i].split('=');
-    const BARE = ['--engine', '--insecure-no-token'];
+    const BARE = ['--engine', '--insecure-no-token', '--mcp'];
     if (![...BARE, '--listen', '--token-file', '--herdr', '--data-dir', '--wake-engine', '--demo-minutes'].includes(key) || flags.has(key)) {
       throw new Error(`serve: unknown or duplicate option ${key}`);
     }
@@ -24,6 +24,10 @@ export function readServeConfig(args: string[]): ServeConfig {
   const engine = flags.has('--engine');
   if (engine) {
     if (flags.has('--listen') || flags.has('--token-file')) throw new Error('--engine cannot be combined with --listen or --token-file');
+    // The engine delegates auth to the host gateway, but MCP write tools must
+    // check the operator token themselves; there is no token to check here.
+    if (flags.has('--mcp')) throw new Error('--mcp is not available under --engine; the gateway does not forward the operator token MCP writes require\n'
+      + '  maw herdr serve --mcp --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457');
     token = (process.env.MAW_SERVE_TOKEN || '').trim();
     const port = process.env.MAW_ENGINE_SERVE_PORT || '';
     if (!/^[1-9][0-9]*$/.test(port) || Number(port) > 65535) throw new Error('--engine requires MAW_ENGINE_SERVE_PORT in 1..65535');
@@ -64,6 +68,7 @@ export function readServeConfig(args: string[]): ServeConfig {
   // A tokenless listener that outlives the demo is the actual hazard, so it
   // always expires; the flag only moves the deadline.
   const demoMinutes = insecure ? Number(rawMinutes ?? 30) : 0;
-  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, engine, insecure, demoMinutes, wakeEngine, explicitWakeEngine: flags.get('--wake-engine'), ...projectMawConfig(readMawConfig()),
+  const tokenFile = flags.has('--token-file') ? resolve(flags.get('--token-file')!) : undefined;
+  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, tokenFile, mcp: flags.has('--mcp'), engine, insecure, demoMinutes, wakeEngine, explicitWakeEngine: flags.get('--wake-engine'), ...projectMawConfig(readMawConfig()),
     binary: flags.get('--herdr') || 'herdr', dataDir: flags.get('--data-dir') || join(configHome, 'maw-herdr', 'serve') };
 }

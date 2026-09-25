@@ -42,6 +42,8 @@ bun-check:
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
     bun utils/smoke-terminal-limits.ts
+    node utils/smoke-mcp-serve.mjs
+    MAW_MCP_ENTRY="$output/index.js" node utils/smoke-mcp-serve.mjs
 
 # The server is TypeScript on Bun; check is the Bun suite.
 check: bun-check

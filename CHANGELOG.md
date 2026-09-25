@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add `maw herdr serve --mcp` (#61): MCP over Streamable HTTP at `/mcp` on the
+  dashboard listener, hand-written JSON-RPC with no new dependency. Read tools
+  (`herdr_sessions`, `herdr_agents`, `herdr_capture`, `herdr_worktrees`) call
+  the same routes as their HTTP twins and follow the mode; write tools
+  (`herdr_send`, `herdr_wake`) require the operator token in every mode,
+  including `--insecure-no-token`. Refused under `--engine`.
+
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
   packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no

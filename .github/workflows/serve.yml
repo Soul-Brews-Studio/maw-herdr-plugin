@@ -67,6 +67,8 @@ jobs:
           bun utils/smoke-terminal-serve.mjs
           MAW_TERMINAL_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-terminal-serve.mjs
           bun utils/smoke-terminal-limits.ts
+          node utils/smoke-mcp-serve.mjs
+          MAW_MCP_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-mcp-serve.mjs
       - name: Build source-independent native plugin package
         run: |
           node --check utils/package-serve.mjs
