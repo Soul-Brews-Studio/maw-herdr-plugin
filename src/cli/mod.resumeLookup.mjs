@@ -4,7 +4,9 @@
  * environment as the #60 resumability providers (src/cli/mod.resumeProviders.mjs on
  * feat/60-ls-state), which were still on a sibling branch when #62 was written:
  *
- *   provider = { name, roots, find(paths) → Map<path, Session> }
+ *   provider = { name, roots, find(paths, skip?) → Map<path, Session> }
+ *              skip: a Set of session ids a live agent already holds — never resumed
+ *              twice (#62: two agents in one worktree), so the newest NOT held wins
  *   Session  = { provider, id, file, at, bytes }
  *   MAW_HERDR_RESUME_PROVIDERS  "claude,codex" (default) · "none" turns all off
  *   MAW_HERDR_CLAUDE_ROOTS      default $CLAUDE_CONFIG_DIR/projects, else ~/.claude/projects
@@ -12,7 +14,10 @@
  *
  * INTEGRATION NOTE: once #60 lands, delete this file and import configuredProviders
  * and findSessions from ./mod.resumeProviders.mjs in mod.lifecycle.mjs instead; the
- * call sites do not change. Nothing else in the plugin imports this module.
+ * call sites do not change — but carry the optional `skip` argument over, since
+ * mod.lifecycle.mjs relies on it (and re-checks the result against it, refusing a
+ * held session, so a provider that ignores it can only refuse, never double-resume).
+ * Nothing else in the plugin imports this module.
  */
 import { closeSync, openSync, readdirSync, readSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -37,14 +42,14 @@ export function claudeProvider(roots) {
   return {
     name: 'claude',
     roots,
-    find(paths) {
+    find(paths, skip = new Set()) {
       const out = new Map();
       for (const path of paths) {
         let best = null;
         for (const root of roots) {
           const dir = join(root, encodeClaudeDir(path));
           for (const e of entries(dir)) {
-            if (!e.isFile() || !e.name.endsWith('.jsonl') || !SAFE_ID.test(basename(e.name, '.jsonl'))) continue;
+            if (!e.isFile() || !e.name.endsWith('.jsonl') || !SAFE_ID.test(basename(e.name, '.jsonl')) || skip.has(basename(e.name, '.jsonl'))) continue;
             const file = join(dir, e.name);
             const s = stat(file);
             if (!s || s.size < MIN_BYTES) continue;
@@ -85,7 +90,7 @@ export function codexProvider(roots) {
   return {
     name: 'codex',
     roots,
-    find(paths) {
+    find(paths, skip = new Set()) {
       const wanted = new Set(paths);
       const best = new Map();
       const resolved = new Map();
@@ -111,7 +116,7 @@ export function codexProvider(roots) {
           const seen = best.get(key);
           if (seen && seen.at >= s.mtimeMs) continue;
           const id = meta.id ?? e.name.slice(0, -'.jsonl'.length).slice(-36);
-          if (!SAFE_ID.test(id)) continue;
+          if (!SAFE_ID.test(id) || skip.has(id)) continue;
           best.set(key, { provider: 'codex', id, file: full, at: s.mtimeMs, bytes: s.size });
         }
       };
@@ -143,12 +148,12 @@ export function configuredProviders(env = process.env) {
   return [...new Set(names)].map(n => BUILT_IN[n](env));
 }
 
-/** Newest session per path across every provider; `aliases` maps each spelling to the caller's key. */
-export function findSessions(providers, aliases) {
+/** Newest session per path across every provider; `aliases` maps each spelling to the caller's key; ids in `skip` are passed over. */
+export function findSessions(providers, aliases, skip = new Set()) {
   const out = new Map();
   const paths = [...aliases.keys()];
   for (const p of providers) {
-    for (const [path, session] of p.find(paths)) {
+    for (const [path, session] of p.find(paths, skip)) {
       const key = aliases.get(path) ?? path;
       const seen = out.get(key);
       if (!seen || session.at > seen.at) out.set(key, session);

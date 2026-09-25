@@ -16,28 +16,37 @@
  *      agent's resume syntax, which is known for claude and codex only; any other
  *      kind is relaunched with its argv exactly as read.
  *
+ *   execIndex(argv, kind, proc)         → where the agent's own executable sits in a process argv, or -1
+ *   isKindProcess(proc, kind)           → a process-info entry IS that agent (whole path components only)
  *   dedupeArgs(args)                    → args with repeated flag units removed
  *   withSession(kind, args, id)         → { args, how } | null (null: syntax unknown for kind)
  *   sessionInArgs(kind, args)           → the session id the argv already names, or null
  *   withChannel(args, channel)          → args with the development channel set/removed/kept
  *   hasDevChannel(args)                 → boolean
  *   redactArgs(args)                    → args safe to print (values of token-ish flags hidden)
- *   agentName(raw, fallback)            → a name herdr accepts (lowercase letter first, ≤ 24)
+ *   agentName(raw, fallback)            → a name herdr accepts (lowercase letter first, ≤ 32)
+ *   freeName(name, taken)               → name, or name-2, name-3 … when a live agent holds it
+ *   CONTROL_CHAR                        → herdr refuses any agent arg matching it
  */
+
+import { basename } from 'node:path';
 
 export const DEV_CHANNEL_FLAG = '--dangerously-load-development-channels';
 
-// A flag and the value after it count as one unit, so `--model x --model x` is one.
-// Without the agent's flag table a boolean flag followed by a positional is read as
-// a pair too; that only matters for an exact repeat, which is dropped either way.
+// A flag and every value after it (up to the next flag) form one unit, so
+// `--model x --model x` is one and so is `--add-dir a b --add-dir a b` (variadic).
+// Without the agent's flag table a boolean flag followed by a positional reads as one
+// unit too; so a unit whose LEADING part repeats a unit already seen drops only that
+// part, and what follows it stays: `--x v … --x v prompt` keeps `prompt`.
 function units(args) {
   const out = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    const next = args[i + 1];
-    const pair = a.startsWith('-') && a !== '-' && a !== '--' && !a.includes('=') && next !== undefined && !next.startsWith('-');
-    out.push(pair ? [a, next] : [a]);
-    if (pair) i++;
+    const unit = [a];
+    if (a.startsWith('-') && a !== '-' && a !== '--' && !a.includes('=')) {
+      while (args[i + 1] !== undefined && !args[i + 1].startsWith('-')) unit.push(args[++i]);
+    }
+    out.push(unit);
   }
   return out;
 }
@@ -47,15 +56,58 @@ export function dedupeArgs(args) {
   const seen = new Set();
   const out = [];
   for (const unit of units(args)) {
-    if (unit[0].startsWith('-')) {
-      const key = unit.join('\0');
-      if (seen.has(key)) continue;
-      seen.add(key);
-    }
+    if (!unit[0].startsWith('-')) { out.push(...unit); continue; }
+    let k = unit.length;
+    while (k > 0 && !seen.has(unit.slice(0, k).join('\0'))) k--;
+    // an exact repeat goes whole; a repeated flag with trailing positionals keeps them
+    if (k === unit.length) continue;
+    if (k > 0) { out.push(...unit.slice(k)); continue; }
+    seen.add(unit.join('\0'));
     out.push(...unit);
   }
   return out;
 }
+
+// --- where the agent is in a process's argv -----------------------------------------
+
+const base = s => basename(String(s ?? ''));
+// runtimes that host an agent written as a script: `bun ~/.bun/bin/omp`, `node ~/.local/bin/codex`
+const INTERPRETER = /^(node|nodejs|bun|deno|python[0-9.]*|ruby|perl)(\.exe)?$/;
+
+/**
+ * The index of the agent's own executable in a process argv, or -1 when it is not
+ * there. herdr relaunches with the kind's canonical executable, so everything up to
+ * and including this index is dropped and the rest is reused.
+ *   [claude, --x]                         → 0   (native)
+ *   [node, /…/bin/codex, resume]          → 1   (a script under its runtime)
+ *   [/…/versions/2.1.280, --x] + argv0/name 'claude' → 0 (native binary under another file name)
+ */
+export function execIndex(argv, kind, { argv0 = null, name = null } = {}) {
+  if (!kind || !Array.isArray(argv) || !argv.length) return -1;
+  const first = base(argv[0]);
+  if (first === kind) return 0;
+  if (INTERPRETER.test(first)) {
+    const script = argv.findIndex((a, i) => i > 0 && !String(a).startsWith('-'));
+    return script > 0 && base(argv[script]) === kind ? script : -1;
+  }
+  return base(argv0) === kind || name === kind ? 0 : -1;
+}
+
+/** A herdr process-info entry is the agent itself — whole path components, never a substring. */
+export const isKindProcess = (proc, kind) => !!proc && execIndex(Array.isArray(proc.argv) && proc.argv.length ? proc.argv : [proc.argv0 ?? proc.name ?? ''], kind, proc) !== -1;
+
+/** A wrapper's argv as a human types it again: the runtime in front of a script goes. */
+export function commandOf(argv) {
+  const a = (argv ?? []).map(String);
+  if (a.length > 1 && INTERPRETER.test(base(a[0]))) {
+    const script = a.findIndex((x, i) => i > 0 && !x.startsWith('-'));
+    if (script > 0) return a.slice(script);
+  }
+  return a;
+}
+
+/** herdr refuses an agent argument holding any control character (invalid_agent_argument). */
+export const CONTROL_CHAR = /[\x00-\x1f\x7f]/;
 
 // --- session pinning, per agent kind --------------------------------------------------
 
@@ -134,45 +186,84 @@ export const hasDevChannel = args => args.includes(DEV_CHANNEL_FLAG) || args.som
 export function withChannel(args, channel) {
   if (channel === undefined) return args;
   const out = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === DEV_CHANNEL_FLAG) { i++; continue; }
-    if (args[i].startsWith(`${DEV_CHANNEL_FLAG}=`)) continue;
-    out.push(args[i]);
-  }
-  if (channel === false) return out;
   const had = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === DEV_CHANNEL_FLAG && args[i + 1] !== undefined) had.push(args[i + 1]);
-    const eq = args[i].match(new RegExp(`^${DEV_CHANNEL_FLAG}=(.+)$`));
-    if (eq) had.push(eq[1]);
+    const eq = args[i].startsWith(`${DEV_CHANNEL_FLAG}=`) ? args[i].slice(DEV_CHANNEL_FLAG.length + 1) : null;
+    if (eq !== null) { had.push(eq); continue; }
+    if (args[i] !== DEV_CHANNEL_FLAG) { out.push(args[i]); continue; }
+    // the flag may carry several entries (`… server:a server:b`); every one goes with
+    // it, or the second is left behind as a positional that claude submits as a prompt
+    while (args[i + 1] !== undefined && CHANNEL_ENTRY.test(args[i + 1])) had.push(args[++i]);
   }
+  if (channel === false) return out;
   if (had.includes(channel)) return args;
   return [DEV_CHANNEL_FLAG, channel, ...args];
 }
+
+// a development-channel entry: server:<name> or plugin:<name>[@marketplace]
+const CHANNEL_ENTRY = /^(server|plugin):\S+$/;
 
 // --- display --------------------------------------------------------------------------
 
 const SECRET_FLAG = /(token|secret|password|passwd|api[-_]?key|auth|credential|ticket)/i;
 
-/** argv safe to print: the value of any token/secret/key-looking flag becomes <redacted>. */
+/**
+ * argv safe to print: the value of any token/secret/key-looking flag becomes
+ * <redacted>, and so does a `-c`/`--config` override whose KEY looks like one
+ * (codex: `-c model_providers.x.api_key=sk-…`).
+ */
 export function redactArgs(args) {
   const out = [];
+  const secretKv = v => {
+    const m = String(v).match(/^([^=]+)=(.*)$/s);
+    return m && SECRET_FLAG.test(m[1]) ? `${m[1]}=<redacted>` : v;
+  };
   for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    const eq = a.match(/^(--?[^=]+)=(.*)$/);
+    const a = String(args[i]);
+    const eq = a.match(/^(--?[^=]+)=(.*)$/s);
+    if (eq && CONFIG_FLAG.has(eq[1])) { out.push(`${eq[1]}=${secretKv(eq[2])}`); continue; }
     if (eq && SECRET_FLAG.test(eq[1])) { out.push(`${eq[1]}=<redacted>`); continue; }
     out.push(a);
-    if (a.startsWith('-') && SECRET_FLAG.test(a) && !a.includes('=') && args[i + 1] !== undefined && !args[i + 1].startsWith('-')) {
-      out.push('<redacted>');
-      i++;
-    }
+    const next = args[i + 1];
+    if (next === undefined || String(next).startsWith('-')) continue;
+    if (CONFIG_FLAG.has(a)) { out.push(secretKv(next)); i++; }
+    else if (a.startsWith('-') && SECRET_FLAG.test(a) && !a.includes('=')) { out.push('<redacted>'); i++; }
   }
   return out;
 }
 
-/** herdr requires an agent name that starts with a lowercase letter. */
+const CONFIG_FLAG = new Set(['-c', '--config']);
+
+/** The literal secret values redactArgs hides, to scrub them from any other text. */
+export function secretValues(args) {
+  const shown = redactArgs(args);
+  if (shown.length !== args.length) return [];
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (shown[i] === args[i]) continue;
+    const a = String(args[i]);
+    const at = String(shown[i]).indexOf('<redacted>');
+    const v = at === -1 ? a : a.slice(at);
+    if (v.length >= 3) out.push(v);
+  }
+  return out;
+}
+
+/** herdr requires an agent name matching [a-z][a-z0-9_-]{0,31}. */
 export function agentName(raw, fallback = 'agent') {
-  let n = String(raw || fallback).toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 24);
-  if (!/^[a-z]/.test(n)) n = `w-${n}`.slice(0, 24);
+  let n = String(raw || fallback).toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 32);
+  if (!/^[a-z]/.test(n)) n = `w-${n}`.slice(0, 32);
   return n;
+}
+
+/** herdr requires a name unique among live agents: name, else name-2, name-3 … (≤ 32). */
+export function freeName(name, taken) {
+  const held = new Set(taken);
+  if (!held.has(name)) return name;
+  for (let k = 2; k < 100; k++) {
+    const suffix = `-${k}`;
+    const n = `${name.slice(0, 32 - suffix.length)}${suffix}`;
+    if (!held.has(n)) return n;
+  }
+  return null;
 }

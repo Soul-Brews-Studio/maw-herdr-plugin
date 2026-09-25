@@ -446,7 +446,7 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
  * matches nothing. `verb` and `after` shape the commands printed in those errors:
  * `maw herdr <verb> <candidate><after>`.
  */
-export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerFromEnv(), cwd = process.cwd(), after = '' } = {}) {
+export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerFromEnv(), cwd = process.cwd(), after = '', exact = false, strictPane = false } = {}) {
   const form = classifyTarget(raw);
   const shown = form.value;
   const ambiguous = (hits, how) => new TargetError(
@@ -464,13 +464,13 @@ export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerF
         'not-found',
       );
     }
-    return finish(picked.hit, form, picked.how, me.pane);
+    return finish(picked.hit, form, picked.how, me.pane, strictPane);
   }
   if (form.form === 'pane') {
     tiers = [['pane id', t => t.panes.some(p => p.pane === form.value)]];
     const picked = pickTier(targets, tiers, { ambiguous });
     if (!picked) throw new TargetError(`no herdr workspace holds pane ${form.value}\n  see every pane: maw herdr ls --agents`, 'not-found');
-    return finish(picked.hit, form, picked.how, form.value);
+    return finish(picked.hit, form, picked.how, form.value, strictPane);
   }
   if (form.form === 'path') {
     const p = expandPath(form.value, cwd);
@@ -492,23 +492,35 @@ export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerF
         'not-found',
       );
     }
-    return finish(picked.hit, form, picked.how, null);
+    return finish(picked.hit, form, picked.how, null, strictPane);
   }
   const q = form.value.toLowerCase();
   const lc = s => (s ?? '').toLowerCase();
+  const partly = t => lc(t.label).includes(q) || lc(t.name).includes(q);
   tiers = [
     ['exact label', t => lc(t.label) === q || lc(t.name) === q],
     ['repo main worktree', t => t.kind === 'worktree' && !t.linked && lc(t.repo) === q],
-    ['substring', t => lc(t.label).includes(q) || lc(t.name).includes(q)],
+    ...(exact ? [] : [['substring', partly]]),
   ];
   const picked = pickTier(targets, tiers, { ambiguous });
+  // A verb that stops agents never acts on a partial name: `kill kvm` must not stop
+  // whatever space merely contains "kvm", possibly in someone else's session.
+  if (!picked && exact) {
+    const hits = targets.filter(partly);
+    if (hits.length) {
+      throw new TargetError(
+        `'${form.value}' is only part of ${hits.length === 1 ? 'a name' : `${hits.length} names`} — ${verb} needs an exact name, a path or a pane id; nothing was done. Name it exactly:\n${candidateLines(hits, verb, after)}`,
+        'inexact', hits,
+      );
+    }
+  }
   if (!picked) {
     throw new TargetError(
       `no worktree matches '${form.value}' (searched ${targets.length})\n  see every worktree it knows: maw herdr resolve --list`,
       'not-found',
     );
   }
-  return finish(picked.hit, form, picked.how, null);
+  return finish(picked.hit, form, picked.how, null, strictPane);
 }
 
 /** loadTargets + resolveTarget, with the target's own path added to discovery. */
@@ -523,14 +535,16 @@ export async function resolveLive(raw, { session = null, cwd = process.cwd(), ..
 // given; otherwise the sole agent pane, else the focused / active-tab one, else —
 // with no agent at all — the first shell pane. Several agents that none of that
 // separates leave `pane` null with `paneChoices` set, for requirePane to report.
-function finish(t, form, how, explicitPane) {
+// strictPane (restart, kill): several agents are never narrowed by focus or active
+// tab — which agent gets stopped must not depend on where the operator last clicked.
+function finish(t, form, how, explicitPane, strictPane = false) {
   let chosen = explicitPane ? t.panes.find(p => p.pane === explicitPane) : null;
   let paneChoices = null;
   if (!chosen) {
     const agents = t.panes.filter(p => p.agent);
     if (agents.length === 1) chosen = agents[0];
     else if (agents.length > 1) {
-      const n = narrow(agents.map(p => ({ ...p, activeTab: t.activeTab })));
+      const n = strictPane ? null : narrow(agents.map(p => ({ ...p, activeTab: t.activeTab })));
       if (n) chosen = n.pick;
       else paneChoices = agents.map(p => p.pane);
     } else chosen = t.panes[0] ?? null;
@@ -541,6 +555,7 @@ function finish(t, form, how, explicitPane) {
     agent: chosen?.agent ?? null,
     status: chosen?.agent ? chosen.status : t.spaceStatus,
     paneChoices,
+    ...(strictPane && paneChoices ? { strictPane: true } : {}),
   };
 }
 
@@ -550,7 +565,7 @@ export function requirePane(r, verb) {
   if (r.paneChoices?.length) {
     const scope = r.session ? `--session ${shq(r.session)} ` : '';
     throw new TargetError(
-      `'${r.label}' has ${r.paneChoices.length} agent panes and none is focused — nothing was done. Name one:\n${r.paneChoices.map(p => `  maw herdr ${verb} ${scope}${p}`).join('\n')}`,
+      `'${r.label}' has ${r.paneChoices.length} agent panes${r.strictPane ? ` — ${verb} stops one agent, and a name or path does not say which` : ' and none is focused'} — nothing was done. Name one:\n${r.paneChoices.map(p => `  maw herdr ${verb} ${scope}${p}`).join('\n')}`,
       'ambiguous', r.paneChoices,
     );
   }

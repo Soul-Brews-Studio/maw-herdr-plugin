@@ -12,15 +12,20 @@
  *       herdr reports it, and only when the two agree). The session is pinned to
  *       the one herdr reports for the pane (mod.agentArgv.mjs). A target with no
  *       live agent has no argv to read, so restart refuses and names `resume`.
+ *       The argv after the agent's executable is reused — after argv[0] for a native
+ *       agent, after the script for one hosted by a runtime (`bun ~/.bun/bin/omp`).
+ *       An agent under a wrapper (the group leader is `omx`, the agent its child) is
+ *       refused: `herdr agent start` can bring back the kind, not the wrapper.
  *   resume <target>
  *       start the agent on the newest transcript for the target's worktree, found
- *       by a resume provider (mod.resumeLookup.mjs); opens a herdr space first when
- *       the worktree has none. Refuses a target that already runs an agent.
+ *       by a resume provider (mod.resumeLookup.mjs), skipping any session a live
+ *       agent holds; opens a herdr space first when the worktree has none. Refuses a
+ *       target that already runs an agent, except an explicit pane at its prompt.
  *   kill <target>
  *       Ctrl-C the agent until its process is gone. The pane (and the space) stay.
  *   close <target> [--force]
  *       close the target's herdr space. The worktree and its transcript stay. A
- *       space with a live agent is refused without --force, listing the kills.
+ *       space with a live agent or a running job is refused without --force.
  *
  * `restart self` and `kill self` run from an agent's own `!` prompt: the command is
  * then a descendant of the process it stops, and dies with it. Whenever the target
@@ -28,6 +33,10 @@
  * ancestors, the work is handed to a detached copy of this CLI (new session, stdin
  * carries the plan, output appended to <maw state>/herdr/lifecycle.log) and the
  * command returns at once. Otherwise it runs in the foreground and reports.
+ *
+ * restart, kill and close stop work, so they take only an exact name, a path, a pane
+ * id or self — never a substring — and a name or path covering several agents is
+ * refused with each pane as a command rather than narrowed by focus.
  *
  * Every herdr call names the target's session with --session, and the binary is
  * always `herdr` from PATH, never HERDR_BIN_PATH (see mod.target.mjs for why).
@@ -38,7 +47,10 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TargetError, callerFromEnv, describeResolved, requirePane, resolveLive, shq, takeDry } from './mod.target.mjs';
-import { agentName, dedupeArgs, hasDevChannel, knowsResume, redactArgs, sessionInArgs, withChannel, withSession } from './mod.agentArgv.mjs';
+import {
+  CONTROL_CHAR, agentName, commandOf, dedupeArgs, execIndex, freeName, hasDevChannel, isKindProcess, knowsResume,
+  redactArgs, secretValues, sessionInArgs, withChannel, withSession,
+} from './mod.agentArgv.mjs';
 import { SAFE_ID, configuredProviders, encodeClaudeDir, findSessions } from './mod.resumeLookup.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -73,19 +85,29 @@ function run(file, args, { timeout = 15_000 } = {}) {
 }
 
 const withSessionFlag = (args, session) => (session ? ['--session', session, ...args] : args);
-const herdrLine = (args, session) => ['herdr', ...withSessionFlag(args, session)].map(shq).join(' ');
+// Every herdr command line that is printed goes through redactArgs: a relaunch
+// carries the agent's own argv, which may hold an --api-key or a `-c …api_key=…`.
+const herdrLine = (args, session) => ['herdr', ...withSessionFlag(redactArgs(args), session)].map(shq).join(' ');
+const scrub = (text, args) => secretValues(args).reduce((t, v) => t.split(v).join('<redacted>'), String(text ?? ''));
 
 async function herdr(args, session, opts) {
   try {
     return await run('herdr', withSessionFlag(args, session), opts);
   } catch (err) {
     if (err?.code === 'ENOENT') throw new TargetError('herdr is not on PATH\n  command -v herdr || echo "herdr not on PATH: $PATH"', 'not-found');
-    const e = new TargetError(`herdr ${args.slice(0, 2).join(' ')} failed — ${err.detail || err.message}\n  ${herdrLine(args, session)}`, 'herdr');
+    const e = new TargetError(`herdr ${args.slice(0, 2).join(' ')} failed — ${scrub(err.detail || err.message, args)}\n  ${herdrLine(args, session)}`, 'herdr');
     e.text = err.text ?? '';
     throw e;
   }
 }
-const herdrJson = async (args, session, opts) => JSON.parse(await herdr(args, session, opts));
+async function herdrJson(args, session, opts) {
+  const text = await herdr(args, session, opts);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new TargetError(`herdr ${args.slice(0, 2).join(' ')} returned something that is not JSON (${JSON.stringify(String(text).trim().slice(0, 60))}) — nothing more was done; see what it prints:\n  ${herdrLine(args, session)}`, 'herdr');
+  }
+}
 
 /** The pid is alive (EPERM means it exists but belongs to someone else). */
 export function alive(pid) {
@@ -97,29 +119,44 @@ const base = s => basename(String(s ?? ''));
 
 /**
  * What runs in the foreground of a pane, from `herdr pane process-info`. A pane whose
- * foreground process group is its shell's runs nothing. Otherwise the process that
- * is the agent kind herdr detected is preferred (the group also holds the agent's
- * MCP children), else the group leader.
+ * foreground process group is its shell's runs nothing. Otherwise the group leader
+ * is the agent when it is the kind herdr detected (natively, or as a script under
+ * its runtime: `node ~/.local/bin/codex`); else the first process that is — the
+ * group also holds the agent's MCP children. When the agent is NOT the leader, the
+ * leader is a wrapper (omx around codex): it holds the pane, and `herdr agent start`
+ * can only bring back the kind itself, so `wrapper` is reported for the verbs.
  */
 export async function paneProcess(pane, session, kind = null) {
   const raw = await herdrJson(['pane', 'process-info', '--pane', pane], session);
-  const pi = raw?.result?.process_info ?? raw?.process_info ?? {};
+  const pi = raw?.result?.process_info ?? raw?.process_info;
+  if (!pi || typeof pi !== 'object' || (pi.shell_pid == null && pi.foreground_process_group_id == null)) {
+    // read as "nothing runs", this would let kill report an agent that is alive as gone
+    throw new TargetError(`herdr pane process-info returned no process info for ${pane} — nothing was done; see what it prints:\n  ${herdrLine(['pane', 'process-info', '--pane', pane], session)}`, 'herdr');
+  }
   const shell = pi.shell_pid ?? null;
   const pg = pi.foreground_process_group_id ?? null;
   const procs = Array.isArray(pi.foreground_processes) ? pi.foreground_processes : [];
   if (!pg || pg === shell) return { running: false, shell };
-  const isKind = p => kind && (base(p.argv0) === kind || base(p.argv?.[0]) === kind || p.name === kind);
-  const proc = procs.find(isKind) ?? procs.find(p => p.pid === pg) ?? { pid: pg };
-  const text = `${proc.argv0 ?? ''} ${proc.name ?? ''} ${proc.cmdline ?? (proc.argv ?? []).join(' ')}`;
+  const leader = procs.find(p => p.pid === pg) ?? null;
+  const agent = !kind ? leader : leader && isKindProcess(leader, kind) ? leader : procs.find(p => isKindProcess(p, kind)) ?? null;
+  const proc = agent ?? leader ?? { pid: pg };
+  const wrapper = kind && agent && agent !== leader ? { pid: pg, argv: Array.isArray(leader?.argv) ? leader.argv.map(String) : null, name: leader?.name ?? null } : null;
   return {
     running: true,
     shell,
     pid: proc.pid,
+    leader: pg,
     name: proc.name || base(proc.argv0 ?? proc.argv?.[0]) || '?',
+    argv0: proc.argv0 ?? null,
     herdrArgv: Array.isArray(proc.argv) && proc.argv.length ? proc.argv.map(String) : null,
-    isAgent: !kind || isKind(proc) || text.includes(kind),
+    isAgent: !kind || !!agent,
+    wrapper,
   };
 }
+
+/** Every pid that has to exit for the pane to be back at its shell: the agent and its group leader. */
+const pidsOf = proc => [...new Set([proc.pid, proc.leader].filter(p => Number.isInteger(p)))];
+const wrapperCommand = w => (w.argv ? commandOf(redactArgs(w.argv)).map(shq).join(' ') : `(pid ${w.pid}${w.name ? `, ${w.name}` : ''})`);
 
 /**
  * argv of a live pid, read from the process itself. Linux: /proc/<pid>/cmdline, exact.
@@ -173,13 +210,14 @@ async function paneSessionId(pane, session) {
   }
 }
 
-async function quitPid(pane, session, pid, log) {
-  for (let i = 0; i < QUIT_TRIES && alive(pid); i++) {
+async function quitPids(pane, session, pids, log) {
+  const any = () => pids.some(alive);
+  for (let i = 0; i < QUIT_TRIES && any(); i++) {
     await herdr(['pane', 'send-keys', pane, 'ctrl+c'], session);
     log?.(`sent ctrl+c to ${pane} (${i + 1})`);
     await sleep(QUIT_EVERY_MS);
   }
-  return !alive(pid);
+  return !any();
 }
 
 /** `herdr agent start` needs the pane back at its shell prompt. */
@@ -216,9 +254,32 @@ async function acceptChannelWarning(pane, session, ready) {
 
 const startArgs = plan => ['agent', 'start', plan.name, '--kind', plan.kind, '--pane', plan.pane, '--timeout', String(START_TIMEOUT_MS), ...(plan.args.length ? ['--', ...plan.args] : [])];
 
-async function startAgent(plan, log) {
+// herdr answers these while its detector still credits the pane or the name to the
+// agent that just exited; OS-level process-info does not cover that window.
+const TRANSIENT_START = /agent_pane_busy|agent_name_taken/;
+const START_RETRY_MS = 5_000;
+
+async function startOnce(plan) {
+  return herdr(startArgs(plan), plan.session, { timeout: START_TIMEOUT_MS + 30_000 });
+}
+
+async function startWithRetry(plan, log, retry) {
+  const end = Date.now() + (retry ? START_RETRY_MS : 0);
+  for (;;) {
+    try {
+      return await startOnce(plan);
+    } catch (err) {
+      const transient = TRANSIENT_START.test(`${err?.text ?? ''} ${err?.message ?? ''}`);
+      if (!transient || Date.now() >= end) throw err;
+      log?.(`herdr still holds ${plan.pane} or "${plan.name}" for the old agent; retrying the start`);
+      await sleep(400);
+    }
+  }
+}
+
+async function startAgent(plan, log, { retry = false } = {}) {
   let outcome = 'pending';
-  const started = herdr(startArgs(plan), plan.session, { timeout: START_TIMEOUT_MS + 30_000 }).then(
+  const started = startWithRetry(plan, log, retry).then(
     () => { outcome = 'ready'; },
     err => {
       if (/agent_not_ready/.test(err?.text ?? '') || /agent_not_ready/.test(err?.message ?? '')) { outcome = 'blocked'; return; }
@@ -240,23 +301,28 @@ async function startAgent(plan, log) {
 
 async function performRestart(plan, log) {
   log(`restart ${plan.pane}: quitting ${plan.kind} pid ${plan.pid}`);
-  if (!(await quitPid(plan.pane, plan.session, plan.pid, log))) {
+  if (!(await quitPids(plan.pane, plan.session, plan.pids ?? [plan.pid], log))) {
     throw new TargetError(`${plan.kind} pid ${plan.pid} in ${plan.pane} did not exit after ${QUIT_TRIES} ctrl+c — it was not relaunched; look at it, then stop it by hand:\n  ${herdrLine(['pane', 'read', plan.pane, '--source', 'visible', '--lines', '20'], plan.session)}\n  kill ${plan.pid}`, 'stuck');
   }
   if (!(await waitForShell(plan.pane, plan.session))) {
-    throw new TargetError(`${plan.pane} did not return to its shell prompt after ${plan.kind} exited — not relaunching into it; see what holds it:\n  ${herdrLine(['pane', 'process-info', '--pane', plan.pane], plan.session)}`, 'stuck');
+    throw new TargetError(`${plan.pane} did not return to its shell prompt after ${plan.kind} exited — it is stopped and was not relaunched; see what holds the pane, then bring the agent back:\n  ${herdrLine(['pane', 'process-info', '--pane', plan.pane], plan.session)}\n  ${plan.resume}`, 'stuck');
   }
   // the prompt being drawn is when direnv reloads .envrc, the point of most restarts
   await sleep(500);
   log(`restart ${plan.pane}: relaunching as "${plan.name}"`);
-  await startAgent(plan, log);
+  try {
+    await startAgent(plan, log, { retry: true });
+  } catch (err) {
+    if (err?.code === 'blocked') throw err;   // it did start; it waits on a screen
+    throw new TargetError(`${plan.kind} in ${plan.pane} was stopped but could not be relaunched — ${err.message}\n  bring it back from its transcript:\n  ${plan.resume}`, 'relaunch-failed');
+  }
   const now = await paneProcess(plan.pane, plan.session, plan.kind).catch(() => null);
   log(`restart ${plan.pane}: ${plan.kind} is back${now?.running ? ` as pid ${now.pid}` : ''}, agent "${plan.name}"`);
   return now;
 }
 
 async function performKill(plan, log) {
-  if (!(await quitPid(plan.pane, plan.session, plan.pid, log))) {
+  if (!(await quitPids(plan.pane, plan.session, plan.pids ?? [plan.pid], log))) {
     throw new TargetError(`${plan.kind ?? 'process'} pid ${plan.pid} in ${plan.pane} did not exit after ${QUIT_TRIES} ctrl+c; look at it, then stop it by hand:\n  ${herdrLine(['pane', 'read', plan.pane, '--source', 'visible', '--lines', '20'], plan.session)}\n  kill ${plan.pid}`, 'stuck');
   }
   log(`kill ${plan.pane}: pid ${plan.pid} is gone; the pane stays`);
@@ -280,14 +346,22 @@ function entryFile() {
 }
 const runtimeBin = () => (/^(bun|node)(\.exe)?$/.test(basename(process.execPath)) ? process.execPath : process.versions.bun ? 'bun' : 'node');
 
-/** Hand a plan to a detached copy of this CLI; it outlives the agent it stops. */
-function spawnWorker(plan) {
-  const log = lifecycleLogPath();
+/**
+ * Hand a plan to a detached copy of this CLI; it outlives the agent it stops.
+ * Throws — before anything was stopped — when the runtime cannot be spawned.
+ */
+export function spawnWorker(plan, { runtime = runtimeBin(), entry = entryFile(), log = lifecycleLogPath() } = {}) {
   mkdirSync(dirname(log), { recursive: true });
   const fd = openSync(log, 'a', 0o600);
   try {
     // the plan goes over stdin: not argv (ps shows it) and not a file left behind
-    const child = spawn(runtimeBin(), [entryFile(), plan.verb, '--worker'], { detached: true, stdio: ['pipe', fd, fd], cwd: homedir(), env: process.env });
+    const child = spawn(runtime, [entry, plan.verb, '--worker'], { detached: true, stdio: ['pipe', fd, fd], cwd: homedir(), env: process.env });
+    // a spawn failure arrives as an 'error' event; unheard, it kills this process
+    child.on('error', () => {});
+    child.stdin?.on('error', () => {});
+    if (!child.pid) {
+      throw new TargetError(`could not start the detached ${plan.verb} worker with runtime '${runtime}' — nothing was stopped; check the runtime is on PATH:\n  command -v ${shq(basename(runtime))} || echo "${basename(runtime)} not on PATH: $PATH"`, 'worker');
+    }
     child.stdin.end(JSON.stringify(plan));
     child.unref();
     return { pid: child.pid, log };
@@ -321,6 +395,8 @@ const HELP = {
   Quit the agent and relaunch it in the same pane, keeping its herdr name, with the
   argv read from its running process (session pinned to the one herdr reports).
   Needs a live agent; a stopped one comes back with 'maw herdr resume <target>'.
+  An agent under a wrapper (omx around codex) is refused with the commands to
+  restart it by hand: herdr can relaunch the agent kind, not the wrapper.
   --channel server:fleet   also load that development channel (claude); the startup
                            warning is accepted for you
   --no-channel             drop every development channel
@@ -329,12 +405,14 @@ const HELP = {
   resume: `maw herdr resume [<target>] [--session <name>] [--dry]
   Start the agent on the newest transcript for the target's worktree (resume
   providers: MAW_HERDR_RESUME_PROVIDERS, MAW_HERDR_CLAUDE_ROOTS, MAW_HERDR_CODEX_ROOTS),
-  opening a herdr space for it when there is none. Refuses a running agent.`,
+  opening a herdr space for it when there is none. Refuses a running agent; a pane
+  id (or self) at its shell prompt is resumed even beside a running neighbour. A
+  session a live agent already runs is never resumed a second time.`,
   kill: `maw herdr kill [<target>] [--session <name>] [--dry]
   Ctrl-C the agent until its process exits. The pane and the space stay open.`,
   close: `maw herdr close [<target>] [--force] [--session <name>] [--dry]
   Close the target's herdr space. The worktree and its transcript stay on disk.
-  A space holding a live agent needs --force.`,
+  A space holding a live agent, or any pane running a job, needs --force.`,
 };
 
 function parse(args, verb, UsageError) {
@@ -374,13 +452,37 @@ const paneHandle = (r, pane) => `--session ${shq(r.session)} ${pane}`;
 // how to name a target again in a printed command: a worktree by its path; a plain
 // space by its pane, because its path is borrowed from whatever its pane sits in
 const targetHandle = (r, pane = r.pane) => (r.kind === 'worktree' ? shq(r.path) : pane ? paneHandle(r, pane) : shq(r.label));
-const resumeHint = (r, pane) => `  maw herdr resume ${targetHandle(r, pane)}`;
+// resume by path acts on the whole worktree and refuses while any agent runs there,
+// so with a neighbour still running, the stopped one is named by its own pane
+const hasNeighbour = (r, pane) => r.panes.some(p => p.agent && p.pane !== pane);
+const resumeCommand = (r, pane) => `maw herdr resume ${pane && r.session && hasNeighbour(r, pane) ? paneHandle(r, pane) : targetHandle(r, pane)}`;
+const resumeHint = (r, pane) => `  ${resumeCommand(r, pane)}`;
 
 function printResolved(r) {
   for (const line of describeResolved(r)) console.log(line);
 }
 
 const isCaller = (caller, r, pane) => !!caller?.pane && caller.pane === pane && (!caller.session || !r.session || caller.session === r.session);
+
+// restart, kill and close stop work: never on a partial name, and never on an agent
+// picked by focus when a name or path covers several (mod.target.mjs)
+const STOPPING = { exact: true, strictPane: true };
+
+const notTheAgent = (r, pane, proc) => new TargetError(`the foreground process in pane ${pane} (${proc.name}, pid ${proc.pid}) is not the ${r.agent} herdr detected there — nothing was done; see what is in front of it:\n  ${herdrLine(['pane', 'read', pane, '--source', 'visible', '--lines', '20'], r.session)}`, 'busy');
+
+/** Every live agent in every running herdr session: its session, pane, name and herdr agent_session. Read-only. */
+async function liveAgents() {
+  const index = await herdrJson(['session', 'list', '--json'], null);
+  const sessions = (index?.sessions ?? index?.result?.sessions ?? []).filter(x => x?.running).map(x => x.name);
+  const out = [];
+  for (const s of sessions) {
+    const raw = await herdrJson(['agent', 'list'], s);
+    for (const a of raw?.result?.agents ?? raw?.agents ?? []) {
+      out.push({ session: s, pane: a.pane_id, name: a.name ?? null, sessionId: typeof a.agent_session?.value === 'string' ? a.agent_session.value : null });
+    }
+  }
+  return out;
+}
 
 // --- restart ---------------------------------------------------------------------------
 
@@ -389,7 +491,7 @@ export async function cmdRestart(args, { UsageError = Error } = {}) {
   if (o.help) return void console.log(HELP.restart);
   if (o.worker) return runWorker('restart');
   const caller = callerFromEnv();
-  const r = await resolveLive(o.target, { session: o.session, verb: 'restart', caller });
+  const r = await resolveLive(o.target, { session: o.session, verb: 'restart', caller, ...STOPPING });
 
   const notRunning = (why, pane) => new TargetError(
     `'${r.label}' ${why} — restart reads the agent's argv from its live process, so there is nothing to restart. Bring it back from its transcript instead:\n${resumeHint(r, pane)}`,
@@ -400,24 +502,46 @@ export async function cmdRestart(args, { UsageError = Error } = {}) {
   if (!r.agent) throw notRunning(`has no agent running in pane ${pane}`, pane);
   const proc = await paneProcess(pane, r.session, r.agent);
   if (!proc.running) throw notRunning(`has no ${r.agent} running in pane ${pane} (herdr still lists it, but the pane is at its shell prompt)`, pane);
-  if (!proc.isAgent) {
-    throw new TargetError(`the foreground process in pane ${pane} (${proc.name}, pid ${proc.pid}) is not the ${r.agent} herdr detected there — nothing was done; see what is in front of it:\n  ${herdrLine(['pane', 'read', pane, '--source', 'visible', '--lines', '20'], r.session)}`, 'busy');
+  if (!proc.isAgent) throw notTheAgent(r, pane, proc);
+  const byHand = `  maw herdr kill ${paneHandle(r, pane)} && ${resumeCommand(r, pane)}`;
+  if (proc.wrapper) {
+    throw new TargetError(
+      `the ${r.agent} in pane ${pane} (pid ${proc.pid}) runs under a wrapper: its process group leader is pid ${proc.wrapper.pid}, ${wrapperCommand(proc.wrapper)}. herdr agent start can only relaunch ${r.agent} itself, which would drop the wrapper and its flags — nothing was done. Stop it, then start the wrapper again at that pane's prompt:\n  maw herdr kill ${paneHandle(r, pane)}\n  ${wrapperCommand(proc.wrapper)}`,
+      'wrapped',
+    );
   }
+  // herdr refuses a control character in any agent argument, and would do so only
+  // after the agent had already been stopped
+  const ctrlRefusal = () => new TargetError(
+    `the ${r.agent} in pane ${pane} (pid ${proc.pid}) was started with an argument holding a control character (a newline, say — a multi-line --append-system-prompt), which herdr agent start refuses — nothing was done. Stop it and resume its transcript instead:\n${byHand}`,
+    'unrelaunchable',
+  );
+  if (proc.herdrArgv?.some(a => CONTROL_CHAR.test(a))) throw ctrlRefusal();
   const read = await readArgv(proc.pid, proc.herdrArgv);
   if (!read) throw notRunning(`has no live process behind pane ${pane} (pid ${proc.pid} is gone)`, pane);
   if (read.mismatch) {
     throw new TargetError(`ps and herdr disagree about pid ${proc.pid}'s command line in pane ${pane} — it changed or exited while being read; nothing was done. Check again:\n  maw herdr restart ${paneHandle(r, pane)} --dry`, 'changed');
   }
+  if (read.argv.some(a => CONTROL_CHAR.test(a))) throw ctrlRefusal();
 
-  // relaunch = the process's own argv minus argv[0] (herdr runs the kind's executable)
-  let relaunch = dedupeArgs(read.argv.slice(1));
+  // relaunch = the process's own argv after the agent's executable (herdr runs the
+  // kind's canonical one): after argv[0] for a native agent, after the script for
+  // one hosted by a runtime (`bun ~/.bun/bin/omp …`)
+  const at = execIndex(read.argv, r.agent, proc);
+  if (at === -1) {
+    throw new TargetError(
+      `cannot find the ${r.agent} executable in pid ${proc.pid}'s command line (${commandOf(redactArgs(read.argv)).slice(0, 2).map(shq).join(' ')} …), so there is no telling which arguments are its own — nothing was done. Stop it and resume its transcript instead:\n${byHand}`,
+      'unrelaunchable',
+    );
+  }
+  let relaunch = dedupeArgs(read.argv.slice(at + 1));
   const herdrSession = await paneSessionId(pane, r.session);
   let sessionNote;
   if (knowsResume(r.agent)) {
     const id = herdrSession ?? sessionInArgs(r.agent, relaunch);
     if (!id) {
       throw new TargetError(
-        `herdr reports no session for the ${r.agent} in pane ${pane} (pid ${proc.pid}) and its argv names none, so a relaunch would open a NEW conversation — nothing was done. Stop it and resume its newest transcript instead:\n  maw herdr kill ${paneHandle(r, pane)} && maw herdr resume ${targetHandle(r, pane)}`,
+        `herdr reports no session for the ${r.agent} in pane ${pane} (pid ${proc.pid}) and its argv names none, so a relaunch would open a NEW conversation — nothing was done. Stop it and resume its newest transcript instead:\n${byHand}`,
         'no-session',
       );
     }
@@ -429,17 +553,17 @@ export async function cmdRestart(args, { UsageError = Error } = {}) {
   relaunch = withChannel(relaunch, o.channel);
   const current = r.panes.find(p => p.pane === pane)?.name;
   const plan = {
-    verb: 'restart', session: r.session, pane, pid: proc.pid, kind: r.agent,
+    verb: 'restart', session: r.session, pane, pid: proc.pid, pids: pidsOf(proc), kind: r.agent,
     name: current || agentName(`${r.agent}-${pane.replace(':', '-')}`),
     args: relaunch,
+    resume: resumeCommand(r, pane),
   };
-  const shown = { ...plan, args: redactArgs(plan.args) };
   const lines = [
     `  restart   ${pane} · ${plan.kind} pid ${plan.pid} · agent "${plan.name}"${current ? '' : ' (herdr had no name for it; this one is derived from the pane)'}`,
-    `    argv    read from ${read.source}`,
+    `    argv    read from ${read.source}${at > 0 ? ` (runs as a script under ${base(read.argv[0])}; herdr starts ${plan.kind} itself)` : ''}`,
     `    session ${sessionNote}`,
-    `    quit    ctrl+c until pid ${plan.pid} exits (up to ${QUIT_TRIES})`,
-    `    start   ${herdrLine(startArgs(shown), plan.session)}`,
+    `    quit    ctrl+c until pid ${plan.pids.join(' and ')} exit${plan.pids.length === 1 ? 's' : ''} (up to ${QUIT_TRIES})`,
+    `    start   ${herdrLine(startArgs(plan), plan.session)}`,
   ];
   if (hasDevChannel(plan.args)) lines.push('    channel a development channel is loaded; its startup warning will be accepted');
 
@@ -469,17 +593,36 @@ export async function cmdResume(args, { UsageError = Error } = {}) {
   const r = await resolveLive(o.target, { session: o.session, verb: 'resume', caller });
   if (r.prunable) requirePane({ ...r, pane: null, paneChoices: null }, 'resume');   // throws the prune fix
 
+  // An explicit pane (self, a pane id) at its shell prompt is resumed even while a
+  // neighbour in the same worktree runs: that is how one of two agents comes back.
+  const explicit = (r.form === 'self' || r.form === 'pane') && r.pane;
   const live = r.panes.filter(p => p.agent);
-  if (live.length) {
+  const blocking = explicit ? live.filter(p => p.pane === r.pane) : live;
+  if (blocking.length) {
+    const shells = explicit ? [] : r.panes.filter(p => !p.agent);
     throw new TargetError(
-      `'${r.label}' already runs ${live.length === 1 ? `a ${live[0].agent} in ${live[0].pane}` : `${live.length} agents`} — resume brings back a stopped agent. To relaunch a running one with a fresh environment:\n${live.map(p => `  maw herdr restart ${paneHandle(r, p.pane)}`).join('\n')}`,
+      `'${r.label}' already runs ${blocking.length === 1 ? `a ${blocking[0].agent} in ${blocking[0].pane}` : `${blocking.length} agents`} — resume brings back a stopped agent. To relaunch a running one with a fresh environment${shells.length ? ', or to resume into one of its shell panes' : ''}:\n${[...blocking.map(p => `  maw herdr restart ${paneHandle(r, p.pane)}`), ...shells.map(p => `  maw herdr resume ${paneHandle(r, p.pane)}`)].join('\n')}`,
       'running',
     );
   }
+  const pane0 = r.pane;
 
+  // a session a live agent already holds is never resumed a second time — in this
+  // worktree (the neighbour's transcript is the newest) or anywhere else
+  const agents = await liveAgents();
+  const held = new Map(agents.filter(a => a.sessionId).map(a => [a.sessionId, a]));
   const providers = configuredProviders();
-  const found = findSessions(providers, new Map([[r.path, r.path]])).get(r.path);
-  if (!found) {
+  const aliases = new Map([[r.path, r.path]]);
+  const newest = findSessions(providers, aliases).get(r.path);
+  const found = findSessions(providers, aliases, new Set(held.keys())).get(r.path);
+  if (!found || held.has(found.id)) {
+    const holder = newest && held.get(newest.id);
+    if (holder) {
+      throw new TargetError(
+        `the only transcript to resume for ${r.path} is ${newest.provider} session ${newest.id}, and the agent in ${holder.pane} (session ${holder.session}) is running it — resuming it again would put two agents on one conversation; nothing was done. Look at that agent:\n  maw herdr peek --session ${shq(holder.session)} ${holder.pane}`,
+        'held',
+      );
+    }
     const where = providers.flatMap(p => p.roots.map(root => (p.name === 'claude' ? join(root, encodeClaudeDir(r.path)) : root)));
     throw new TargetError(
       providers.length
@@ -499,14 +642,23 @@ export async function cmdResume(args, { UsageError = Error } = {}) {
   const create = r.repoRoot
     ? ['worktree', 'open', '--cwd', r.repoRoot, '--path', r.path, '--no-focus']
     : ['workspace', 'create', '--cwd', r.path, '--label', r.label, '--no-focus'];
-  const name = agentName(r.label);
-  const plan = { verb: 'resume', session: createSession, pane: r.pane, name, kind: launch.kind, args: launch.args };
+  // herdr wants the name unique among live agents; checked before anything opens
+  const wanted = agentName(r.label);
+  const taken = agents.filter(a => a.name && (!createSession || a.session === createSession)).map(a => a.name);
+  const name = freeName(wanted, taken);
+  if (!name) {
+    throw new TargetError(`every agent name from "${wanted}" to "${wanted.slice(0, 29)}-99" is taken in session ${createSession ?? 'default'} — nothing was done; see which agents hold them:\n  herdr${createSession ? ` --session ${shq(createSession)}` : ''} agent list`, 'name-taken');
+  }
+  const plan = { verb: 'resume', session: createSession, pane: pane0, name, kind: launch.kind, args: launch.args };
   const lines = [
     `  resume    ${r.label} · ${found.provider} session ${found.id}`,
     `    from    ${found.file} (${(found.bytes / 1024).toFixed(0)} KB, ${new Date(found.at).toISOString()})`,
-    r.pane ? `    pane    ${r.pane} (open space ${r.workspace}, at its shell prompt)` : `    open    ${herdrLine(create, createSession)}`,
-    `    start   ${herdrLine(startArgs({ ...plan, pane: r.pane ?? '<new root pane>' }), createSession)}`,
+    pane0 ? `    pane    ${pane0} (open space ${r.workspace}, at its shell prompt)` : `    open    ${herdrLine(create, createSession)}`,
+    `    start   ${herdrLine(startArgs({ ...plan, pane: pane0 ?? '<new root pane>' }), createSession)}`,
   ];
+  if (name !== wanted) lines.push(`    name    "${wanted}" is held by a live agent, so this one is "${name}"`);
+  const passed = newest && newest.id !== found.id ? held.get(newest.id) : null;
+  if (passed) lines.push(`    skip    newer session ${newest.id} — the agent in ${passed.pane} is running it`);
   if (o.dry) {
     printResolved(r);
     for (const l of lines) console.log(l);
@@ -514,7 +666,7 @@ export async function cmdResume(args, { UsageError = Error } = {}) {
     return;
   }
 
-  let pane = r.pane;
+  let pane = pane0;
   if (pane) {
     const busy = await paneProcess(pane, r.session);
     if (busy.running) {
@@ -541,7 +693,7 @@ export async function cmdKill(args, { UsageError = Error } = {}) {
   if (o.help) return void console.log(HELP.kill);
   if (o.worker) return runWorker('kill');
   const caller = callerFromEnv();
-  const r = await resolveLive(o.target, { session: o.session, verb: 'kill', caller });
+  const r = await resolveLive(o.target, { session: o.session, verb: 'kill', caller, ...STOPPING });
   if (!r.workspace) {
     if (o.dry) printResolved(r);
     return void console.log(`  '${r.label}' has no open herdr space — nothing is running there, nothing to stop`);
@@ -556,25 +708,27 @@ export async function cmdKill(args, { UsageError = Error } = {}) {
     if (o.dry) printResolved(r);
     return void console.log(`  the ${r.agent} in ${pane} has already exited — nothing to stop`);
   }
-  if (!proc.isAgent) {
-    throw new TargetError(`the foreground process in pane ${pane} (${proc.name}, pid ${proc.pid}) is not the ${r.agent} herdr detected there — nothing was done; see what is in front of it:\n  ${herdrLine(['pane', 'read', pane, '--source', 'visible', '--lines', '20'], r.session)}`, 'busy');
-  }
-  const plan = { verb: 'kill', session: r.session, pane, pid: proc.pid, kind: r.agent };
-  const line = `  kill      ${pane} · ${r.agent} pid ${proc.pid} · ctrl+c until it exits (up to ${QUIT_TRIES}); the pane stays`;
+  if (!proc.isAgent) throw notTheAgent(r, pane, proc);
+  const plan = { verb: 'kill', session: r.session, pane, pid: proc.pid, pids: pidsOf(proc), kind: r.agent };
+  const lines = [`  kill      ${pane} · ${r.agent} pid ${proc.pid} · ctrl+c until pid ${plan.pids.join(' and ')} exit${plan.pids.length === 1 ? 's' : ''} (up to ${QUIT_TRIES}); the pane stays`];
+  if (proc.wrapper) lines.push(`    wrapper pid ${proc.wrapper.pid} ${wrapperCommand(proc.wrapper)} holds the pane and is stopped too`);
+  const back = proc.wrapper
+    ? `Bring it back under its wrapper by typing this at the pane's prompt (resume would start ${r.agent} without it):\n  ${wrapperCommand(proc.wrapper)}`
+    : `Bring it back with:\n${resumeHint(r, pane)}`;
   if (o.dry) {
     printResolved(r);
-    console.log(line);
+    for (const l of lines) console.log(l);
     console.log('  --dry: nothing was done');
     return;
   }
-  console.log(line);
+  for (const l of lines) console.log(l);
   if (isCaller(caller, r, pane) || (await isOurAncestor(proc.pid))) {
     const w = spawnWorker(plan);
     console.log(`  kill scheduled — this command runs inside the agent it stops, so a detached worker (pid ${w.pid}) does it. Follow it:\n  tail -n 20 ${shq(w.log)}`);
     return;
   }
   await performKill(plan, () => {});
-  console.log(`  stopped ${r.agent} pid ${proc.pid} in ${pane}; the pane stays open. Bring it back with:\n${resumeHint(r, pane)}`);
+  console.log(`  stopped ${r.agent} pid ${proc.pid} in ${pane}; the pane stays open. ${back}`);
 }
 
 // --- close -----------------------------------------------------------------------------
@@ -582,20 +736,35 @@ export async function cmdKill(args, { UsageError = Error } = {}) {
 export async function cmdClose(args, { UsageError = Error } = {}) {
   const o = parse(args, 'close', UsageError);
   if (o.help) return void console.log(HELP.close);
-  const r = await resolveLive(o.target, { session: o.session, verb: 'close' });
+  const r = await resolveLive(o.target, { session: o.session, verb: 'close', exact: true });
   if (!r.workspace) {
     if (o.dry) printResolved(r);
     return void console.log(`  '${r.label}' has no open herdr space — nothing to close`);
   }
   const live = r.panes.filter(p => p.agent);
-  if (live.length && !o.force) {
+  // closing a space kills whatever runs in any of its panes, not only agents: a dev
+  // server, a test suite, an index build
+  const jobs = [];
+  for (const p of r.panes.filter(p => !p.agent)) {
+    const proc = await paneProcess(p.pane, r.session);
+    if (proc.running) jobs.push({ pane: p.pane, name: proc.name, pid: proc.pid });
+  }
+  if ((live.length || jobs.length) && !o.force) {
+    const what = [
+      live.length ? `${live.length} running agent${live.length === 1 ? '' : 's'}` : null,
+      jobs.length ? `${jobs.length} pane${jobs.length === 1 ? '' : 's'} running a job (${jobs.map(j => `${j.pane}: ${j.name} pid ${j.pid}`).join(', ')})` : null,
+    ].filter(Boolean).join(' and ');
     throw new TargetError(
-      `'${r.label}' (space ${r.workspace}, session ${r.session}) holds ${live.length} running agent${live.length === 1 ? '' : 's'} — closing the space would end ${live.length === 1 ? 'it' : 'them'}; nothing was done. Stop ${live.length === 1 ? 'it' : 'them'} first, or close anyway:\n${live.map(p => `  maw herdr kill ${paneHandle(r, p.pane)}`).join('\n')}\n  maw herdr close ${targetHandle(r)} --force`,
+      `'${r.label}' (space ${r.workspace}, session ${r.session}) holds ${what} — closing the space would end them; nothing was done. Stop or look at them first, or close anyway:\n${[
+        ...live.map(p => `  maw herdr kill ${paneHandle(r, p.pane)}`),
+        ...jobs.map(j => `  ${herdrLine(['pane', 'read', j.pane, '--source', 'visible', '--lines', '20'], r.session)}`),
+      ].join('\n')}\n  maw herdr close ${targetHandle(r)} --force`,
       'running',
     );
   }
   const cmd = ['workspace', 'close', r.workspace];
-  const line = `  close     space ${r.workspace} '${r.label}' in session ${r.session} · ${r.panes.length} pane${r.panes.length === 1 ? '' : 's'}${live.length ? `, ${live.length} running agent${live.length === 1 ? '' : 's'} (--force)` : ''}\n    run     ${herdrLine(cmd, r.session)}`;
+  const busy = live.length + jobs.length;
+  const line = `  close     space ${r.workspace} '${r.label}' in session ${r.session} · ${r.panes.length} pane${r.panes.length === 1 ? '' : 's'}${busy ? `, ${busy} still running (--force)` : ''}\n    run     ${herdrLine(cmd, r.session)}`;
   if (o.dry) {
     printResolved(r);
     console.log(line);

@@ -17,6 +17,15 @@
   `mod.resumeLookup.mjs` with the #60 provider interface (to be replaced by #60's
   `mod.resumeProviders.mjs` on merge). Smoke: `utils/smoke-lifecycle.mjs`, a fake
   herdr hosting real fake-agent processes.
+- Harden the lifecycle verbs after review (#62): restart drops the runtime AND the
+  script of an interpreter-hosted agent, refuses a wrapped agent (omx around codex)
+  and an argv with control characters before stopping anything, retries herdr's
+  transient busy/name-taken answers, and ends a failed relaunch with the `resume`
+  command; restart/kill/close take no substring names and never pick an agent by
+  focus; resume takes a pane beside a running neighbour, skips sessions a live
+  agent holds and picks a free agent name; close also refuses panes running a job;
+  every printed herdr line and the worker log redact secret values; unreadable
+  `process-info` is an error, not "nothing runs".
 
 - Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
   takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
