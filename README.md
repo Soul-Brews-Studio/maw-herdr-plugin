@@ -35,6 +35,7 @@ forever. Measured: 3.5 GB written before kill, plugin left with no
 ```bash
 maw herdr ls                    # workspaces, grouped machine → repo → worktree
 maw herdr ls --path             # ...each workspace's checkout path beneath it
+maw herdr ls resumable          # every worktree in one state: running|open|resumable|cold
 maw herdr ls --sessions         # herdr server instances
 maw herdr ls --agents           # every agent pane, every session
 maw herdr ls --json             # any of the above, as JSON
@@ -60,6 +61,58 @@ keeps the raw server listing if you need it.
 
 `●` working, `○` idle. Branch/`↑↓` come from a local git read only — never a
 fetch, never blocks on network.
+
+### Worktree states
+
+A worktree is in one of four states, whether or not a herdr space is open on it:
+
+| state | meaning | who knows |
+|---|---|---|
+| running | an agent is live in a pane | herdr |
+| open | a space is open, no agent | herdr |
+| resumable | no space, but a transcript exists to resume from | a resume provider |
+| cold | nothing | — |
+
+Plain `ls` adds one line counting every checkout on disk by state
+(`290 checkouts · 28 running · …` — "checkouts" because the tree's own footer
+already says "worktrees" for linked worktrees with a space open); `ls <state>`
+(or `--state <state>`) lists the worktrees in that state, repo → worktree, and
+combines with `--path` and `--json`. `--json` keeps the `workspaces` array
+(each row now carries `state` and `agents`) and adds `worktrees`, `states`
+(the counts) and `providers`. A resumable row carries `resume.command`, the
+agent's own resume line, runnable as printed; a transcript whose session id is
+not a plain `[A-Za-z0-9._-]` token is never offered.
+
+A listing can be short, and then it says so on stderr, each warning ending in
+the command that shows the cause, and `--json` names what is missing:
+
+- `incomplete`: herdr sessions whose `api snapshot` failed or did not parse.
+  Their spaces are absent, so a worktree with a live agent in one of them shows
+  as resumable or cold. Check with `herdr --session <name> api snapshot`.
+- `unreadable`: repos `git worktree list` failed on (dubious ownership, a
+  corrupt `.git/worktrees` entry). Their closed worktrees are absent from the
+  counts. Check with `git -C <repo> worktree list`.
+
+Both are empty arrays on a complete listing. The scan runs at most 8 gits at once.
+
+Worktrees come from git: every repo under the ghq root (`$GHQ_ROOT`, else
+`ghq root --all`, else `ghq_root` in `~/.maw/oracles.json`) with at least one
+linked worktree, plus the repo of every open space. A repo that never used a
+worktree and has no space open is a clone, not a workspace, and is not listed.
+
+"Resumable" is the only state herdr cannot answer, so it comes from providers,
+not from a path baked into the plugin. Two ship built in:
+
+| provider | looks in | default root | override |
+|---|---|---|---|
+| `claude` | `<root>/<cwd with every non-alphanumeric as ->/*.jsonl` | `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects` | `MAW_HERDR_CLAUDE_ROOTS` |
+| `codex` | `<root>/YYYY/MM/DD/rollout-*.jsonl`, matched on the `cwd` in the first line | `$CODEX_HOME/sessions`, else `~/.codex/sessions` | `MAW_HERDR_CODEX_ROOTS` |
+
+Root lists are `:`-separated. A transcript under 1 KiB, or a Codex subagent
+thread, is not counted as resumable. `MAW_HERDR_RESUME_PROVIDERS=claude` runs
+only one; `MAW_HERDR_RESUME_PROVIDERS=none` runs none, and `ls` then reports
+running, open and cold and never calls anything resumable. The interface a new
+provider implements is documented at the top of `src/cli/mod.resumeProviders.mjs`.
 
 ### Wake
 

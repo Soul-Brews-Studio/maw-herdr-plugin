@@ -52,6 +52,8 @@ bun-check:
     MAW_SEND_ENTRY="$output/index.js" node utils/smoke-send-delivery.mjs
     node utils/smoke-mcp-serve.mjs
     MAW_MCP_ENTRY="$output/index.js" node utils/smoke-mcp-serve.mjs
+    node utils/smoke-ls-states.mjs
+    MAW_STATES_ENTRY="$output/index.js" node utils/smoke-ls-states.mjs
 
 # The server is TypeScript on Bun; check is the Bun suite.
 check: bun-check
