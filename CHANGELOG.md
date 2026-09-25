@@ -16,6 +16,17 @@
   instead of the repo name. Two same-named checkouts from different orgs are
   now two groups, and a group prints every mother workspace, where before the
   second one was dropped from the tree without notice.
+- Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
+  takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
+  name (exact label, then a repo's main worktree, then a unique substring).
+  Ambiguity lists runnable candidates and exits 1; `--dry` is accepted wherever
+  a target is. `hey` and `peek` now resolve through it with unchanged output and
+  exit codes, and gain `self`, paths and `--dry`. A path means the worktree
+  containing it in every verb; `self` and paths never fall through to name
+  matching; focus picks a pane only within one space, never across spaces or
+  sessions (a pane id held in two sessions is now listed, not narrowed to the
+  focused copy). New read-only `maw herdr resolve [<target>]` /
+  `resolve --list` (#59).
 - `POST /api/send` restores the legacy delivery semantics (#42): a `[node:oracle]`
   sender tag from `X-Maw-From` or the server's identity (slash commands
   untagged), a read of the agent's input box that refuses someone's draft,
