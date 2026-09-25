@@ -13,6 +13,36 @@
   sessions (a pane id held in two sessions is now listed, not narrowed to the
   focused copy). New read-only `maw herdr resolve [<target>]` /
   `resolve --list` (#59).
+- `maw herdr ls [running|open|resumable|cold]`: every git worktree in one of
+  four states, including the ones with no open herdr space, which `ls` could
+  not show before (#60). Plain `ls` gains a line counting all four; `--json`
+  keeps its shape, adds `state`/`agents` to each workspace, and adds
+  `worktrees`, `states` and `providers`. "Resumable" comes from resume
+  providers — Claude and Codex built in, roots configurable, all switchable
+  off with `MAW_HERDR_RESUME_PROVIDERS=none` — rather than from a vendor path
+  in the plugin. A herdr session whose snapshot fails, or a repo git cannot
+  list, is a stderr warning ending in the command to check it, and
+  `incomplete` / `unreadable` in `--json` — never a silently wrong state. The
+  tally line counts "checkouts", so it no longer reuses the tree footer's
+  "worktrees" for a different number.
+- `ls --json` larger than 64 KB is no longer cut at 65,536 bytes when piped
+  under Bun.
+
+- `maw herdr ls --path` prints each workspace's checkout beneath its row, as a
+  full absolute path that pastes straight into `cd` (#56). The data was already
+  in `--json` as `checkout`; only the human-facing view lacked it.
+- `--help` / `-h` after any verb prints the usage instead of `unknown argument`,
+  and runs nothing. A usage error with no fix line of its own now ends with
+  `maw herdr <verb> --help`. A verb that does not exist is still
+  `unknown command` (exit 2) with `--help` after it, so probing for a verb
+  cannot get a false yes. `wake <oracle> --kind -h` is now a help request: it
+  used to take `-h` as the engine, create a workspace, and fail on
+  `agent start`, leaving the workspace behind.
+- `maw herdr ls` groups workspaces by herdr's `repo_key` (the shared git dir)
+  instead of the repo name. Two same-named checkouts from different orgs are
+  now two groups, and a group prints every mother workspace, where before the
+  second one was dropped from the tree without notice.
+
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,
   packages ship no `bin/maw-herdr-serve` and no `bundledArtifacts`, and CI no

@@ -296,8 +296,12 @@ else { console.error('fake herdr: unexpected', JSON.stringify(args)); process.ex
   const legacy = JSON.parse(readFileSync(FIXTURE, 'utf8'));
   eq(legacy.ref, LEGACY_REF);
   assert.deepEqual(legacy.cases.map(c => c.args), cases, `the case list changed; re-record: bun utils/smoke-target-grammar.mjs --record`); checks++;
+  // #56 (merged alongside) appends `maw herdr <verb> --help` to every one-line
+  // usage error. The fixture predates it, so apply that one rule to what it expects.
+  const with56 = (verb, w) => (w.rc === 2 && /^maw herdr: [^\n]*\n$/.test(w.err) ? { ...w, err: `${w.err}  maw herdr ${verb} --help\n` } : w);
   for (const c of legacy.cases) {
-    const { args, ...want } = c;
+    const { args, ...recorded } = c;
+    const want = with56(args[0], recorded);
     assert.deepEqual(norm(run(args)), want, `hey/peek changed for: ${args.join(' ')}`);
     checks++; compared++;
   }
