@@ -7,10 +7,14 @@
   from herdr's pushed `pane.agent_status_changed` events (no polling), fires
   exactly once per busy→idle/done transition (`--every`: once per completion),
   and is held by one detached watcher process per watch with a record under
-  `<config>/maw-herdr/watches/`. Watches on panes that close, move, or whose
-  herdr session stops clean themselves up with a `vanished` note; orphaned
-  records are swept by `watch --list`. Notes are addressed to a pane and read
-  with `inbox`, which is read-only and shows this pane's notes only.
+  `<config>/maw-herdr/watches/`. Watches on panes that close or whose herdr
+  session stops clean themselves up with a `vanished` note; a pane that herdr
+  moves (a new pane id) keeps its watch, recognised by its terminal id; orphaned
+  records are swept by `watch --list` (and only there — `--dry` deletes
+  nothing). `--stop` is scoped by `--session`, since pane ids repeat across
+  sessions. Notes are addressed to a pane and read with `inbox`, which is
+  read-only and shows this pane's notes only. `maw herdr reply <target> <text>`
+  files an answer in another pane's inbox, signed with this pane's address.
 - Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
   takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
   name (exact label, then a repo's main worktree, then a unique substring).

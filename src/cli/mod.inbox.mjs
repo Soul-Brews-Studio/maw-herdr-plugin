@@ -3,8 +3,9 @@
  *
  * A note carries the pane it is for ({session, pane}), so whatever agent sits in
  * that pane finds it without anyone having named it. `watch` files one when the
- * agent it watches finishes (or when that pane disappears); anything else that
- * needs a return path to "the pane that asked" can file one with fileNote().
+ * agent it watches finishes (or when that pane disappears); `reply <target> <text>`
+ * is how an agent that was asked something puts its answer there. Anything else
+ * that needs a return path to "the pane that asked" can file one with fileNote().
  *
  * Storage: one append-only JSON-lines file per pane,
  *   <config>/maw-herdr/inbox/<session>/<pane>.jsonl
@@ -22,7 +23,7 @@ import { randomBytes } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { callerFromEnv, resolveLive, shq } from './mod.target.mjs';
+import { callerFromEnv, describeResolved, requirePane, resolveLive, shq, takeDry } from './mod.target.mjs';
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
@@ -96,7 +97,7 @@ const hhmm = iso => { const d = new Date(iso); return Number.isNaN(+d) ? '??:??:
 
 function printNote(n) {
   const who = n.from ? `${n.from.label ? `${n.from.label} ` : ''}(${n.from.pane}${n.from.session && n.from.session !== n.to.session ? ` · ${n.from.session}` : ''})` : '';
-  const mark = n.kind === 'finished' ? `${C.green}●${C.off}` : n.kind === 'vanished' ? `${C.red}○${C.off}` : `${C.dim}·${C.off}`;
+  const mark = n.kind === 'finished' ? `${C.green}●${C.off}` : n.kind === 'vanished' ? `${C.red}○${C.off}` : n.kind === 'reply' ? `${C.cyan}●${C.off}` : `${C.dim}·${C.off}`;
   console.log(`  ${mark} ${C.dim}${hhmm(n.at)}${C.off}  ${(n.kind ?? 'note').padEnd(8)} ${C.cyan}${who}${C.off}  ${n.text ?? ''}`);
   const tail = (n.tail ?? '').replace(/\s+$/, '');
   if (tail) for (const line of tail.split('\n')) console.log(`      ${C.dim}│ ${line}${C.off}`);
@@ -142,5 +143,47 @@ export async function cmdInbox(args, { UsageError = Error } = {}) {
   const last = shown[shown.length - 1];
   const reply = [...shown].reverse().find(n => n.from?.pane);
   console.log(`  ${C.dim}newest ${last.id} · next time only what is new: maw herdr inbox --since ${last.id}${C.off}`);
-  if (reply) console.log(`  ${C.dim}talk back: maw herdr hey ${reply.from.session && reply.from.session !== me.session ? `--session ${shq(reply.from.session)} ` : ''}${reply.from.pane} "…"${C.off}`);
+  if (reply) {
+    const scope = reply.from.session && reply.from.session !== me.session ? `--session ${shq(reply.from.session)} ` : '';
+    console.log(`  ${C.dim}talk back: maw herdr hey ${scope}${reply.from.pane} "…" · or answer in its inbox: maw herdr reply ${scope}${reply.from.pane} "…"${C.off}`);
+  }
+}
+
+/**
+ * `maw herdr reply <target> <text…> [--session S] [--dry]` — file a note in that
+ * pane's inbox, signed with this pane's address. The answering half of the return
+ * path: `hey` asks, the asker's `watch` says the work finished, and `reply` is
+ * where the answer itself goes. It writes one local file and sends herdr nothing
+ * (the target is resolved from a read-only snapshot), so it never interrupts the
+ * agent it answers; that agent reads it with `inbox` when it chooses.
+ */
+export async function cmdReply(args, { UsageError = Error } = {}) {
+  const rest = [...args];
+  const dry = takeDry(rest);
+  let session = null;
+  const at = rest.indexOf('--session');
+  if (at !== -1) {
+    session = rest[at + 1];
+    if (!session || session.startsWith('-')) throw new UsageError('--session needs a session name; list them:\n  maw herdr ls --sessions');
+    rest.splice(at, 2);
+  }
+  const raw = rest.shift();
+  if (!raw) throw new UsageError('reply needs the pane to answer and the text; see who wrote to this pane:\n  maw herdr inbox');
+  if (raw.startsWith('-')) throw new UsageError(`unknown argument: ${raw} (reply takes a target, the text, and --session, --dry)\n  maw herdr inbox`);
+  const text = rest.join(' ').trim();
+  const scope = session ? `--session ${shq(session)} ` : '';
+  if (!text) throw new UsageError(`reply to ${raw} needs the text to file in its inbox:\n  maw herdr reply ${scope}${shq(raw)} 'done — see the PR'`);
+
+  const me = await selfAddress('reply');
+  const r = await resolveLive(raw, { session, verb: 'reply' });
+  const pane = requirePane(r, 'reply');
+  const to = { session: r.session, pane };
+  if (dry) {
+    for (const line of describeResolved(r)) console.log(line);
+    console.log(`  ${C.dim}would file a reply from ${me.pane} (${me.session}) in the inbox of ${pane} (${r.session}): ${JSON.stringify(text)} · nothing was done${C.off}`);
+    return;
+  }
+  const n = fileNote(to, { kind: 'reply', from: { session: me.session, pane: me.pane, label: null, agent: null }, text });
+  console.log(`  ${C.cyan}●${C.off} filed a reply in the inbox of ${C.cyan}${r.label}${C.off} ${C.dim}(${pane} · ${r.session}) · note ${n.id}${C.off}`);
+  console.log(`  ${C.dim}it reads it with: maw herdr inbox · nothing was typed into its pane${C.off}`);
 }

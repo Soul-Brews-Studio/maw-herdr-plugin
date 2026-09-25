@@ -8,11 +8,11 @@ import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
 import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
-import { cmdInbox } from './src/cli/mod.inbox.mjs';
+import { cmdInbox, cmdReply } from './src/cli/mod.inbox.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|watch|inbox|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|watch|inbox|reply|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
@@ -31,6 +31,7 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|watch|inbox|serve> [a
   watch [<target>] --stop              stop watching it
   inbox [--since <id>] [--all] [--json]
                                        notes addressed to this pane; reading never consumes
+  reply <target> <text> [--dry]        file an answer in that pane's inbox, signed by this pane
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
@@ -1072,6 +1073,7 @@ try {
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
   else if (command === 'watch') await cmdWatch(args, { UsageError, entry: fileURLToPath(import.meta.url) });
   else if (command === 'inbox') await cmdInbox(args, { UsageError });
+  else if (command === 'reply') await cmdReply(args, { UsageError });
   else if (command === '__watch-run') process.exit(await runWatcher(args[0]));   // spawned by watch, detached; exits when the watch ends
   else throw new UsageError(`unknown command: ${command}`);
 } catch (err) {

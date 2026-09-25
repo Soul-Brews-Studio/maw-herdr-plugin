@@ -43,7 +43,8 @@ maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
 maw herdr watch [<target>]      # be told when that agent finishes [--every] [--stop] [--list]
-maw herdr inbox                 # notes addressed to this pane (watch results); read-only
+maw herdr inbox                 # notes addressed to this pane (watch results, replies); read-only
+maw herdr reply <target> <text> # file an answer in that pane's inbox, signed by this pane
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
 
@@ -129,14 +130,22 @@ maw herdr inbox                 # ● 14:02:11  finished  feat-one (wB:p2)  work
 maw herdr inbox --since <id>    # only what is new; the last line prints the id
 ```
 
+The agent that was asked answers with `maw herdr reply <asker's pane> "…"`: a
+note of kind `reply` in the asker's inbox, signed with the answering pane's
+address. It writes one local file and types nothing into anyone's pane.
+
 It learns from herdr's **pushed** `pane.agent_status_changed` events, never a
 scan. A CLI verb exits, so each watch is one small detached watcher process
 holding one `events.subscribe` connection; it files the note and exits. (Not
 `serve`: that is optional and token-gated, and a CLI verb must not depend on
 it. Not `herdr agent wait`: it matches the current status, so "working, then
-not" would race.) A watch on a pane that closes, moves, or whose session
-stops cleans itself up and leaves a `vanished` note instead of firing forever;
-a watcher killed outright is swept by the next `watch --list`.
+not" would race.) A watch on a pane that closes or whose session stops cleans
+itself up and leaves a `vanished` note instead of firing forever. A pane herdr
+moves to another workspace gets a new id; the watch follows it (herdr's
+`pane.moved` carries the terminal id, which is how a replayed move of some
+older pane with the same id is told apart). A watcher killed outright is swept
+by the next `watch --list`. Pane ids repeat across sessions, so when one id is
+watched in two, `--stop` needs `--session` and says so.
 
 Notes are addressed to a pane (session + pane id), not a person, and live in
 `<config>/maw-herdr/inbox/` (`~/Library/Application Support` on macOS,
