@@ -3,13 +3,16 @@ import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
+import { cmdInbox } from './src/cli/mod.inbox.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|watch|inbox|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
@@ -22,6 +25,12 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
                                        read what an agent's pane is showing
   resolve [<target>] [--json]          what a target resolves to, and how; never acts
   resolve --list [--json]              every worktree and space a target can name
+  watch [<target>] [--every] [--dry]   be told when that agent finishes: a note lands
+                                       in this pane's inbox (from herdr's pushed events)
+  watch --list [--all] [--json]        what this pane watches (--all: every pane's)
+  watch [<target>] --stop              stop watching it
+  inbox [--since <id>] [--all] [--json]
+                                       notes addressed to this pane; reading never consumes
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
@@ -1061,6 +1070,9 @@ try {
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
+  else if (command === 'watch') await cmdWatch(args, { UsageError, entry: fileURLToPath(import.meta.url) });
+  else if (command === 'inbox') await cmdInbox(args, { UsageError });
+  else if (command === '__watch-run') process.exit(await runWatcher(args[0]));   // spawned by watch, detached; exits when the watch ends
   else throw new UsageError(`unknown command: ${command}`);
 } catch (err) {
   console.error(`maw herdr: ${err.message}`);

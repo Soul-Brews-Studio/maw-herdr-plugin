@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add `maw herdr watch <target>` / `watch --list` / `watch <target> --stop` and
+  `maw herdr inbox`, the return path for `hey` (#63). A watch learns completion
+  from herdr's pushed `pane.agent_status_changed` events (no polling), fires
+  exactly once per busy→idle/done transition (`--every`: once per completion),
+  and is held by one detached watcher process per watch with a record under
+  `<config>/maw-herdr/watches/`. Watches on panes that close, move, or whose
+  herdr session stops clean themselves up with a `vanished` note; orphaned
+  records are swept by `watch --list`. Notes are addressed to a pane and read
+  with `inbox`, which is read-only and shows this pane's notes only.
 - Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
   takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
   name (exact label, then a repo's main worktree, then a unique substring).
