@@ -82,6 +82,9 @@ export async function runBunServe(args: string[]): Promise<number> {
             readOnly = !!ticket.readOnly;
             tickets.delete(offers[1]); // Single-use, before upgrade, with no intervening await.
           }
+          // Unreachable while the ticket route refuses read-only pty tickets; kept
+          // so a future ticket path cannot silently reopen the hole.
+          if (path === '/ws/pty' && readOnly) return failure(401, 'operator_token_required_for_writes');
           if (connections >= 32) return failure(503, 'websocket_capacity_reached');
           if (offers.includes('maw.ws.v1')) headers.set('Sec-WebSocket-Protocol', 'maw.ws.v1');
           if (instance.upgrade(request, { headers, data: { controller: new AbortController(), path, readOnly } })) { connections++; return; }
@@ -107,6 +110,10 @@ export async function runBunServe(args: string[]): Promise<number> {
           const body = await readJSON(request, 128, signal);
           if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'path') || ('path' in body && typeof body.path !== 'string')) return failure(400, 'invalid_json');
           if (!('path' in body) || (body.path !== '/ws' && body.path !== '/ws/pty')) return failure(400, 'ticket_path_invalid');
+          // A pty is a write surface: it carries keystrokes into a live pane. Demo
+          // mode mints read-only tickets, but the pty session has no read-only
+          // mode to honour, so the only safe read-only pty ticket is none at all.
+          if (body.path === '/ws/pty' && config.insecure && !authenticated) return failure(401, 'operator_token_required_for_writes');
           const now = Date.now();
           for (const [key, ticket] of tickets) if (ticket.expires <= now) tickets.delete(key);
           if (tickets.size >= 256) return failure(429, 'too_many_tickets');
@@ -140,7 +147,7 @@ export async function runBunServe(args: string[]): Promise<number> {
     // visits can reach this port. Reads are open here, so say so plainly and
     // stop on a deadline rather than lingering.
     console.error('maw herdr serve: WARNING — reads (sessions, panes, captures) are open to any local process or web page.');
-    console.error('maw herdr serve: writes (send, wake, cleanup) still require --token-file.');
+    console.error('maw herdr serve: writes (send, wake, cleanup, terminal) still require --token-file.');
     console.error(`maw herdr serve: stopping automatically in ${config.demoMinutes} minute(s).`);
     const demoTimer = setTimeout(() => {
       console.error('maw herdr serve: demo window elapsed; stopping.');
