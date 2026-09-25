@@ -8,6 +8,7 @@ import { HTTPError } from './serverTypes.ts';
 import { readServeConfig } from './mod.readServeConfig.ts';
 import { loopbackHost } from './mod.loopbackHost.ts';
 import { requestOrigin } from './mod.requestOrigin.ts';
+import { createAccessLog } from './mod.accessLog.ts';
 import { readJSON } from './mod.readJSON.ts';
 import { serveAPI } from './mod.serveAPI.ts';
 import { createPtySession } from './mod.createPtySession.ts';
@@ -26,13 +27,35 @@ export async function runBunServe(args: string[]): Promise<number> {
   const tickets = new Map<string, { origin: string; path: string; expires: number; readOnly?: boolean }>();
   const sockets = new Set<ServerWebSocket<SocketData>>();
   let connections = 0, requests = 0;
+  const access = createAccessLog(!!config.accessLog);
+
   const server = Bun.serve<SocketData>({
     hostname: config.hostname, port: config.port, development: false,
     maxRequestBodySize: 257 << 10, idleTimeout: 20,
     async fetch(request, instance) {
+      const startedAt = performance.now();
+      const requestURL = new URL(request.url);
+      const clientIP = instance.requestIP(request)?.address || '';
+      // Wrapped rather than logged at each return: there are a dozen early
+      // exits in here and a log line attached to only some of them is worse
+      // than none, because the gaps look like requests that never arrived.
+      const logged = (response: Response, note?: string) => {
+        const length = response.headers.get('content-length');
+        access({
+          ip: clientIP,
+          method: request.method,
+          url: requestURL,
+          status: response.status,
+          bytes: length === null ? null : Number(length),
+          ms: performance.now() - startedAt,
+          origin: request.headers.get('origin') || '',
+          note,
+        });
+        return response;
+      };
       const headers = new Headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-      const json = (value: unknown, status = 200) => Response.json(value, { status, headers });
-      const failure = (status: number, error: string) => json({ error }, status);
+      const json = (value: unknown, status = 200, note?: string) => logged(Response.json(value, { status, headers }), note);
+      const failure = (status: number, error: string) => json({ error }, status, error);
       let path = new URL(request.url).pathname;
       if (shutdown.signal.aborted || requests >= 64) return failure(503, 'server_busy');
       requests++;
@@ -50,7 +73,7 @@ export async function runBunServe(args: string[]): Promise<number> {
           path = !suffix || suffix === '/' ? '/api/identity' : suffix === '/ws' || suffix === '/ws/pty' || suffix === '/health' ? suffix : '/api' + suffix;
         } else {
           if (!loopbackHost(request.headers.get('host') || '')) return failure(403, 'host_not_allowed');
-          origin = requestOrigin(request);
+          origin = requestOrigin(request, config.allowOrigins ?? []);
           if (origin) { headers.set('Access-Control-Allow-Origin', origin); headers.set('Vary', 'Origin'); }
           if (request.method === 'OPTIONS') {
             headers.append('Vary', 'Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network');
@@ -87,7 +110,16 @@ export async function runBunServe(args: string[]): Promise<number> {
           if (path === '/ws/pty' && readOnly) return failure(401, 'operator_token_required_for_writes');
           if (connections >= 32) return failure(503, 'websocket_capacity_reached');
           if (offers.includes('maw.ws.v1')) headers.set('Sec-WebSocket-Protocol', 'maw.ws.v1');
-          if (instance.upgrade(request, { headers, data: { controller: new AbortController(), path, readOnly } })) { connections++; return; }
+          if (instance.upgrade(request, { headers, data: { controller: new AbortController(), path, readOnly } })) {
+            connections++;
+            // A socket has no Response to carry a status, so the upgrade is
+            // reported as the 101 it is; otherwise the busiest client on the
+            // server would be the one that never appears in the log.
+            access({ ip: clientIP, method: request.method, url: requestURL, status: 101, bytes: null,
+              ms: performance.now() - startedAt, origin: request.headers.get('origin') || '',
+              note: readOnly ? 'ws read-only' : 'ws' });
+            return;
+          }
           return failure(400, 'websocket_request_invalid');
         }
         const WRITE_ROUTES = new Set(['/api/send', '/api/wake', '/api/worktrees/cleanup']);
@@ -141,6 +173,8 @@ export async function runBunServe(args: string[]): Promise<number> {
   });
   const hostname = server.hostname || config.hostname;
   const displayHost = hostname.includes(':') ? `[${hostname}]` : hostname;
+  if (config.accessLog) console.error('maw herdr serve: access log on (--no-access-log to silence).');
+  if (config.allowOrigins?.length) console.error(`maw herdr serve: extra allowed origins — ${config.allowOrigins.join(', ')}`);
   console.error(`maw herdr serve: http://${displayHost}:${server.port}${config.engine ? '/api/herdr' : ''} (Bun/TypeScript; ${config.engine ? 'engine child; gateway authenticates remote clients' : config.insecure ? 'INSECURE read-only demo; no token required' : 'operator token required; core dashboard only'})`);
   if (config.insecure) {
     // Loopback is not a boundary against a browser: any page the operator
