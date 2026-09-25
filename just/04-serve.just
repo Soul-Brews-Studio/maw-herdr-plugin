@@ -8,6 +8,8 @@ bun-check:
     output=$(mktemp -d "${TMPDIR:-/tmp}/maw-herdr-bun.XXXXXX")
     trap 'rm -rf "$output"' EXIT
     bun build index.mjs --target=bun --outfile "$output/index.js"
+    bun utils/smoke-target-grammar.mjs
+    MAW_TARGET_ENTRY="$output/index.js" bun utils/smoke-target-grammar.mjs
     bun utils/smoke-bun-serve.mjs
     bun utils/smoke-federation-config.ts
     node utils/smoke-federation-serve.mjs
@@ -44,6 +46,10 @@ bun-check:
     bun utils/smoke-terminal-limits.ts
     node utils/smoke-mcp-serve.mjs
     MAW_MCP_ENTRY="$output/index.js" node utils/smoke-mcp-serve.mjs
+    bun utils/smoke-send-composer.ts
+    bun utils/smoke-send-watch.ts
+    node utils/smoke-send-delivery.mjs
+    MAW_SEND_ENTRY="$output/index.js" node utils/smoke-send-delivery.mjs
     node utils/smoke-ls-path-help.mjs
     MAW_LS_ENTRY="$output/index.js" node utils/smoke-ls-path-help.mjs
 
