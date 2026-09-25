@@ -10,6 +10,8 @@ bun-check:
     bun build index.mjs --target=bun --outfile "$output/index.js"
     bun utils/smoke-target-grammar.mjs
     MAW_TARGET_ENTRY="$output/index.js" bun utils/smoke-target-grammar.mjs
+    bun utils/smoke-lifecycle.mjs
+    MAW_LIFECYCLE_ENTRY="$output/index.js" bun utils/smoke-lifecycle.mjs
     bun utils/smoke-bun-serve.mjs
     bun utils/smoke-federation-config.ts
     node utils/smoke-federation-serve.mjs
