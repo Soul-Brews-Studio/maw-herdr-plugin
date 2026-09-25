@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+
 - `maw herdr audit`, `clean` and `sync` (#64). `audit` reports worktrees whose
   folder is gone, herdr spaces pointing at nothing, agents idle past `--idle`
   (herdr's idle status plus a resume provider's transcript age), checkouts only
@@ -60,6 +61,82 @@
   instead of the repo name. Two same-named checkouts from different orgs are
   now two groups, and a group prints every mother workspace, where before the
   second one was dropped from the tree without notice.
+- Add `maw herdr watch <target>` / `watch --list` / `watch <target> --stop` and
+  `maw herdr inbox`, the return path for `hey` (#63). A watch learns completion
+  from herdr's pushed `pane.agent_status_changed` events (no polling), fires
+  exactly once per busy→idle/done transition (`--every`: once per completion),
+  and is held by one detached watcher process per watch with a record under
+  `<config>/maw-herdr/watches/`. Watches on panes that close or whose herdr
+  session stops clean themselves up with a `vanished` note; a pane that herdr
+  moves (a new pane id) keeps its watch, recognised by its terminal id; orphaned
+  records are swept by `watch --list` (and only there — `--dry` deletes
+  nothing). `--stop` is scoped by `--session`, since pane ids repeat across
+  sessions. Notes are addressed to a pane and read with `inbox`, which is
+  read-only and shows this pane's notes only. `maw herdr reply <target> <text>`
+  files an answer in another pane's inbox, signed with this pane's address.
+- Add the lifecycle verbs `restart`, `resume`, `kill` and `close`, all on the
+  shared target grammar and all honouring `--dry` (#62). `restart` reads argv
+  from the running process in the pane (herdr's process-info for the pid, then
+  `/proc` or `ps`), quits it with Ctrl-C until the pid is gone, and relaunches it
+  in the same pane with the same herdr name, deduplicated and with the claude or
+  codex session pinned to the one herdr reports; on a target with no live agent it
+  fails and prints the `resume` command. `restart self` / `kill self` from inside
+  the agent hand off to a detached worker logging to `~/.maw/herdr/lifecycle.log`.
+  `resume` starts the agent on the worktree's newest Claude or Codex transcript,
+  opening the space through `herdr worktree open --cwd <repo>` when needed. `close`
+  refuses a space with a live agent unless `--force`. New modules:
+  `src/cli/mod.lifecycle.mjs`, `mod.agentArgv.mjs`, and a minimal
+  `mod.resumeLookup.mjs` with the #60 provider interface (to be replaced by #60's
+  `mod.resumeProviders.mjs` on merge). Smoke: `utils/smoke-lifecycle.mjs`, a fake
+  herdr hosting real fake-agent processes.
+- Harden the lifecycle verbs after review (#62): restart drops the runtime AND the
+  script of an interpreter-hosted agent, refuses a wrapped agent (omx around codex)
+  and an argv with control characters before stopping anything, retries herdr's
+  transient busy/name-taken answers, and ends a failed relaunch with the `resume`
+  command; restart/kill/close take no substring names and never pick an agent by
+  focus; resume takes a pane beside a running neighbour, skips sessions a live
+  agent holds and picks a free agent name; close also refuses panes running a job;
+  every printed herdr line and the worker log redact secret values; unreadable
+  `process-info` is an error, not "nothing runs".
+
+- Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
+  takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
+  name (exact label, then a repo's main worktree, then a unique substring).
+  Ambiguity lists runnable candidates and exits 1; `--dry` is accepted wherever
+  a target is. `hey` and `peek` now resolve through it with unchanged output and
+  exit codes, and gain `self`, paths and `--dry`. A path means the worktree
+  containing it in every verb; `self` and paths never fall through to name
+  matching; focus picks a pane only within one space, never across spaces or
+  sessions (a pane id held in two sessions is now listed, not narrowed to the
+  focused copy). New read-only `maw herdr resolve [<target>]` /
+  `resolve --list` (#59).
+- `POST /api/send` restores the legacy delivery semantics (#42): a `[node:oracle]`
+  sender tag from `X-Maw-From` or the server's identity (slash commands
+  untagged), a read of the agent's input box that refuses someone's draft,
+  a roster re-read right before submitting, refusal of blocked agents, and a
+  receipt that says `delivered`, `queued` or only `accepted` according to what
+  the box showed, with one Enter retry when our own text stayed in it.
+  Refusals return `ok/error/target/detail/state` plus a `hint` command, and
+  lifecycle records carry `error` or `lastLine`. Dim placeholder text is not a
+  draft. `force` stays unsupported; empty or whitespace-only text without
+  attachments stays `400`, and text that the sender tag pushes past herdr's
+  64 KiB prompt limit is `413 text_too_large`. Once herdr has taken the prompt
+  nothing afterwards (abort, timeout, failed Enter retry) can report it
+  failed or release its idempotency key; an input box that cannot be read
+  before submit refuses the send. An unreadable config layer falls back to
+  `local:pane/unknown` for the tag instead of refusing.
+- Fix: roster targets use the decimal window index the dashboard shows. herdr
+  pane ids count in base 36, so dashboard target `:12` (pane `pC`) used to
+  resolve to pane `p12` on send, capture and terminal attach.
+- Add `maw herdr serve --mcp` (#61): MCP over Streamable HTTP at `/mcp` on the
+  dashboard listener, hand-written JSON-RPC with no new dependency. Read tools
+  (`herdr_sessions`, `herdr_agents`, `herdr_capture`, `herdr_worktrees`) call
+  the same routes as their HTTP twins and follow the mode; write tools
+  (`herdr_send`, `herdr_wake`) require the operator token in every mode,
+  including `--insecure-no-token`. Refused under `--engine`. Every MCP error,
+  including a wrong Content-Type (415) and an over-limit frame (413), stays
+  inside the JSON-RPC envelope and ends with a runnable fix command. Paths are
+  shell-quoted, and caller input is never echoed into one.
 
 - Remove the Go server: the dashboard is TypeScript on Bun only. `--runtime`,
   `--build` and `MAW_HERDR_SERVE_BIN` now fail with the command to use instead,

@@ -13,12 +13,16 @@ export interface Backend {
   wake(target: string, signal?: AbortSignal, task?: string): Promise<"ready" | "already-awake" | "launched">;
   sendLiteral(target: string, text: string, enter: boolean, signal?: AbortSignal): Promise<void>;
   inbox?(target: string, text: string, serverRoot: string, from: string, signal?: AbortSignal): Promise<string>;
-  send(target: string, text: string, signal?: AbortSignal): Promise<void>;
+  send(target: string, text: string, signal?: AbortSignal): Promise<SendReceipt>;
   openTerminal(target: string, cols: number, rows: number, output: (bytes: Buffer) => void, signal: AbortSignal): Promise<Terminal>;
   close?(): Promise<void>;
 }
+/** What was observed after `herdr agent prompt`; never a claim the agent read it. */
+export interface SendReceipt { state: "accepted" | "queued" | "delivered"; lastLine: string; evidence: string[] }
+export type BackendErrorCode = "target_not_found" | "target_not_agent" | "target_blocked" | "composer_not_empty" | "target_changed" | "backend_error";
 export class BackendError extends Error {
-  constructor(public readonly code: "target_not_found" | "target_not_agent" | "backend_error", message: string) {
+  /** hint: a copy-pasteable command with real values that shows or fixes the condition. */
+  constructor(public readonly code: BackendErrorCode, message: string, public readonly hint?: string) {
     super(message);
     this.name = "BackendError";
   }

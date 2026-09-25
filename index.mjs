@@ -3,9 +3,13 @@ import { execFile, execFileSync, spawn, spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
 import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { cmdClose, cmdKill, cmdRestart, cmdResume } from './src/cli/mod.lifecycle.mjs';
+import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
+import { cmdInbox, cmdReply } from './src/cli/mod.inbox.mjs';
 import { checkoutLine } from './src/cli/mod.checkoutLine.mjs';
 import { wantsHelp } from './src/cli/mod.wantsHelp.mjs';
 import { repoGroups } from './src/cli/mod.repoGroups.mjs';
@@ -17,7 +21,7 @@ import { cmdClean, cmdSync } from './src/cli/mod.cleanup.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|audit|clean|sync|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|watch|inbox|reply|audit|clean|sync|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -33,6 +37,19 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|audit|clean|sync|serv
                                        read what an agent's pane is showing
   resolve [<target>] [--json]          what a target resolves to, and how; never acts
   resolve --list [--json]              every worktree and space a target can name
+  restart [<target>] [--channel <entry>|--no-channel] [--dry]
+                                       quit the agent, relaunch it in the same pane and
+                                       name with the argv read from its running process
+  resume [<target>] [--dry]            start the agent on its worktree's newest transcript
+  kill [<target>] [--dry]              ctrl+c the agent until it exits; the pane stays
+  close [<target>] [--force] [--dry]   close the target's herdr space; worktree stays
+  watch [<target>] [--every] [--dry]   be told when that agent finishes: a note lands
+                                       in this pane's inbox (from herdr's pushed events)
+  watch --list [--all] [--json]        what this pane watches (--all: every pane's)
+  watch [<target>] --stop              stop watching it
+  inbox [--since <id>] [--all] [--json]
+                                       notes addressed to this pane; reading never consumes
+  reply <target> <text> [--dry]        file an answer in that pane's inbox, signed by this pane
   audit [<target>...] [--idle 24h] [--min-age 3] [--json]
                                        report only, never changes anything: worktrees whose
                                        folder is gone, spaces on nothing, idle agents,
@@ -48,6 +65,7 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|audit|clean|sync|serv
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
+        [--mcp]                       also serve MCP at /mcp (writes always need the token)
   federation [--json]                  the mesh: who federates with whom (alias: fed)
 
 Mirrors 'maw ls', 'maw a', 'maw wake' and 'maw hey' against the herdr multiplexer.
@@ -1107,6 +1125,14 @@ try {
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
+  else if (command === 'restart') await cmdRestart(args, { UsageError });
+  else if (command === 'resume') await cmdResume(args, { UsageError });
+  else if (command === 'kill') await cmdKill(args, { UsageError });
+  else if (command === 'close') await cmdClose(args, { UsageError });
+  else if (command === 'watch') await cmdWatch(args, { UsageError, entry: fileURLToPath(import.meta.url) });
+  else if (command === 'inbox') await cmdInbox(args, { UsageError });
+  else if (command === 'reply') await cmdReply(args, { UsageError });
+  else if (command === '__watch-run') process.exit(await runWatcher(args[0]));   // spawned by watch, detached; exits when the watch ends
   else if (command === 'audit') process.exitCode = await cmdAudit(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
   else if (command === 'clean') process.exitCode = await cmdClean(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
   else if (command === 'sync') process.exitCode = await cmdSync(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });

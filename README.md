@@ -44,6 +44,13 @@ maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
+maw herdr restart [<target>]    # quit the agent, relaunch it in the same pane and name
+maw herdr resume [<target>]     # start the agent on its worktree's newest transcript
+maw herdr kill [<target>]       # ctrl+c the agent until it exits; the pane stays
+maw herdr close [<target>]      # close the herdr space; the worktree stays [--force]
+maw herdr watch [<target>]      # be told when that agent finishes [--every] [--stop] [--list]
+maw herdr inbox                 # notes addressed to this pane (watch results, replies); read-only
+maw herdr reply <target> <text> # file an answer in that pane's inbox, signed by this pane
 maw herdr audit                 # report only: gone, orphan, idle, behind, merged
 maw herdr clean [--go|--pick]   # remove gone + merged worktrees (plan unless --go/--pick)
 maw herdr sync [--go|--pick]    # make herdr and git agree (plan unless --go/--pick)
@@ -145,6 +152,50 @@ and does nothing. `maw herdr resolve <target>` shows what any target means,
 including worktrees with no open space; `resolve --list` shows everything it
 can name. The resolver is `src/cli/mod.target.mjs`.
 
+### Lifecycle — restart, resume, kill, close
+
+All four take the target grammar above and honour `--dry`, which prints what the
+target resolved to and the exact herdr commands, then does nothing. restart, kill
+and close stop work, so they take an exact name, a path, a pane id or `self` only —
+never a substring match — and a name or path that covers several agents is refused
+with one command per pane, whichever pane has focus.
+
+- **restart** reads the agent's argv from its *running process* — the pane's
+  foreground pid from `herdr pane process-info`, argv from `/proc/<pid>/cmdline`
+  (Linux) or `ps -p <pid>` (macOS, split as herdr reports it and only when the two
+  agree) — quits it with Ctrl-C until the pid is gone, and relaunches it in the same
+  pane under the same herdr name with `herdr agent start … -- <argv>`, where `<argv>`
+  is everything after the agent's executable (after `claude` for a native agent,
+  after the script for one run by its runtime, like `bun ~/.bun/bin/omp`). Repeated flags
+  are dropped (a shell alias re-adds them on every relaunch) and, for claude and
+  codex, the session is pinned to the one herdr reports for the pane. Any other kind
+  is relaunched with its argv as read. `--channel <entry>` / `--no-channel` add or
+  drop a claude development channel; the startup warning is accepted. A target with
+  no live agent has no argv to read: restart fails and prints the `resume` command.
+  Refused up front, before anything is stopped, with the commands to do it by hand:
+  an agent under a wrapper (`omx` leading the process group around `codex` — herdr
+  can relaunch the kind, not the wrapper), and an argv holding a control character
+  (herdr refuses those). A relaunch herdr turns away as busy is retried for 5 s;
+  one that still fails ends with the `resume` command. Secret-looking flag values
+  (`--api-key`, `-c …api_key=…`) are redacted in every printed line and in the log.
+- **restart self** from an agent's own `!` prompt, or any restart/kill whose target
+  process is an ancestor of the command, hands off to a detached worker and returns
+  at once; the worker logs to `~/.maw/herdr/lifecycle.log` (maw's state dir). With two
+  agents in one worktree, `self` is exactly your pane; a name lists both panes.
+- **resume** finds the newest transcript for the worktree through the resume
+  providers (Claude and Codex, `MAW_HERDR_RESUME_PROVIDERS`, `MAW_HERDR_CLAUDE_ROOTS`,
+  `MAW_HERDR_CODEX_ROOTS`), opens the worktree's space with
+  `herdr worktree open --cwd <repo> --path <worktree>` if it has none, and starts the
+  agent on that session, under a name no live agent holds (`name-2` otherwise). It
+  refuses a target that already runs an agent, except a pane id (or `self`) at its
+  shell prompt: that is how one of two agents in a worktree comes back, and kill
+  prints exactly that command when a neighbour still runs. A session a live agent
+  holds — anywhere — is never resumed a second time; the next newest is used.
+- **kill** stops the agent; the pane and space stay, so `resume` can bring it back.
+- **close** closes the space; the worktree and transcript stay. A space with a live
+  agent, or a pane running any other job (a dev server, a test run), needs `--force`
+  (the refusal lists the `kill` for each agent and a `pane read` for each job).
+
 ### Hey and peek — targeting
 
 hey and peek take the grammar above. `self` is the agent in your own pane; a
@@ -170,6 +221,48 @@ $ maw herdr peek neo-oracle
 scrollback. herdr's own default (`recent`) drives the pane's real mouse-scroll
 to fetch it, which is slow (13.8s vs ~0.1s, measured) and visibly hijacks the
 operator's terminal. `--lines` (default 40) only trims what's already in view.
+
+### Watch and inbox — the return path for hey
+
+`hey` sends; `watch` is how an answer comes back. `maw herdr watch <target>`
+(default `self`) files a note in **this pane's** inbox when that agent next
+finishes — busy (working, or blocked mid-task) to idle/done. It fires exactly
+once per completion: herdr re-sends the same status on title changes and
+follows idle with done, and none of that fires. `--every` keeps watching,
+one note per completion; `watch <target> --stop` ends it; `watch --list`
+shows what this pane watches (`--all`: everyone's).
+
+```bash
+maw herdr hey feat-one "run the suite and fix what fails"
+maw herdr watch feat-one        # returns at once; the note arrives later
+maw herdr inbox                 # ● 14:02:11  finished  feat-one (wB:p2)  working → idle
+maw herdr inbox --since <id>    # only what is new; the last line prints the id
+```
+
+The agent that was asked answers with `maw herdr reply <asker's pane> "…"`: a
+note of kind `reply` in the asker's inbox, signed with the answering pane's
+address. It writes one local file and types nothing into anyone's pane.
+
+It learns from herdr's **pushed** `pane.agent_status_changed` events, never a
+scan. A CLI verb exits, so each watch is one small detached watcher process
+holding one `events.subscribe` connection; it files the note and exits. (Not
+`serve`: that is optional and token-gated, and a CLI verb must not depend on
+it. Not `herdr agent wait`: it matches the current status, so "working, then
+not" would race.) A watch on a pane that closes or whose session stops cleans
+itself up and leaves a `vanished` note instead of firing forever. A pane herdr
+moves to another workspace gets a new id; the watch follows it (herdr's
+`pane.moved` carries the terminal id, which is how a replayed move of some
+older pane with the same id is told apart). A watcher killed outright is swept
+by the next `watch --list`. Pane ids repeat across sessions, so when one id is
+watched in two, `--stop` needs `--session` and says so.
+
+Notes are addressed to a pane (session + pane id), not a person, and live in
+`<config>/maw-herdr/inbox/` (`~/Library/Application Support` on macOS,
+`$XDG_CONFIG_HOME` or `~/.config` elsewhere) — never in an oracle's `ψ/`.
+`inbox` shows this pane's notes only and never marks or deletes anything, so
+reading is idempotent. Each note carries the last visible lines of the
+finished pane. The implementation is `src/cli/mod.watch.mjs` and
+`src/cli/mod.inbox.mjs`.
 
 ### Audit, clean, sync — cleanup
 
@@ -266,8 +359,54 @@ Coverage vs. the legacy `maw serve`/God UI contract — not full parity:
 | Interactive terminal | `/ws/pty` — attach to a real herdr pane, resize, ANSI |
 | Federation status | reads `peers.json`, probes each peer's `/api/sessions` |
 | Inbox delivery | `POST /api/send {"inbox":true}` → `ψ/inbox`, `queued` |
+| Prompt delivery | `POST /api/send` → `[node:oracle]` sender tag, literal attachments, draft/blocked/changed-pane refusal, `delivered`/`queued`/`accepted` receipt |
 | Fleet wake | `POST /api/wake` with a `task` → new/reused worktree |
+| MCP | `--mcp` → `/mcp` on the same listener (see below) |
 | Not included | full lifecycle control, inbound pairing, config mutation |
+
+`POST /api/send` receipts name what was observed, never that the agent read
+the prompt: `accepted` is herdr taking it, `delivered` is the input box seen
+empty afterwards, `queued` is the agent showing it queued. A draft already in
+the box, a blocked agent, or a pane that changed under the request is refused
+with `409` and a `hint` holding the herdr command that shows why. If the
+input box cannot be read first, nothing is typed (`503`).
+
+### MCP at `/mcp` (`--mcp`)
+
+`maw herdr serve --mcp` mounts an MCP endpoint (Streamable HTTP, JSON-RPC 2.0,
+stateless, no SSE) on the same port. No second listener, no second process.
+
+```bash
+maw herdr serve --mcp --token-file "$HOME/.maw-herdr-token" --listen 127.0.0.1:3457
+claude mcp add --transport http herdr http://127.0.0.1:3457/mcp \
+  --header "Authorization: Bearer $(cat "$HOME/.maw-herdr-token")"
+```
+
+| Tool | HTTP twin | Auth |
+|---|---|---|
+| `herdr_sessions` | `GET /api/sessions` | follows the mode |
+| `herdr_agents` | `GET /api/agents` | follows the mode |
+| `herdr_capture` | `GET /api/capture?target=` | follows the mode |
+| `herdr_worktrees` | `GET /api/worktrees` | follows the mode |
+| `herdr_send` | `POST /api/send` | operator token, always |
+| `herdr_wake` | `POST /api/wake` | operator token, always |
+
+Token mode refuses every `/mcp` request without the token (HTTP 401), like
+every other route. `--insecure-no-token` answers the read tools on loopback;
+a write tool there answers JSON-RPC error `-32001` with `data.status: 401`
+inside an HTTP 200, so an MCP client keeps its session for reads instead of
+starting an OAuth flow. Host and Origin checks are the same as for `/api/*`.
+`--mcp` is refused under `--engine`. Negotiated protocol versions:
+2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05.
+
+Every MCP error ends with a command that fixes it: usually a `curl` against
+this listener, which reads the token from the token file through
+`-H @<(printf …)` so the token never appears in argv. Caller-supplied text,
+such as a target, is never copied into a suggested command. Paths are
+shell-quoted. Write tools are annotated `destructiveHint: true`. A refused
+`herdr_send` in token mode lands in `/api/feed` as `auth-reject`, like a
+refused `POST /api/send`. A frame over 256 KiB answers 413. Bun rejects a body
+over 257 KiB before the handler runs, with an empty 413.
 
 Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for
@@ -300,3 +439,28 @@ just serve check                  # Bun build, API/process smokes
 
 Skips with a `SKIP:` line (exit 0) when `maw`/`herdr` isn't on `PATH` — safe
 in CI.
+
+## Serving a dashboard
+
+```bash
+# read-only demo: no token, stops itself, logs every request
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60
+
+# a dashboard on another origin must be named, or it gets 403 origin_not_allowed
+maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60 \
+  --allow-origin https://village.buildwithoracle.com \
+  --allow-origin https://bridge.buildwithoracle.com
+
+# writes — send, wake, cleanup — need the token file
+maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457
+```
+
+Loopback pages and `god.buildwithoracle.com` are allowed built-in. Everything
+else is opt-in per origin: an allowed origin can read every pane this server can
+see, so there are no wildcards.
+
+`--access-log` prints an nginx-style line per request to stderr as it happens,
+and is on by default under `--insecure-no-token`. Tokens and tickets never reach
+it. A page that sits on "offline" with nothing in the log was blocked by the
+browser before the request left — usually Private Network Access on an HTTPS
+page reaching loopback.
