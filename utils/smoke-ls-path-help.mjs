@@ -244,8 +244,9 @@ try {
   }
 
   // --help on a verb that does not exist is still an unknown command: a probe
-  // for `restart --help` must not read as "restart exists".
-  for (const argv of [['bogus', '--help'], ['restart', 'neo', '--help'], ['watch', '-h'], ['pek', 'alpha', '-h']]) {
+  // for `reboot --help` must not read as "reboot exists". (restart and watch
+  // were the examples here until #62 and #63 made them real verbs.)
+  for (const argv of [['bogus', '--help'], ['reboot', 'neo', '--help'], ['wach', '-h'], ['pek', 'alpha', '-h']]) {
     const r = run(...argv);
     assert.equal(r.code, 2, `${argv.join(' ')}: ${r.out}`);
     assert.equal(r.out, '');

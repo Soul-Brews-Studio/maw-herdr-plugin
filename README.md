@@ -35,6 +35,7 @@ forever. Measured: 3.5 GB written before kill, plugin left with no
 ```bash
 maw herdr ls                    # workspaces, grouped machine → repo → worktree
 maw herdr ls --path             # ...each workspace's checkout path beneath it
+maw herdr ls resumable          # every worktree in one state: running|open|resumable|cold
 maw herdr ls --sessions         # herdr server instances
 maw herdr ls --agents           # every agent pane, every session
 maw herdr ls --json             # any of the above, as JSON
@@ -43,6 +44,9 @@ maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
+maw herdr watch [<target>]      # be told when that agent finishes [--every] [--stop] [--list]
+maw herdr inbox                 # notes addressed to this pane (watch results, replies); read-only
+maw herdr reply <target> <text> # file an answer in that pane's inbox, signed by this pane
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
 
@@ -60,6 +64,58 @@ keeps the raw server listing if you need it.
 
 `●` working, `○` idle. Branch/`↑↓` come from a local git read only — never a
 fetch, never blocks on network.
+
+### Worktree states
+
+A worktree is in one of four states, whether or not a herdr space is open on it:
+
+| state | meaning | who knows |
+|---|---|---|
+| running | an agent is live in a pane | herdr |
+| open | a space is open, no agent | herdr |
+| resumable | no space, but a transcript exists to resume from | a resume provider |
+| cold | nothing | — |
+
+Plain `ls` adds one line counting every checkout on disk by state
+(`290 checkouts · 28 running · …` — "checkouts" because the tree's own footer
+already says "worktrees" for linked worktrees with a space open); `ls <state>`
+(or `--state <state>`) lists the worktrees in that state, repo → worktree, and
+combines with `--path` and `--json`. `--json` keeps the `workspaces` array
+(each row now carries `state` and `agents`) and adds `worktrees`, `states`
+(the counts) and `providers`. A resumable row carries `resume.command`, the
+agent's own resume line, runnable as printed; a transcript whose session id is
+not a plain `[A-Za-z0-9._-]` token is never offered.
+
+A listing can be short, and then it says so on stderr, each warning ending in
+the command that shows the cause, and `--json` names what is missing:
+
+- `incomplete`: herdr sessions whose `api snapshot` failed or did not parse.
+  Their spaces are absent, so a worktree with a live agent in one of them shows
+  as resumable or cold. Check with `herdr --session <name> api snapshot`.
+- `unreadable`: repos `git worktree list` failed on (dubious ownership, a
+  corrupt `.git/worktrees` entry). Their closed worktrees are absent from the
+  counts. Check with `git -C <repo> worktree list`.
+
+Both are empty arrays on a complete listing. The scan runs at most 8 gits at once.
+
+Worktrees come from git: every repo under the ghq root (`$GHQ_ROOT`, else
+`ghq root --all`, else `ghq_root` in `~/.maw/oracles.json`) with at least one
+linked worktree, plus the repo of every open space. A repo that never used a
+worktree and has no space open is a clone, not a workspace, and is not listed.
+
+"Resumable" is the only state herdr cannot answer, so it comes from providers,
+not from a path baked into the plugin. Two ship built in:
+
+| provider | looks in | default root | override |
+|---|---|---|---|
+| `claude` | `<root>/<cwd with every non-alphanumeric as ->/*.jsonl` | `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects` | `MAW_HERDR_CLAUDE_ROOTS` |
+| `codex` | `<root>/YYYY/MM/DD/rollout-*.jsonl`, matched on the `cwd` in the first line | `$CODEX_HOME/sessions`, else `~/.codex/sessions` | `MAW_HERDR_CODEX_ROOTS` |
+
+Root lists are `:`-separated. A transcript under 1 KiB, or a Codex subagent
+thread, is not counted as resumable. `MAW_HERDR_RESUME_PROVIDERS=claude` runs
+only one; `MAW_HERDR_RESUME_PROVIDERS=none` runs none, and `ls` then reports
+running, open and cold and never calls anything resumable. The interface a new
+provider implements is documented at the top of `src/cli/mod.resumeProviders.mjs`.
 
 ### Wake
 
@@ -114,6 +170,48 @@ $ maw herdr peek neo-oracle
 scrollback. herdr's own default (`recent`) drives the pane's real mouse-scroll
 to fetch it, which is slow (13.8s vs ~0.1s, measured) and visibly hijacks the
 operator's terminal. `--lines` (default 40) only trims what's already in view.
+
+### Watch and inbox — the return path for hey
+
+`hey` sends; `watch` is how an answer comes back. `maw herdr watch <target>`
+(default `self`) files a note in **this pane's** inbox when that agent next
+finishes — busy (working, or blocked mid-task) to idle/done. It fires exactly
+once per completion: herdr re-sends the same status on title changes and
+follows idle with done, and none of that fires. `--every` keeps watching,
+one note per completion; `watch <target> --stop` ends it; `watch --list`
+shows what this pane watches (`--all`: everyone's).
+
+```bash
+maw herdr hey feat-one "run the suite and fix what fails"
+maw herdr watch feat-one        # returns at once; the note arrives later
+maw herdr inbox                 # ● 14:02:11  finished  feat-one (wB:p2)  working → idle
+maw herdr inbox --since <id>    # only what is new; the last line prints the id
+```
+
+The agent that was asked answers with `maw herdr reply <asker's pane> "…"`: a
+note of kind `reply` in the asker's inbox, signed with the answering pane's
+address. It writes one local file and types nothing into anyone's pane.
+
+It learns from herdr's **pushed** `pane.agent_status_changed` events, never a
+scan. A CLI verb exits, so each watch is one small detached watcher process
+holding one `events.subscribe` connection; it files the note and exits. (Not
+`serve`: that is optional and token-gated, and a CLI verb must not depend on
+it. Not `herdr agent wait`: it matches the current status, so "working, then
+not" would race.) A watch on a pane that closes or whose session stops cleans
+itself up and leaves a `vanished` note instead of firing forever. A pane herdr
+moves to another workspace gets a new id; the watch follows it (herdr's
+`pane.moved` carries the terminal id, which is how a replayed move of some
+older pane with the same id is told apart). A watcher killed outright is swept
+by the next `watch --list`. Pane ids repeat across sessions, so when one id is
+watched in two, `--stop` needs `--session` and says so.
+
+Notes are addressed to a pane (session + pane id), not a person, and live in
+`<config>/maw-herdr/inbox/` (`~/Library/Application Support` on macOS,
+`$XDG_CONFIG_HOME` or `~/.config` elsewhere) — never in an oracle's `ψ/`.
+`inbox` shows this pane's notes only and never marks or deletes anything, so
+reading is idempotent. Each note carries the last visible lines of the
+finished pane. The implementation is `src/cli/mod.watch.mjs` and
+`src/cli/mod.inbox.mjs`.
 
 ### Federation map
 

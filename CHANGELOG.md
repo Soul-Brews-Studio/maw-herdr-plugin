@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- `maw herdr ls [running|open|resumable|cold]`: every git worktree in one of
+  four states, including the ones with no open herdr space, which `ls` could
+  not show before (#60). Plain `ls` gains a line counting all four; `--json`
+  keeps its shape, adds `state`/`agents` to each workspace, and adds
+  `worktrees`, `states` and `providers`. "Resumable" comes from resume
+  providers — Claude and Codex built in, roots configurable, all switchable
+  off with `MAW_HERDR_RESUME_PROVIDERS=none` — rather than from a vendor path
+  in the plugin. A herdr session whose snapshot fails, or a repo git cannot
+  list, is a stderr warning ending in the command to check it, and
+  `incomplete` / `unreadable` in `--json` — never a silently wrong state. The
+  tally line counts "checkouts", so it no longer reuses the tree footer's
+  "worktrees" for a different number.
+- `ls --json` larger than 64 KB is no longer cut at 65,536 bytes when piped
+  under Bun.
+
 - `maw herdr ls --path` prints each workspace's checkout beneath its row, as a
   full absolute path that pastes straight into `cd` (#56). The data was already
   in `--json` as `checkout`; only the human-facing view lacked it.
@@ -16,6 +31,19 @@
   instead of the repo name. Two same-named checkouts from different orgs are
   now two groups, and a group prints every mother workspace, where before the
   second one was dropped from the tree without notice.
+- Add `maw herdr watch <target>` / `watch --list` / `watch <target> --stop` and
+  `maw herdr inbox`, the return path for `hey` (#63). A watch learns completion
+  from herdr's pushed `pane.agent_status_changed` events (no polling), fires
+  exactly once per busy→idle/done transition (`--every`: once per completion),
+  and is held by one detached watcher process per watch with a record under
+  `<config>/maw-herdr/watches/`. Watches on panes that close or whose herdr
+  session stops clean themselves up with a `vanished` note; a pane that herdr
+  moves (a new pane id) keeps its watch, recognised by its terminal id; orphaned
+  records are swept by `watch --list` (and only there — `--dry` deletes
+  nothing). `--stop` is scoped by `--session`, since pane ids repeat across
+  sessions. Notes are addressed to a pane and read with `inbox`, which is
+  read-only and shows this pane's notes only. `maw herdr reply <target> <text>`
+  files an answer in another pane's inbox, signed with this pane's address.
 - Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
   takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
   name (exact label, then a repo's main worktree, then a unique substring).
