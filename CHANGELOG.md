@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `maw herdr audit`, `clean` and `sync` (#64). `audit` reports worktrees whose
+  folder is gone, herdr spaces pointing at nothing, agents idle past `--idle`
+  (herdr's idle status plus a resume provider's transcript age), checkouts only
+  behind their upstream, and merged worktrees — and never changes anything.
+  `clean` removes gone and merged worktrees; `sync` prunes gone ones, closes
+  orphan spaces, fast-forwards behind checkouts and, with `--idle-agents`,
+  closes the spaces of idle, resumable agents. Both are plan-only until `--go`
+  or `--pick` (asks before each action, re-checking it first). A worktree with
+  gitignored data is kept (rebuildable dirs excepted), as is anything with an
+  agent, uncommitted work, a lock, or local-only commits. Removals go through
+  herdr when a space is open, and herdr and `git worktree list` are re-read
+  afterwards to prove they agree. A herdr session whose snapshot fails stops
+  `clean`/`sync` from acting.
+
 - Add one shared target grammar, `src/cli/mod.target.mjs`, for every verb that
   takes a `<target>`: `self` (the calling pane), a path or `.`, a pane id, or a
   name (exact label, then a repo's main worktree, then a unique substring).

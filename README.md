@@ -44,6 +44,9 @@ maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
+maw herdr audit                 # report only: gone, orphan, idle, behind, merged
+maw herdr clean [--go|--pick]   # remove gone + merged worktrees (plan unless --go/--pick)
+maw herdr sync [--go|--pick]    # make herdr and git agree (plan unless --go/--pick)
 maw herdr federation            # draw the cross-machine mesh (alias: fed)
 ```
 
@@ -167,6 +170,49 @@ $ maw herdr peek neo-oracle
 scrollback. herdr's own default (`recent`) drives the pane's real mouse-scroll
 to fetch it, which is slow (13.8s vs ~0.1s, measured) and visibly hijacks the
 operator's terminal. `--lines` (default 40) only trims what's already in view.
+
+### Audit, clean, sync — cleanup
+
+`audit` reports and never changes anything: it asks herdr only `session list`
+and `api snapshot`, runs git with `GIT_OPTIONAL_LOCKS=0` (so not even `status`
+rewrites an index) and never fetches.
+
+| finding | meaning | fixed by |
+|---|---|---|
+| gone | git lists a worktree whose folder is gone | `clean`, `sync` |
+| orphan | a herdr space points at a folder that is gone | `sync` |
+| idle | herdr says idle/done, and the newest transcript a resume provider finds is older than `--idle` (default `24h`) | `sync --idle-agents` |
+| behind | a checkout only behind its upstream (as of the last fetch), nothing ahead | `sync` (fast-forward) |
+| merged | a linked worktree whose HEAD is in the default branch, touched over `--min-age` days ago (default 3) | `clean` |
+
+`clean` and `sync` print a plan and change nothing until given `--go` (run the
+plan) or `--pick` (ask before each action, showing the exact commands, and
+re-plan right before acting on a yes; no answer is a no). Each takes targets in
+the grammar above to narrow the scope; a worktree **named** to `clean` is also
+removable when it is not merged but its commits are on a remote (a
+squash-merged PR looks like that), and `--min-age` does not apply to it. `--session <name>` narrows which herdr
+session a target is resolved in; every session is still read, so a space in
+another session always counts.
+
+What is never removed or closed, each with the command that shows why:
+
+- a worktree holding **gitignored data** — `git worktree remove` deletes ignored
+  files and no commit brings them back. Rebuildable directories
+  (`node_modules`, `.venv`, `target`, `dist`, `build`, caches) do not count;
+  `.DS_Store`, `._*` and `.envrc` are litter.
+- uncommitted changes, local-only commits (named targets), a git lock, the
+  checkout you are running in, a repo's main checkout;
+- anything with an agent in it — an idle one too, except through
+  `sync --idle-agents`, which closes a space only when every agent in it is idle
+  past `--idle` with a transcript to resume, and prints the resume command.
+
+Removals go through herdr: a worktree with an open space is removed with
+`herdr worktree remove --workspace`, a gone worktree's spaces are closed with
+`herdr workspace close` before git forgets it, and a worktree with no space is
+`git worktree remove`d (`--force` only when junk is all that is untracked).
+After acting, herdr and git are read again and any disagreement is printed with
+the command that settles it. If a herdr session does not answer its snapshot,
+`clean`/`sync` refuse to act: a worktree whose space lives there would look unused.
 
 ### Federation map
 

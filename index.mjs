@@ -12,10 +12,12 @@ import { repoGroups } from './src/cli/mod.repoGroups.mjs';
 import { configuredProviders } from './src/cli/mod.resumeProviders.mjs';
 import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.mjs';
 import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } from './src/cli/mod.lsStateView.mjs';
+import { cmdAudit } from './src/cli/mod.audit.mjs';
+import { cmdClean, cmdSync } from './src/cli/mod.cleanup.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|audit|clean|sync|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -31,6 +33,17 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|serve> [args]
                                        read what an agent's pane is showing
   resolve [<target>] [--json]          what a target resolves to, and how; never acts
   resolve --list [--json]              every worktree and space a target can name
+  audit [<target>...] [--idle 24h] [--min-age 3] [--json]
+                                       report only, never changes anything: worktrees whose
+                                       folder is gone, spaces on nothing, idle agents,
+                                       checkouts only behind, merged worktrees (or why kept)
+  clean [<target>...] [--go|--pick] [--min-age 3] [--json]
+                                       plan removing gone + merged worktrees, through herdr;
+                                       a named target is removed if its commits are pushed
+  sync [<target>...] [--idle-agents] [--idle 24h] [--go|--pick] [--json]
+                                       plan making herdr and git agree: prune gone worktrees,
+                                       close spaces on nothing, fast-forward behind checkouts;
+                                       --idle-agents also closes idle agents' spaces
   serve [--listen HOST:PORT]           core dashboard API (default 127.0.0.1:3457)
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
@@ -58,6 +71,12 @@ A worktree is running (agent in a pane), open (space, no agent), resumable (no
 space, but a resume provider found a transcript) or cold. Providers: claude, codex;
 MAW_HERDR_RESUME_PROVIDERS=none turns them off, MAW_HERDR_CLAUDE_ROOTS and
 MAW_HERDR_CODEX_ROOTS move them. Worktrees are found under $GHQ_ROOT / ghq root.
+
+clean and sync only print a plan until given --go (run it all) or --pick (ask
+before each action, re-checking it first). A worktree holding gitignored data is
+kept — gitignored is not worthless, and no commit brings it back; node_modules and
+other rebuildable directories do not count. "Idle" is herdr's idle/done status
+plus a transcript older than --idle, so a closed agent can always be resumed.
 
 --help / -h after any verb prints this text; 'serve --help' has its own.`;
 
@@ -1087,6 +1106,9 @@ try {
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
+  else if (command === 'audit') process.exitCode = await cmdAudit(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
+  else if (command === 'clean') process.exitCode = await cmdClean(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
+  else if (command === 'sync') process.exitCode = await cmdSync(args, { UsageError, registryRoot: readOracleRegistry().ghqRoot });
   else throw new UsageError(`unknown command: ${command}\n  maw herdr help`);
 } catch (err) {
   // A usage error with no fix line of its own gets the one that now always works.

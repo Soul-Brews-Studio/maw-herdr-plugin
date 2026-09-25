@@ -71,6 +71,8 @@ jobs:
           bun utils/smoke-terminal-limits.ts
           node utils/smoke-ls-path-help.mjs
           MAW_LS_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-ls-path-help.mjs
+          node utils/smoke-audit-clean-sync.mjs
+          MAW_CLEANUP_ENTRY="$RUNNER_TEMP/herdr-bun.js" node utils/smoke-audit-clean-sync.mjs
       - name: Build source-independent native plugin package
         run: |
           node --check utils/package-serve.mjs
