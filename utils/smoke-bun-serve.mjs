@@ -248,8 +248,14 @@ async function exerciseDemoMode(entry, label) {
   assert.equal(legacyRefused?.error, 'operator_token_required_for_writes');
   legacy.close();
   await assert.rejects(socket(origin, undefined, '/ws/pty', { origin: true }), /handshake failed/);
+  // #58: the ticketless check above never exercised the real hole. A demo
+  // caller could MINT a pty ticket token-free, connect, and type into any pane.
+  const ptyTicket = await http(origin, '/api/auth/ws-ticket', { auth: false, method: 'POST', headers: { Origin: origin }, body: { path: '/ws/pty' }, status: 401 });
+  assert.equal(ptyTicket.json.error, 'operator_token_required_for_writes');
+  assert.equal(ptyTicket.json.ticket, undefined);
+  assert.match(output, /writes \(send, wake, cleanup, terminal\) still require --token-file/);
   child.kill('SIGKILL');
-  console.log(`PASS ${label} demo mode: open reads, refused writes, read-only ticket and legacy sockets, pty still gated, warning banner`);
+  console.log(`PASS ${label} demo mode: open reads, refused writes, read-only ticket and legacy sockets, pty ticket refused without a token, warning banner`);
 }
 async function exerciseFeedActivity(entry, label) {
   const {child,url} = await start(entry, join(temporary, `activity-${label}`));

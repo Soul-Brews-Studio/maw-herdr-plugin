@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `maw herdr ls --path` prints each workspace's checkout beneath its row, as a
+  full absolute path that pastes straight into `cd` (#56). The data was already
+  in `--json` as `checkout`; only the human-facing view lacked it.
+- `--help` / `-h` after any verb prints the usage instead of `unknown argument`,
+  and runs nothing. A usage error with no fix line of its own now ends with
+  `maw herdr <verb> --help`. A verb that does not exist is still
+  `unknown command` (exit 2) with `--help` after it, so probing for a verb
+  cannot get a false yes. `wake <oracle> --kind -h` is now a help request: it
+  used to take `-h` as the engine, create a workspace, and fail on
+  `agent start`, leaving the workspace behind.
+- `maw herdr ls` groups workspaces by herdr's `repo_key` (the shared git dir)
+  instead of the repo name. Two same-named checkouts from different orgs are
+  now two groups, and a group prints every mother workspace, where before the
+  second one was dropped from the tree without notice.
 - `POST /api/send` restores the legacy delivery semantics (#42): a `[node:oracle]`
   sender tag from `X-Maw-From` or the server's identity (slash commands
   untagged), a read of the agent's input box that refuses someone's draft,
