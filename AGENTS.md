@@ -33,3 +33,13 @@
   exact commit/build provenance and never replace existing tags/assets.
 - Keep Serena/CodeGraph indexes and learning artifacts private. Verify semantic
   lookups after changes; activation alone is not evidence of a working index.
+
+## GitHub Actions is off — test locally (Nat, 2026-09-28)
+
+Actions minutes were billed heavily, macOS runners at ten times Linux. Tests run
+locally only: `just serve bun-check` plus any new smoke, before merge, with the
+real exit codes in the PR body. `serve.yml` is manual-only and Linux-only. Never
+trigger a workflow, never add a macOS runner, and do not treat a missing CI
+result as a failure. Releases are a git tag plus a GitHub release and need no
+workflow.
+
