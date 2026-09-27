@@ -23,6 +23,9 @@ const VALUE_FLAGS = {
   wake: new Set(['--prompt']),
   peek: new Set(['--lines', '--session']),
   hey: new Set(['--session']),
+  reply: new Set(['--session']),
+  watch: new Set(['--session']),
+  inbox: new Set(['--since']),
   audit: new Set(['--idle', '--min-age', '--session']),
   clean: new Set(['--min-age', '--session']),
   sync: new Set(['--idle', '--session']),
@@ -46,7 +49,7 @@ export function wantsHelp(verb, args) {
   let asked = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === '--' && verb !== 'hey') break;
+    if (arg === '--' && verb !== 'hey' && verb !== 'reply') break;
     if (values?.has(arg)) {
       i++;
       continue;
@@ -55,6 +58,7 @@ export function wantsHelp(verb, args) {
     else words.push(arg);
   }
   if (!asked) return false;
-  if (verb === 'hey') return words.filter(w => w !== '--dry-run').length <= 1;
+  // reply, like hey, ends in free text: help only when nothing but the target is left.
+  if (verb === 'hey' || verb === 'reply') return words.filter(w => w !== '--dry-run' && w !== '--dry').length <= 1;
   return true;
 }
