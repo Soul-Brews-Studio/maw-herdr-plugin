@@ -26,7 +26,10 @@
   framework/dependency without approval. Bun build transpiles; it is not
   TypeScript typechecking.
 - Use issue -> feature branch -> PR into `main` -> verified merge. Release tags
-  use `vYY.M.D-alpha.HMM` from the successful source CI creation time in Bangkok;
-  retain exact commit/build provenance and never replace existing tags/assets.
+  use `vYY.M.D-alpha.HMM` in Bangkok. A release PR sets `plugin.json` `version`
+  to that string without the leading `v` (the bump commit's Bangkok time); the
+  tag is cut on the merged commit only after its CI succeeds and uses the same
+  string, so `maw herdr version` always matches the published tag (#77). Retain
+  exact commit/build provenance and never replace existing tags/assets.
 - Keep Serena/CodeGraph indexes and learning artifacts private. Verify semantic
   lookups after changes; activation alone is not evidence of a working index.

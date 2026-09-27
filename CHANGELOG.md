@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 26.9.28-alpha.620 — 2026-09-28
+
+First release to carry its CalVer in `plugin.json` (#77). It also covers the
+`v26.9.20-alpha.*` and `v26.9.21-alpha.*` tags, which were published without
+touching `plugin.json` or this file, so everything since 0.4.0 is listed here.
+
 
 - `maw herdr audit`, `clean` and `sync` (#64). `audit` reports worktrees whose
   folder is gone, herdr spaces pointing at nothing, agents idle past `--idle`
