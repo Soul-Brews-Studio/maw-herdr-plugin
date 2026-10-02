@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 26.10.2-alpha.1101 — 2026-10-02
+
+- `maw herdr serve --demo`: the easy name for the read-only demo, exactly
+  `--insecure-no-token` (#80). `--demo --rw` also opens writes (send, wake,
+  cleanup, terminal) with no token for the same window; `--rw` without `--demo` is
+  refused. Every demo prints its expiry clock time at start, and `/api/identity`
+  carries `demo: {writes, expiresAt, secondsLeft}` so a dashboard can show the
+  countdown. The missing-token error leads with both demo forms.
+
 ## 26.9.28-alpha.620 — 2026-09-28
 
 First release to carry its CalVer in `plugin.json` (#77). It also covers the

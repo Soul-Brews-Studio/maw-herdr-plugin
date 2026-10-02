@@ -11,6 +11,9 @@ export interface ServeConfig {
   accessLog?: boolean;
   allowOrigins?: string[];
   demoMinutes?: number;
+  /** --demo: writes open without a token until demoExpiresAt (epoch ms). */
+  demoWrites?: boolean;
+  demoExpiresAt?: number;
   dataDir: string;
   binary: string;
   wakeEngine: string;

@@ -9,7 +9,13 @@ import type { ServeConfig } from './serverTypes.ts';
 export function readServeConfig(argv: string[]): ServeConfig {
   // `--demo` is the easy name for the read-only, self-stopping demo: exactly
   // `--insecure-no-token`, so every rule for that flag applies unchanged.
-  const args = argv.map(arg => (arg === '--demo' ? '--insecure-no-token' : arg));
+  // `--rw` adds writes for the same window, and only ever to a demo.
+  const demoWrites = argv.includes('--rw');
+  const args = argv.filter(arg => arg !== '--rw').map(arg => (arg === '--demo' ? '--insecure-no-token' : arg));
+  if (demoWrites && !args.includes('--insecure-no-token')) {
+    throw new Error('--rw only opens writes for a demo window; it needs --demo\n'
+      + '  maw herdr serve --demo --rw   (reads and writes, no token, stops itself after 30 min)');
+  }
   const flags = new Map<string, string>();
   const allowOrigins: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -46,7 +52,8 @@ export function readServeConfig(argv: string[]): ServeConfig {
   } else {
     const path = flags.get('--token-file');
     if (!path) throw new Error('--token-file is required; never pass operator tokens on the command line\n'
-      + '  maw herdr serve --demo   (read-only demo on 127.0.0.1:3457, stops itself after 30 min)\n'
+      + '  maw herdr serve --demo        (read-only demo on 127.0.0.1:3457, no token, stops itself after 30 min)\n'
+      + '  maw herdr serve --demo --rw   (same, and writes too: send, wake, terminal)\n'
       + '  test -e ~/.maw-herdr-token || (umask 077; openssl rand -hex 32 > ~/.maw-herdr-token)\n'
       + '  maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457');
     let fd: number | undefined;
@@ -79,6 +86,6 @@ export function readServeConfig(argv: string[]): ServeConfig {
   // logs by default; everything else opts in.
   const accessLog = flags.has('--no-access-log') ? false : flags.has('--access-log') ? true : insecure;
   const tokenFile = flags.has('--token-file') ? resolve(flags.get('--token-file')!) : undefined;
-  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, tokenFile, mcp: flags.has('--mcp'), engine, insecure, demoMinutes, accessLog, allowOrigins, wakeEngine, explicitWakeEngine: flags.get('--wake-engine'), ...projectMawConfig(readMawConfig()),
+  return { worktreeRoot: process.cwd(), hostname: match[1] || match[2], port: Number(match[3]), token, tokenFile, mcp: flags.has('--mcp'), engine, insecure, demoWrites, demoMinutes, demoExpiresAt: insecure ? Date.now() + demoMinutes * 60_000 : undefined, accessLog, allowOrigins, wakeEngine, explicitWakeEngine: flags.get('--wake-engine'), ...projectMawConfig(readMawConfig()),
     binary: flags.get('--herdr') || 'herdr', dataDir: flags.get('--data-dir') || join(configHome, 'maw-herdr', 'serve') };
 }

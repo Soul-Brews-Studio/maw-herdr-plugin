@@ -218,10 +218,10 @@ async function exerciseDemoMode(entry, label) {
     child.stdout.on('data', chunk); child.stderr.on('data', chunk); child.once('error', reject);
   }), 'demo startup');
   const origin = new URL(url).origin;
-  for (let i = 0; i < 50 && !/stopping automatically in 5 minute/.test(output); i++) await new Promise(done => setTimeout(done, 100));
+  for (let i = 0; i < 50 && !/demo expires at \d\d:\d\d \(in 5 minute\(s\)\), then stops itself/.test(output); i++) await new Promise(done => setTimeout(done, 100));
   assert.match(output, /INSECURE read-only demo/);
   assert.match(output, /reads \(sessions, panes, captures\) are open/);
-  assert.match(output, /stopping automatically in 5 minute/);
+  assert.match(output, /demo expires at \d\d:\d\d \(in 5 minute\(s\)\), then stops itself/);
   for (const path of ['/api/identity', '/api/sessions', '/api/feed']) {
     assert.equal((await http(origin, path, { auth: false })).status, 200, path);
   }
@@ -254,7 +254,35 @@ async function exerciseDemoMode(entry, label) {
   assert.equal(ptyTicket.json.error, 'operator_token_required_for_writes');
   assert.equal(ptyTicket.json.ticket, undefined);
   assert.match(output, /writes \(send, wake, cleanup, terminal\) still require --token-file/);
+  const id = (await http(origin, '/api/identity', { auth: false })).json;
+  assert.equal(id.demo?.writes, false); assert.match(id.demo?.expiresAt ?? '', /^\d{4}-\d\d-\d\dT/); assert.ok(id.demo.secondsLeft > 0 && id.demo.secondsLeft <= 300);
   child.kill('SIGKILL');
+  // --demo --rw: the same demo window, but writes open without a token.
+  const rw = spawn(bun, [entry, 'serve', '--demo', '--rw', '--listen', '127.0.0.1:0', '--demo-minutes', '5', '--herdr', fake, '--data-dir', dataDir + '-rw'], { env, cwd: temporary, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.add(rw);
+  let rwOut = '';
+  const rwUrl = await deadline(new Promise((ok, no) => { const c = d => { rwOut += d; const m = /http:\/\/[^\s]+/.exec(rwOut); if (m) ok(m[0]); }; rw.stdout.on('data', c); rw.stderr.on('data', c); rw.once('error', no); }), 'demo rw startup');
+  const rwOrigin = new URL(rwUrl).origin;
+  for (let i = 0; i < 50 && !/demo expires at/.test(rwOut); i++) await new Promise(done => setTimeout(done, 100));
+  assert.match(rwOut, /DEMO read\/write/); assert.match(rwOut, /reads AND writes/);
+  const rwPty = await http(rwOrigin, '/api/auth/ws-ticket', { auth: false, method: 'POST', headers: { Origin: rwOrigin }, body: { path: '/ws/pty' } });
+  assert.match(rwPty.json.ticket, /^mwt1_[0-9a-f]{64}$/);
+  const rwSend = await http(rwOrigin, '/api/send', { auth: false, method: 'POST', body: {}, status: 400 });
+  assert.notEqual(rwSend.json.error, 'operator_token_required_for_writes');
+  assert.equal((await http(rwOrigin, '/api/identity', { auth: false })).json.demo?.writes, true);
+  rw.kill('SIGKILL');
+  // --demo alone is the read-only demo: writes still refused, identity says so.
+  const ro = spawn(bun, [entry, 'serve', '--demo', '--listen', '127.0.0.1:0', '--demo-minutes', '5', '--herdr', fake, '--data-dir', dataDir + '-ro'], { env, cwd: temporary, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.add(ro);
+  let roOut = '';
+  const roUrl = await deadline(new Promise((ok, no) => { const c = d => { roOut += d; const m = /http:\/\/[^\s]+/.exec(roOut); if (m) ok(m[0]); }; ro.stdout.on('data', c); ro.stderr.on('data', c); ro.once('error', no); }), 'demo ro startup');
+  const roOrigin = new URL(roUrl).origin;
+  assert.equal((await http(roOrigin, '/api/send', { auth: false, method: 'POST', body: {}, status: 401 })).json.error, 'operator_token_required_for_writes');
+  assert.equal((await http(roOrigin, '/api/identity', { auth: false })).json.demo?.writes, false);
+  ro.kill('SIGKILL');
+  // --rw without --demo is refused before anything listens.
+  const lone = spawnSync(bun, [entry, 'serve', '--rw', '--listen', '127.0.0.1:0', '--herdr', fake], { env, cwd: temporary, encoding: 'utf8', timeout: 20_000 });
+  assert.notEqual(lone.status, 0); assert.match(lone.stderr, /--rw only opens writes for a demo window/); assert.match(lone.stderr, /maw herdr serve --demo --rw/);
   console.log(`PASS ${label} demo mode: open reads, refused writes, read-only ticket and legacy sockets, pty ticket refused without a token, warning banner`);
 }
 async function exerciseFeedActivity(entry, label) {
