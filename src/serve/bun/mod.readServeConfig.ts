@@ -6,7 +6,10 @@ import { loopbackHost } from './mod.loopbackHost.ts';
 import { parseAllowedOrigin } from './mod.requestOrigin.ts';
 import type { ServeConfig } from './serverTypes.ts';
 
-export function readServeConfig(args: string[]): ServeConfig {
+export function readServeConfig(argv: string[]): ServeConfig {
+  // `--demo` is the easy name for the read-only, self-stopping demo: exactly
+  // `--insecure-no-token`, so every rule for that flag applies unchanged.
+  const args = argv.map(arg => (arg === '--demo' ? '--insecure-no-token' : arg));
   const flags = new Map<string, string>();
   const allowOrigins: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -43,9 +46,9 @@ export function readServeConfig(args: string[]): ServeConfig {
   } else {
     const path = flags.get('--token-file');
     if (!path) throw new Error('--token-file is required; never pass operator tokens on the command line\n'
+      + '  maw herdr serve --demo   (read-only demo on 127.0.0.1:3457, stops itself after 30 min)\n'
       + '  test -e ~/.maw-herdr-token || (umask 077; openssl rand -hex 32 > ~/.maw-herdr-token)\n'
-      + '  maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457\n'
-      + '  maw herdr serve --insecure-no-token --listen 127.0.0.1:3457   (read-only demo, self-stopping)');
+      + '  maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457');
     let fd: number | undefined;
     try {
       fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
