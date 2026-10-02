@@ -144,7 +144,7 @@ maw herdr wake neo --prompt "recap the last session" --attach
 | `self` | the pane you are typing in (from `HERDR_PANE_ID` + `HERDR_SOCKET_PATH`); the default where a target is optional |
 | `/abs/path`, `.`, `../x` | the git worktree containing that path (a linked worktree, never its main checkout, when you are inside one) |
 | `w5D:p1` | a herdr pane id |
-| `digger-oracle` | a name: exact label → a repo's main worktree → unique substring |
+| `digger-oracle` `neo` | a name: exact label → a repo's main worktree → an oracle's main worktree (`neo` = `neo-oracle`) → unique substring |
 
 An ambiguous target lists every candidate as a runnable command and exits 1;
 nothing is picked for you. `--dry` (alias `--dry-run`) prints the resolution

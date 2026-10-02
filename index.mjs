@@ -6,8 +6,10 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
-import { TargetError, callerFromEnv, cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { TargetError, callerFromEnv, cmdResolve, label, resolveAgent, shq, takeDry } from './src/cli/mod.target.mjs';
 import { describeFocus, focusPane, planFocus } from './src/cli/mod.attachFocus.mjs';
+import { pickCandidate } from './src/cli/mod.pickCandidate.mjs';
+import { promptLine } from './src/cli/mod.promptLine.mjs';
 import { cmdClose, cmdKill, cmdRestart, cmdResume } from './src/cli/mod.lifecycle.mjs';
 import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
 import { cmdInbox, cmdReply } from './src/cli/mod.inbox.mjs';
@@ -29,9 +31,11 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|c
                                        (also --state <s>; combines with --path, --json)
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
-  a <target> [--print] [--dry]         bring a target to the front, like maw tmux a: focus its
+  a <target> [--print] [--dry] [-y]    bring a target to the front, like maw tmux a: focus its
                                        pane (inside herdr) or attach its session; a session
-                                       name attaches that session (alias: attach)
+                                       name attaches that session (alias: attach). An ambiguous
+                                       name asks which one when run in a terminal; a target
+                                       with no pane asks to wake it (-y: wake without asking).
   wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
        [--own-session]                 start an oracle's agent as a workspace in the
                                        running session (--own-session: its own server)
@@ -82,7 +86,8 @@ session's role — the place work lives — is a WORKSPACE, and one session hold
   self           the pane you are typing in (the default where a target is optional)
   /abs/path  .   the worktree containing that path (a directory inside one works)
   w5D:p1         a herdr pane id
-  digger-oracle  a name: exact label, then a repo's main worktree, then a unique substring
+  digger-oracle  a name: exact label, then a repo's main worktree, then an oracle's main
+                 worktree (neo = neo-oracle), then a unique substring
 hey and peek also take an agent name or a workspace/tab label, as they always have.
 An ambiguous target lists its candidates and does nothing. --dry (alias --dry-run)
 prints what a target resolves to and exits. Most herdr agents are unnamed until
@@ -567,6 +572,60 @@ function attachSession(match, target, print) {
 }
 
 /**
+ * The interactive picker for an ambiguous `a <name>`. It runs only when stdin and
+ * stderr are both terminals (pipes, agents and tests keep the plain error), and
+ * never with --dry or --print. MAW_HERDR_PICK_ANSWER exists ONLY so a smoke can
+ * drive the picker without a terminal: when set, it is the typed line.
+ */
+const pickerAnswerEnv = () => process.env.MAW_HERDR_PICK_ANSWER;
+// The wake question has the same seam: MAW_HERDR_WAKE_ANSWER is the typed line (smoke only).
+const wakeAnswerEnv = () => process.env.MAW_HERDR_WAKE_ANSWER;
+const pickerAvailable = () => pickerAnswerEnv() !== undefined || wakeAnswerEnv() !== undefined || Boolean(process.stdin.isTTY && process.stderr.isTTY);
+
+/** Ask one question on stderr; `seam` is the test answer, when one is set. → { line } | { eof } | { sigint } */
+async function ask(question, seam) {
+  if (seam !== undefined) { console.error(`${question}${seam}`); return { line: seam }; }
+  return promptLine(question);
+}
+
+/**
+ * `a` on a target with no pane (a closed worktree). Returns true when it was woken
+ * and the caller should resolve again; false after saying nothing was done.
+ * Waking is `maw herdr resume`: it opens the worktree's space and brings its newest
+ * transcript back, in-process. Default answer is No (old maw-js `attach`, Tier 2).
+ */
+async function wakeForAttach(err, { target, scope, yes }) {
+  const { label, path } = err.wake;
+  if (!yes) {
+    console.error(`  ○ '${label}' has no pane (not running)`);
+    const got = await ask(`  Wake "${label}"? [y/N] `, wakeAnswerEnv());
+    if (got.sigint) { console.error('\n  aborted — nothing was done.'); process.exitCode = 130; return false; }
+    if (!/^(y|yes)$/i.test((got.line ?? '').trim())) { console.error('  aborted — nothing was done.'); process.exitCode = 1; return false; }
+  }
+  await cmdResume([path, ...(scope ? ['--session', scope] : [])], { UsageError });
+  return true;
+}
+
+/** Ask which candidate. Returns { args } to continue with, or null after saying nothing was done. */
+async function askWhich(err) {
+  const choices = err.choices;
+  const [header, ...rest] = err.message.split('\n');
+  const wide = Math.max(...choices.map(c => c.args.map(shq).join(' ').length));
+  const list = choices.map((c, i) => `  ${i + 1}) ${c.args.map(shq).join(' ').padEnd(wide)}   # ${c.note}`);
+  console.error([`maw herdr: ${header}`, ...list, ...(err.choicesMore ? [err.choicesMore] : [])].join('\n'));
+  const question = `pick 1-${choices.length} (Enter cancels): `;
+  const got = await ask(question, pickerAnswerEnv());
+  if (got.sigint) { console.error('\n  nothing was done'); process.exitCode = 130; return null; }
+  const result = pickCandidate(choices, got.line ?? null);
+  if (result.index !== undefined) return choices[result.index];
+  if (result.cancel) { console.error('  nothing was done'); process.exitCode = 1; return null; }
+  throw new TargetError(
+    `'${result.invalid}' is not 1-${choices.length} — nothing was done. Name one:\n${rest.join('\n')}`,
+    'ambiguous', err.candidates,
+  );
+}
+
+/**
  * `a <target>` brings a target to the front, like `maw tmux a` (#82). A session
  * name keeps its old meaning (attach that session). Anything else resolves through
  * the shared target grammar and its pane is focused over the session's socket —
@@ -574,10 +633,12 @@ function attachSession(match, target, print) {
  * already its client. A target the grammar cannot find falls back to the old
  * session prefix/substring match, so nothing that attached before stops working.
  */
-async function cmdAttach(args) {
+async function cmdAttach(args, { picked = false, woke = false } = {}) {
   const dry = takeDry(args);
   const print = args.includes('--print');
-  const rest = args.filter(a => a !== '--print');
+  const yes = args.some(a => a === '-y' || a === '--yes');
+  const rest = args.filter(a => a !== '--print' && a !== '-y' && a !== '--yes');
+  const scope = takeSession(rest);   // the `--session <s> <pane>` lines an ambiguity prints
   const target = rest.shift();
   if (!target) throw new UsageError('a needs a target: a session, worktree, workspace or pane\n  maw herdr a self\n  maw herdr resolve --list');
   if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
@@ -594,8 +655,22 @@ async function cmdAttach(args) {
 
   let plan;
   try {
-    plan = await planFocus(target, { caller: callerFromEnv() });
+    plan = await planFocus(target, { caller: callerFromEnv(), session: scope });
   } catch (err) {
+    if (err instanceof TargetError && err.wake && !woke) {
+      if (dry) { console.log(`  would wake '${err.wake.label}', then focus`); return; }
+      if (!yes && (print || !pickerAvailable())) {
+        err.message += `\n  maw herdr a ${scope ? `--session ${shq(scope)} ` : ''}${shq(target)} -y   (wake it, then bring it to the front)`;
+        throw err;
+      }
+      if (!(await wakeForAttach(err, { target, scope, yes }))) return;
+      return cmdAttach([target, ...(scope ? ['--session', scope] : []), ...(print ? ['--print'] : [])], { picked: true, woke: true });
+    }
+    if (!picked && !dry && !print && err instanceof TargetError && err.code === 'ambiguous' && err.choices?.length > 0 && pickerAvailable()) {
+      const choice = await askWhich(err);
+      if (choice) return cmdAttach(choice.args, { picked: true });
+      return;
+    }
     // Ambiguity or a target with no pane is a real answer; only "no such target"
     // falls back to the session match that `a` has always done.
     if (!(err instanceof TargetError) || err.code !== 'not-found' || /has no open herdr space|prunable worktree/.test(err.message)) throw err;

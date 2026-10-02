@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- `maw herdr a <name>` asks which one when the name is ambiguous and it runs in
+  a terminal (stdin and stderr both TTYs, no `--dry`/`--print`): a numbered list
+  and `pick 1-N (Enter cancels):`. A number continues as if that candidate had
+  been typed; Enter, `q`, EOF or Ctrl-C prints `nothing was done` and focuses
+  nothing; anything else is not 1-N and ends with the runnable list. Pipes,
+  agents and tests keep the plain error and exit code. `a` also accepts the
+  `--session <s> <pane>` form its own ambiguity lines print (follow-up to #84).
+  The picker offers only worktrees that have a pane (running first, at most 20)
+  and ends with a line counting the closed and hidden ones.
+- A name now also means an oracle's main checkout: `neo` is `neo-oracle`, `thor`
+  is `thor-oracle` (new tier `oracle name`, after an exact label and a repo's
+  main worktree, before substring; exact verbs such as `kill` use it too).
+- `maw herdr a <target>` on a target with no pane (a closed worktree) asks
+  `Wake "<label>"? [y/N]` in a terminal (default No) and, on yes, wakes it with
+  the `resume` code path (opens its space, brings back its newest transcript) and
+  then brings it to the front. `-y`/`--yes` skips the question; `--dry` prints
+  `would wake '<label>', then focus`; without a terminal the error is unchanged
+  plus one line, `maw herdr a <target> -y`.
+
 ## 26.10.2-alpha.1101 — 2026-10-02
 
 - `maw herdr a <target>` brings a target to the front, like `maw tmux a` (#82):

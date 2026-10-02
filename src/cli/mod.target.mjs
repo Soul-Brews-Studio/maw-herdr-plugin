@@ -6,7 +6,8 @@
  *   self (default)  self                     the herdr pane this command runs in
  *   path            /abs/path  .  ../x  ~/x  the worktree containing that path
  *   pane            w5D:p1                   a herdr pane id
- *   name            digger-oracle            exact label → a repo's main worktree → unique substring
+ *   name            neo                      exact label → a repo's main worktree → an oracle's main worktree
+ *                                            (neo = neo-oracle) → unique substring
  *
  * An ambiguous target LISTS its candidates and throws; nothing is ever picked
  * for the caller. Within ONE herdr space the focused pane (then the active tab)
@@ -463,10 +464,10 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
 export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerFromEnv(), cwd = process.cwd(), after = '', exact = false, strictPane = false } = {}) {
   const form = classifyTarget(raw);
   const shown = form.value;
-  const ambiguous = (hits, how) => new TargetError(
+  const ambiguous = (hits, how) => Object.assign(new TargetError(
     `'${shown}' matches ${hits.length} worktrees (${how}) — nothing was done. Name one:\n${candidateLines(hits, verb, after, form.form === 'pane' ? form.value : null)}`,
     'ambiguous', hits,
-  );
+  ), pickable(hits, verb, after, form.form === 'pane' ? form.value : null));
   let tiers;
   if (form.form === 'self') {
     const me = selfPane(caller, cwd);
@@ -514,6 +515,9 @@ export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerF
   tiers = [
     ['exact label', t => lc(t.label) === q || lc(t.name) === q],
     ['repo main worktree', t => t.kind === 'worktree' && !t.linked && lc(t.repo) === q],
+    // An oracle is called by its short name: `neo` is the neo-oracle main checkout. An exact
+    // convention, not a partial match, so it stays in the exact-verb tier list too.
+    ['oracle name', t => t.kind === 'worktree' && !t.linked && lc(t.repo) === `${q}-oracle`],
     ...(exact ? [] : [['substring', partly]]),
   ];
   const picked = pickTier(targets, tiers, { ambiguous });
@@ -578,10 +582,10 @@ export function requirePane(r, verb) {
   if (r.pane) return r.pane;
   if (r.paneChoices?.length) {
     const scope = r.session ? `--session ${shq(r.session)} ` : '';
-    throw new TargetError(
+    throw Object.assign(new TargetError(
       `'${r.label}' has ${r.paneChoices.length} agent panes${r.strictPane ? ` — ${verb} stops one agent, and a name or path does not say which` : ' and none is focused'} — nothing was done. Name one:\n${r.paneChoices.map(p => `  maw herdr ${verb} ${scope}${p}`).join('\n')}`,
       'ambiguous', r.paneChoices,
-    );
+    ), { choices: r.paneChoices.map(p => ({ args: [...(r.session ? ['--session', r.session] : []), p], note: [r.session, p].filter(Boolean).join(' · ') })) });
   }
   if (r.prunable) {
     throw new TargetError(
@@ -589,10 +593,11 @@ export function requirePane(r, verb) {
       'not-found',
     );
   }
-  throw new TargetError(
+  // `.wake` lets a verb that can bring a closed worktree back (`a`) offer to, without parsing this text
+  throw Object.assign(new TargetError(
     `'${r.label}' has no open herdr space, so there is no pane to act on\n  open one: herdr workspace create --cwd ${shq(r.path)} --label ${shq(r.label)} --no-focus`,
     'not-found',
-  );
+  ), { wake: { label: r.label, path: r.path } });
 }
 
 // Each candidate as its own runnable line, addressed by the most specific handle
@@ -600,17 +605,36 @@ export function requirePane(r, verb) {
 // two sessions, or the target was a pane id held in two sessions — its pane scoped
 // by session. A plain space is ALWAYS its pane: its path is borrowed from whatever
 // checkout its first pane sits in, and pasting it would resolve to that worktree.
-function candidateLines(hits, verb, after, paneId = null) {
+function candidateRows(hits, verb, after, paneId = null, limit = 15) {
   const pathCount = new Map();
   for (const h of hits) pathCount.set(h.path, (pathCount.get(h.path) ?? 0) + 1);
-  const rows = hits.slice(0, 15).map(h => {
+  return hits.slice(0, limit).map(h => {
     const firstPane = paneId ?? h.panes.find(p => p.agent)?.pane ?? h.panes[0]?.pane;
     const byPath = h.kind === 'worktree' && !paneId && (pathCount.get(h.path) === 1 || !firstPane);
     const note = [h.state, h.session, firstPane, h.kind === 'space' ? `space ${h.label}` : null].filter(Boolean).join(' · ');
     if (!byPath && !firstPane) return { cmd: `  maw herdr resolve --list --session ${shq(h.session)}`, note: `${note} · no pane to name it by` };
-    const handle = byPath ? shq(h.path) : `--session ${shq(h.session)} ${firstPane}`;
-    return { cmd: `  maw herdr ${verb} ${handle}${after}`, note };
+    const args = byPath ? [h.path] : ['--session', h.session, firstPane];
+    return { cmd: `  maw herdr ${verb} ${args.map(shq).join(' ')}${after}`, note, args };
   });
+}
+
+/**
+ * What a picker may offer for an ambiguous target: only candidates that have a pane
+ * (a closed worktree cannot be focused), running first, at most 20, as argv plus
+ * the one line saying what was left out. The plain error text is untouched.
+ */
+function pickable(hits, verb, after, paneId = null, limit = 20) {
+  const live = hits.filter(h => h.panes?.length);
+  const ordered = [...live.filter(h => h.state === 'running'), ...live.filter(h => h.state !== 'running')];
+  const choices = candidateRows(ordered, verb, after, paneId, limit).filter(r => r.args).map(({ args, note }) => ({ args, note }));
+  const closed = hits.length - live.length;
+  const hidden = Math.max(0, live.length - limit);
+  const left = [closed ? `${closed} closed (no pane)` : null, hidden ? `${hidden} more not shown` : null].filter(Boolean);
+  return { choices, choicesMore: left.length ? `  + ${left.join(' and ')} — see all: maw herdr resolve --list` : null };
+}
+
+function candidateLines(hits, verb, after, paneId = null) {
+  const rows = candidateRows(hits, verb, after, paneId);
   const wide = Math.max(...rows.map(r => r.cmd.length));
   const lines = rows.map(r => `${r.cmd.padEnd(wide)}   # ${r.note}`);
   if (hits.length > 15) lines.push(`  … and ${hits.length - 15} more; see them all: maw herdr resolve --list`);
