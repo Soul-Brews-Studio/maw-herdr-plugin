@@ -38,6 +38,8 @@ jobs:
           MAW_LIFECYCLE_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-lifecycle.mjs
           bun utils/smoke-watch-inbox.mjs
           MAW_WATCH_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-watch-inbox.mjs
+          bun utils/smoke-attach-focus.mjs
+          MAW_ATTACH_ENTRY="$RUNNER_TEMP/herdr-bun.js" bun utils/smoke-attach-focus.mjs
           node utils/smoke-serve-launcher.mjs
           bun utils/smoke-bun-serve.mjs
           bun utils/smoke-federation-config.ts
