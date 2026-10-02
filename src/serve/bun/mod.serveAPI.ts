@@ -42,7 +42,8 @@ export async function serveAPI(request: Request, path: string, config: ServeConf
     case '/api/identity': return { version: 'herdr-core-dev', runtime: 'bun', node: config.node, host: 'localhost', agents: [],
       uptime: Math.floor((Date.now() - started) / 1000), clockUtc: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
       endpoints: config.engine ? ['/api/herdr/sessions', '/api/herdr/capture', '/api/herdr/send', '/api/herdr/wake', '/api/herdr/ws', '/api/herdr/ws/pty'] : ['/api/sessions', '/api/capture', '/api/send', '/api/wake', '/ws', '/ws/pty'],
-      capabilities: ['sessions', 'capture', 'agent-prompt', 'dashboard-ws', 'terminal-stream', 'existing-pane-wake'] };
+      capabilities: ['sessions', 'capture', 'agent-prompt', 'dashboard-ws', 'terminal-stream', 'existing-pane-wake'],
+      ...(config.insecure ? { demo: { writes: !!config.demoWrites, expiresAt: new Date(config.demoExpiresAt ?? 0).toISOString(), secondsLeft: Math.max(0, Math.round(((config.demoExpiresAt ?? 0) - Date.now()) / 1000)) } } : {}) };
     case '/api/federation/status': case '/fed.json': return backend.federation.status(signal);
     case '/api/config':
       if (request.url.includes('?')) throw new HTTPError(400, 'config_query_not_supported');

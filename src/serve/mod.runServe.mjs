@@ -2,13 +2,15 @@ export async function runServe(args) {
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`maw herdr serve --token-file PATH [--listen 127.0.0.1:3457]
                 [--herdr PATH] [--data-dir PATH] [--wake-engine KIND]
-                [--demo | --insecure-no-token [--demo-minutes N]] [--mcp]
+                [--demo [--rw] | --insecure-no-token [--demo-minutes N]] [--mcp]
                 [--allow-origin ORIGIN]... [--access-log | --no-access-log]
 
 Core dashboard API: sessions, live pane output and prompt submission.
 Dashboard wake supports existing panes and registered repositories/tasks (default codex).
 The token file is required, including on loopback.
-Quick demo: maw herdr serve --demo  (same as --insecure-no-token).
+Quick demo: maw herdr serve --demo  — reads with no token, on loopback, until it
+expires (default 30 min; the time is printed at start and in /api/identity .demo).
+Add --rw to open writes too (send, wake, cleanup, terminal) for the same window.
 --insecure-no-token opens READS only (sessions, panes, captures) with no token,
 for a quick demo; writes still require --token-file and the server stops itself
 after --demo-minutes (default 30). Loopback is not a boundary against a browser. Help needs no Herdr.

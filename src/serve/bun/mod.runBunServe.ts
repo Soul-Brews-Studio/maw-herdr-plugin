@@ -99,7 +99,7 @@ export async function runBunServe(args: string[]): Promise<number> {
           const offers = (request.headers.get('Sec-WebSocket-Protocol') || '').split(',').map(value => value.trim());
           const ticketless = !!config.insecure && path === '/ws' && offers.length === 1 && offers[0] === '';
           if (!config.engine && ticketless) {
-            readOnly = true;
+            readOnly = !config.demoWrites;
           } else if (!config.engine) {
             if (offers.length !== 2 || offers[0] !== 'maw.ws.v1') return failure(401, 'websocket_ticket_required');
             const ticket = tickets.get(offers[1]);
@@ -129,8 +129,10 @@ export async function runBunServe(args: string[]): Promise<number> {
         const recordAuthReject = () => deliveryHistory.append({ timestamp: Math.floor(Date.now() / 1000), kind: 'message', direction: 'inbound', state: 'failed', route: 'auth', event: 'auth-reject', decision: 'operator_token_required', source: 'herdr', from: '', to: '', target: '', text: '', oracle: '' });
         const isWrite = path !== '/api/auth/ws-ticket' && (request.method === 'POST' || WRITE_ROUTES.has(path));
         const authorization = request.headers.get('authorization') || '';
-        const authenticated = tokenConfigured && authorization.startsWith('Bearer ')
+        const tokenOk = tokenConfigured && authorization.startsWith('Bearer ')
           && timingSafeEqual(createHash('sha256').update(authorization.slice(7)).digest(), tokenHash);
+        // --demo opens every write path for its window, exactly as a token would.
+        const authenticated = tokenOk || !!config.demoWrites;
         // /mcp carries reads and writes in one POST, so the per-tool rule lives in
         // serveMCP: reads follow the mode, writes always need the token. Host and
         // Origin were already checked above, exactly as for every other route.
@@ -148,7 +150,7 @@ export async function runBunServe(args: string[]): Promise<number> {
         }
         if (!config.engine) {
           if (config.insecure && !isWrite) { /* read-only demo access */ }
-          else if (config.insecure && isWrite) {
+          else if (config.insecure && isWrite && !authenticated) {
             return failure(401, 'operator_token_required_for_writes');
           } else if (!authenticated) {
             if (path === '/api/send' && request.method === 'POST') recordAuthReject();
@@ -194,15 +196,20 @@ export async function runBunServe(args: string[]): Promise<number> {
   const displayHost = hostname.includes(':') ? `[${hostname}]` : hostname;
   if (config.accessLog) console.error('maw herdr serve: access log on (--no-access-log to silence).');
   if (config.allowOrigins?.length) console.error(`maw herdr serve: extra allowed origins — ${config.allowOrigins.join(', ')}`);
-  console.error(`maw herdr serve: http://${displayHost}:${server.port}${config.engine ? '/api/herdr' : ''} (Bun/TypeScript; ${config.engine ? 'engine child; gateway authenticates remote clients' : config.insecure ? 'INSECURE read-only demo; no token required' : 'operator token required; core dashboard only'})`);
+  console.error(`maw herdr serve: http://${displayHost}:${server.port}${config.engine ? '/api/herdr' : ''} (Bun/TypeScript; ${config.engine ? 'engine child; gateway authenticates remote clients' : config.demoWrites ? 'DEMO read/write; no token required' : config.insecure ? 'INSECURE read-only demo; no token required' : 'operator token required; core dashboard only'})`);
   if (config.mcp) console.error(`maw herdr serve: MCP at http://${displayHost}:${server.port}/mcp (read tools follow the mode; write tools always require the operator token)`);
   if (config.insecure) {
     // Loopback is not a boundary against a browser: any page the operator
     // visits can reach this port. Reads are open here, so say so plainly and
     // stop on a deadline rather than lingering.
-    console.error('maw herdr serve: WARNING — reads (sessions, panes, captures) are open to any local process or web page.');
-    console.error('maw herdr serve: writes (send, wake, cleanup, terminal) still require --token-file.');
-    console.error(`maw herdr serve: stopping automatically in ${config.demoMinutes} minute(s).`);
+    const until = new Date(config.demoExpiresAt ?? Date.now()).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    if (config.demoWrites) {
+      console.error('maw herdr serve: WARNING — reads AND writes (send, wake, cleanup, terminal) are open to any local process or allowed web page.');
+    } else {
+      console.error('maw herdr serve: WARNING — reads (sessions, panes, captures) are open to any local process or web page.');
+      console.error('maw herdr serve: writes (send, wake, cleanup, terminal) still require --token-file.');
+    }
+    console.error(`maw herdr serve: demo expires at ${until} (in ${config.demoMinutes} minute(s)), then stops itself.`);
     const demoTimer = setTimeout(() => {
       console.error('maw herdr serve: demo window elapsed; stopping.');
       shutdown.abort();
