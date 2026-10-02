@@ -6,7 +6,8 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
-import { cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { TargetError, callerFromEnv, cmdResolve, label, resolveAgent, takeDry } from './src/cli/mod.target.mjs';
+import { describeFocus, focusPane, planFocus } from './src/cli/mod.attachFocus.mjs';
 import { cmdClose, cmdKill, cmdRestart, cmdResume } from './src/cli/mod.lifecycle.mjs';
 import { cmdWatch, runWatcher } from './src/cli/mod.watch.mjs';
 import { cmdInbox, cmdReply } from './src/cli/mod.inbox.mjs';
@@ -28,7 +29,9 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|c
                                        (also --state <s>; combines with --path, --json)
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
-  a <session> [--print]                attach to a herdr session (alias: attach)
+  a <target> [--print] [--dry]         bring a target to the front, like maw tmux a: focus its
+                                       pane (inside herdr) or attach its session; a session
+                                       name attaches that session (alias: attach)
   wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
        [--own-session]                 start an oracle's agent as a workspace in the
                                        running session (--own-session: its own server)
@@ -166,6 +169,9 @@ function resolveSession(known, target) {
       message += `\n  ${i + 1}. tmux ${s.session} (${s.how}, ${s.status})   → maw a ${s.session}`;
     });
   }
+  // `a` also takes worktrees, workspaces and panes now (#82), so say so and end
+  // with commands that list every valid target.
+  message += `\n  no worktree, workspace or pane matches '${target}' either. List what a takes:\n  maw herdr resolve --list\n  maw herdr ls --sessions`;
   throw new Error(message);
 }
 
@@ -549,16 +555,8 @@ function runAttach(argv) {
   process.exitCode = run.status ?? 1;
 }
 
-function cmdAttach(args) {
-  const print = args.includes('--print');
-  const rest = args.filter(a => a !== '--print');
-  const target = rest.shift();
-  if (!target) throw new UsageError('attach needs a session name: maw herdr a <session>');
-  if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
-
-  const match = resolveSession(sessionIndex(), target);
-  if (match.status !== 'active') throw new Error(`herdr session '${match.session}' is stopped; start it before attaching`);
-
+function attachSession(match, target, print) {
+  if (match.status !== 'active') throw new Error(`herdr session '${match.session}' is stopped; start it before attaching\n  herdr --session ${match.session}`);
   const argv = attachArgv(match);
   if (match.session !== target) console.log(`  resolved: ${target} → ${match.session}`);
   if (print) {
@@ -566,6 +564,60 @@ function cmdAttach(args) {
     return;
   }
   runAttach(argv);
+}
+
+/**
+ * `a <target>` brings a target to the front, like `maw tmux a` (#82). A session
+ * name keeps its old meaning (attach that session). Anything else resolves through
+ * the shared target grammar and its pane is focused over the session's socket —
+ * herdr's switch-client — then the session is attached if the caller is not
+ * already its client. A target the grammar cannot find falls back to the old
+ * session prefix/substring match, so nothing that attached before stops working.
+ */
+async function cmdAttach(args) {
+  const dry = takeDry(args);
+  const print = args.includes('--print');
+  const rest = args.filter(a => a !== '--print');
+  const target = rest.shift();
+  if (!target) throw new UsageError('a needs a target: a session, worktree, workspace or pane\n  maw herdr a self\n  maw herdr resolve --list');
+  if (rest.length) throw new UsageError(`unknown argument: ${rest[0]}`);
+
+  const known = sessionIndex();
+  // A running session named exactly keeps the old meaning. A STOPPED one does not
+  // shadow a live worktree or workspace of the same name (herdr keeps stopped
+  // sessions listed, e.g. a 'neo-oracle' session beside the neo-oracle workspace).
+  const exact = known.find(s => s.session === target && s.status === 'active');
+  if (exact) {
+    if (dry) { console.log(`  session ${exact.session} (${exact.status}) — would attach: ${attachArgv(exact).join(' ')}`); return; }
+    return attachSession(exact, target, print);
+  }
+
+  let plan;
+  try {
+    plan = await planFocus(target, { caller: callerFromEnv() });
+  } catch (err) {
+    // Ambiguity or a target with no pane is a real answer; only "no such target"
+    // falls back to the session match that `a` has always done.
+    if (!(err instanceof TargetError) || err.code !== 'not-found' || /has no open herdr space|prunable worktree/.test(err.message)) throw err;
+    const match = resolveSession(known, target);
+    if (dry) { console.log(`  session ${match.session} (${match.status}) — would attach: ${attachArgv(match).join(' ')}`); return; }
+    return attachSession(match, target, print);
+  }
+
+  const session = known.find(s => s.session === plan.session) ?? { session: plan.session, status: 'active' };
+  const attachLine = attachArgv(session).join(' ');
+  if (dry) { console.log(describeFocus(plan, attachLine).join('\n')); return; }
+  if (print && plan.where === 'away') { console.log(attachLine); return; }
+
+  await focusPane(plan.session, plan.pane);
+  const name = `${plan.r.label} (${plan.pane}${plan.r.agent ? ` · ${plan.r.agent}` : ''})`;
+  if (plan.where === 'here') { console.log(`  focused ${name}`); return; }
+  if (plan.where === 'other') {
+    console.log(`  focused ${name} in session '${plan.session}'; this client shows another session. Switch with:\n  ${attachLine}`);
+    return;
+  }
+  console.log(`  focused ${name} — attaching session '${plan.session}'`);
+  runAttach(attachArgv(session));
 }
 
 // --- federation -------------------------------------------------------------
@@ -1119,7 +1171,7 @@ try {
   else if (wantsHelp(command, args)) console.log(HELP);
   else if (command === 'serve') process.exitCode = await runServe(args);
   else if (command === 'ls' || command === 'list') await cmdLs(args);
-  else if (command === 'a' || command === 'attach') cmdAttach(args);
+  else if (command === 'a' || command === 'attach') await cmdAttach(args);
   else if (command === 'wake') cmdWake(args);
   else if (command === 'hey') await cmdHey(args);
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
