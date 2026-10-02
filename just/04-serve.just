@@ -14,6 +14,8 @@ bun-check:
     MAW_LIFECYCLE_ENTRY="$output/index.js" bun utils/smoke-lifecycle.mjs
     bun utils/smoke-watch-inbox.mjs
     MAW_WATCH_ENTRY="$output/index.js" bun utils/smoke-watch-inbox.mjs
+    bun utils/smoke-attach-focus.mjs
+    MAW_ATTACH_ENTRY="$output/index.js" bun utils/smoke-attach-focus.mjs
     bun utils/smoke-bun-serve.mjs
     bun utils/smoke-federation-config.ts
     node utils/smoke-federation-serve.mjs

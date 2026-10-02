@@ -205,7 +205,7 @@ function run(file, args) {
 }
 
 /** The socket a session listens on, as herdr itself reports it. */
-async function sessionSocket(session) {
+export async function sessionSocket(session) {
   let sessions;
   try { sessions = JSON.parse(await run('herdr', ['session', 'list', '--json'])).sessions ?? []; } catch (err) {
     throw new Error(`cannot list herdr sessions to find the socket of '${session}' — ${String(err?.stderr || err?.message || err).trim().split('\n')[0]}\n  herdr session list --json`);

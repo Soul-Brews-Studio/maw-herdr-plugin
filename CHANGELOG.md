@@ -4,6 +4,13 @@
 
 ## 26.10.2-alpha.1101 — 2026-10-02
 
+- `maw herdr a <target>` brings a target to the front, like `maw tmux a` (#82):
+  it resolves any target the shared grammar does and focuses its pane over the
+  session socket (`pane.focus`, which also raises its tab and workspace). Inside
+  herdr that is all; for another session it focuses there and prints the switch
+  command; outside herdr it focuses, then attaches. A running session's exact
+  name still attaches that session, and a stopped session no longer shadows a
+  live workspace of the same name. `--print` and `--dry` never focus anything.
 - `maw herdr serve --demo`: the easy name for the read-only demo, exactly
   `--insecure-no-token` (#80). `--demo --rw` also opens writes (send, wake,
   cleanup, terminal) with no token for the same window; `--rw` without `--demo` is
