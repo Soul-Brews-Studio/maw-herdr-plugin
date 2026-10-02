@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix: `maw herdr a <target> --print` focused the pane when run inside herdr (it only
+  printed when run outside). It now never acts: outside herdr it prints the attach
+  command, inside it prints `maw herdr a --session <s> <pane>`. Released in
+  26.10.2-alpha.1101 (#84).
+
 - `maw herdr a <name>` asks which one when the name is ambiguous and it runs in
   a terminal (stdin and stderr both TTYs, no `--dry`/`--print`): a numbered list
   and `pick 1-N (Enter cancels):`. A number continues as if that candidate had

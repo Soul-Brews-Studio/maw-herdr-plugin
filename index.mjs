@@ -682,7 +682,13 @@ async function cmdAttach(args, { picked = false, woke = false } = {}) {
   const session = known.find(s => s.session === plan.session) ?? { session: plan.session, status: 'active' };
   const attachLine = attachArgv(session).join(' ');
   if (dry) { console.log(describeFocus(plan, attachLine).join('\n')); return; }
-  if (print && plan.where === 'away') { console.log(attachLine); return; }
+  // --print never acts, wherever it runs. Outside herdr it is the attach command; inside
+  // herdr there is no herdr CLI for "focus this pane", so it is the maw command that
+  // does it. (It used to fall through to focusPane inside herdr — seen live, 2026-10-02.)
+  if (print) {
+    console.log(plan.where === 'away' ? attachLine : `maw herdr a --session ${shq(plan.session)} ${plan.pane}`);
+    return;
+  }
 
   await focusPane(plan.session, plan.pane);
   const name = `${plan.r.label} (${plan.pane}${plan.r.agent ? ` · ${plan.r.agent}` : ''})`;

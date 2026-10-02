@@ -200,6 +200,11 @@ try {
   eq(r.rc, 0, r.err); ok(r.out.includes('would  focus wB:p1 in this herdr session'), r.out); eq(focuses(herdrD).length, 0);
   r = await cli(['a', 'sierra', '--dry'], { pane: 'wA:p1' });
   eq(r.rc, 0, r.err); ok(r.out.includes("then print how to switch"), r.out); eq(focuses(herdrS).length, 0);
+  // inside herdr too: --print prints the command and focuses nothing, same session or another
+  r = await cli(['a', 'bravo', '--print'], { pane: 'wA:p1' });
+  eq(r.rc, 0, r.err); eq(r.out.trim(), 'maw herdr a --session default wB:p1'); eq(focuses(herdrD).length, 0, '--print inside herdr focuses nothing');
+  r = await cli(['a', 'sierra', '--print'], { pane: 'wA:p1' });
+  eq(r.rc, 0, r.err); eq(r.out.trim(), 'maw herdr a --session side wS:p1'); eq(focuses(herdrS).length + focuses(herdrD).length, 0, '--print for another session focuses nothing');
 
   // 5. a running session's exact name keeps the old meaning; a stopped one does not shadow
   resetAll();
