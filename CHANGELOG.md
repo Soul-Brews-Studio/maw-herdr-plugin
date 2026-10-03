@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix manifest/CLI help drift (#93): `plugin.json` help and description and the first `HELP`
+  line now name every verb and alias (`list`, `read`, `here`, `back`, `fed`, …). A new smoke,
+  `utils/smoke-help-verbs.mjs`, derives the verbs from the dispatch and rejects a missing or
+  ghost verb, manifest drift, and any `--help` that reaches herdr — on source and bundle.
+
 ## 26.10.3-alpha.916 — 2026-10-03
 
 - New verb `restore` and `ls restorable` (#90): list and bring back worktrees whose
