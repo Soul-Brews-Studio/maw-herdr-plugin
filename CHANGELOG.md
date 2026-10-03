@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Live send coverage for #42: `utils/smoke-send-live.mjs` runs `POST /api/send` through the Bun
+  server against a throwaway herdr daemon (`utils/lib.herdrDaemon.mjs`, stopped and deleted even on
+  failure) with an unpaid stand-in agent — tagged delivery, busy-agent queueing, bounded Enter retry,
+  draft/blocked refusals, honest receipts, dashboard WebSocket updates and delivery history.
 - Fix `ls` and `resolve` counting a scratch repository under a dot-folder inside another
   checkout (`wt/<name>/.tmp/<repo>`) as a fleet repo (#92): its space duplicated the checkout
   label, so an exact name resolved to two worktrees. Scratch repos and their spaces are now

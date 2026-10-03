@@ -517,6 +517,7 @@ exact field/limit contracts; this README stays a map, not the spec.
 ## Smoke
 
 ```bash
+bun utils/smoke-send-live.mjs     # live send against a throwaway herdr daemon (needs herdr)
 bun utils/smoke-help-verbs.mjs    # dispatch, HELP and plugin.json name the same verbs
 just local smoke                  # here, against the installed plugin
 just remote smoke god@white.local # there
