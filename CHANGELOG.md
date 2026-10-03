@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Real-herdr smoke for join/break/layout/restore (#94): `utils/smoke-layout-live.mjs` checks exact
+  geometry, pane id and terminal continuity, the duplicate-label refusal, and same-path restore
+  then resume, on a throwaway herdr daemon with an unpaid stand-in agent; cleanup holds on SIGTERM.
 - Live send coverage for #42: `utils/smoke-send-live.mjs` runs `POST /api/send` through the Bun
   server against a throwaway herdr daemon (`utils/lib.herdrDaemon.mjs`, stopped and deleted even on
   failure) with an unpaid stand-in agent — tagged delivery, busy-agent queueing, bounded Enter retry,
