@@ -144,7 +144,9 @@ else { console.error('fake herdr: unexpected', JSON.stringify(args)); process.ex
   const run = (args, opts) => cli(entry, args, opts);
   const json = (args, opts) => { const r = run([...args, '--json'], opts); eq(r.rc, 0, `${args.join(' ')} --json: ${r.err}`); return JSON.parse(r.out).resolved; };
   const calls = () => readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
-  const READS = new Set(['session list', 'api snapshot', 'pane read', 'machine list']);
+  // pane process-info is a read too: resolving `self` checks HERDR_PANE_ID against the
+  // process tree with it (#88), because the env goes stale when herdr moves a pane
+  const READS = new Set(['session list', 'api snapshot', 'pane read', 'machine list', 'pane process-info']);
   const verbOf = a => (a[0] === '--session' ? a.slice(2) : a).slice(0, 2).join(' ');
 
   // --- pure module checks ------------------------------------------------------
