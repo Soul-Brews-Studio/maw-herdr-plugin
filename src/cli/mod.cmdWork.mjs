@@ -20,7 +20,7 @@ const isDir = (path) => { try { return statSync(path).isDirectory(); } catch { r
 function run(file, args, { cwd, timeout = 15_000 } = {}) {
   return new Promise((ok, fail) => {
     execFile(file, args, { cwd, encoding: 'utf8', timeout, maxBuffer: 16 << 20 }, (err, stdout, stderr) => {
-      if (err) { err.detail = String(stderr || err.message || '').trim().split('\n')[0]; fail(err); }
+      if (err) { err.detail = String(stderr || err.message || '').trim().split('\n')[0]; err.stdout = stdout; fail(err); }
       else ok(stdout);
     });
   });
@@ -100,6 +100,13 @@ async function runningSession() {
   throw new TargetError(`${running.length} herdr sessions are running and none is 'default' — the space would land in an arbitrary one\n  herdr session list --json`, 'ambiguous');
 }
 
+// herdr reports a refused call as one JSON line, on stderr (or stdout): {"error":{"code":…}}
+const herdrErrorCode = (err) => {
+  for (const text of [err?.detail, String(err?.stdout || '').trim().split('\n')[0]]) {
+    try { const code = JSON.parse(text || '').error?.code; if (code) return code; } catch {}
+  }
+  return undefined;
+};
 const agentName = (label) => (label.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^[^a-z]+/, '') || 'work').slice(0, 32);
 const real = (p) => { try { return realpathSync(p); } catch { return null; } };
 
@@ -179,7 +186,19 @@ export async function cmdWork(args, { UsageError = Error, runAttach } = {}) {
   // an engine can take longer than one herdr call to come up: wake allows 60 s, so does work
   const start = ['agent', 'start', name, '--kind', o.engine, '--pane', pane];
   try { await run('herdr', ['--session', session, ...start], { timeout: 60_000 }); }
-  catch (err) { throw new TargetError(`agent start failed — ${err?.detail || err?.message}; the space ${label} is open in pane ${pane} without an agent\n  ${herdrLine(start, session)}`, 'herdr'); }
+  catch (err) {
+    // herdr starts the engine, then will not call it ready while it sits at a question of its own:
+    // for Claude Code in a folder it has never opened (every fresh clone, every new worktree), whether
+    // to trust that folder. That answer belongs to a human — report it, never answer it.
+    if (herdrErrorCode(err) !== 'agent_not_ready') {
+      throw new TargetError(`agent start failed — ${err?.detail || err?.message}; the space ${label} is open in pane ${pane} without a ready agent\n  ${herdrLine(start, session)}`, 'herdr');
+    }
+    console.log(`  ● opened ${label} in ${session} pane ${pane}; the agent ${name} (${o.engine}) is waiting at a startup question`);
+    console.log(`    (Claude Code in a folder it has never opened asks whether to trust it) — answer it yourself:`);
+    console.log(`    maw herdr a ${shq(pane)}`);
+    if (prompt !== null) console.log(`  prompt held back until then; send it after answering:\n    maw herdr hey ${shq(pane)} ${shq(prompt)}`);
+    return;   // exit 0: the space and the agent exist; the next step is a person's
+  }
   console.log(`  ● opened ${label} in ${session} pane ${pane}, agent ${name} (${o.engine})`);
   if (prompt !== null) {
     const send = ['agent', 'prompt', name, prompt];

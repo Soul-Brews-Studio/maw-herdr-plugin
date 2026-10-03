@@ -33,7 +33,12 @@ const say = (value) => { process.stdout.write(typeof value === 'string' ? value 
 if (a[0] === 'session' && a[1] === 'list') say({ sessions: process.env.FAKE_NO_SESSION ? [{ name: 'default', running: false, default: true }] : [{ name: 'default', running: true, default: true }, { name: 'old', running: false }] });
 if (a[0] === 'pane' && a[1] === 'list') say({ result: { panes: JSON.parse(process.env.FAKE_PANES || '[]') } });
 if (a[0] === 'workspace' && a[1] === 'create') say({ result: { root_pane: { pane_id: 'wT:p1' } } });
-if (a[0] === 'agent' && a[1] === 'start') say({ result: { agent: { agent_status: 'idle' } } });
+if (a[0] === 'agent' && a[1] === 'start') {
+  // what real herdr printed (2026-10-03) for Claude Code at its folder-trust question in a fresh clone
+  if (process.env.FAKE_AGENT_START === 'blocked') { process.stderr.write(JSON.stringify({ error: { code: 'agent_not_ready', message: 'agent x is blocked during startup and is not ready for prompts' }, id: 'cli:agent:start' }) + '\\n'); process.exit(1); }
+  if (process.env.FAKE_AGENT_START === 'fail') { process.stderr.write(JSON.stringify({ error: { code: 'invalid_kind', message: 'unknown agent kind' }, id: 'cli:agent:start' }) + '\\n'); process.exit(1); }
+  say({ result: { agent: { agent_status: 'idle' } } });
+}
 if (a[0] === 'agent' && a[1] === 'prompt') say('');
 process.exit(97);
 `, { mode: 0o755 });
@@ -152,6 +157,20 @@ process.exit(96);
   }
   r = run(['acme/solo', '--dry'], { FAKE_NO_SESSION: '1' });
   ok(r.status === 1 && r.stderr.includes('no herdr session is running'), `L no session: ${r.stderr}`);
+
+  // M — an agent waiting at a startup question (folder trust) is reported, never answered; exit 0
+  reset();
+  r = run(['acme/solo'], { FAKE_AGENT_START: 'blocked' });
+  eq(r.status, 0, `M exit: ${r.stderr}`);
+  ok(r.stdout.includes('waiting at a startup question') && r.stdout.includes('maw herdr a wT:p1'), `M says where to answer: ${r.stdout}`);
+  ok(!calls(herdrLog).some(argv => argv.includes('prompt')), 'M sends nothing to a waiting agent');
+  reset();
+  r = run(['https://github.com/acme/solo/issues/3'], { FAKE_AGENT_START: 'blocked' });
+  ok(r.status === 0 && r.stdout.includes('prompt held back') && r.stdout.includes('maw herdr hey wT:p1 https://github.com/acme/solo/issues/3'), `M2 holds the prompt back: ${r.stdout}${r.stderr}`);
+  ok(!calls(herdrLog).some(argv => argv.includes('prompt')), 'M2 the prompt is not sent');
+  // N — any other refusal is still a failure, with the start command to retry
+  r = run(['acme/solo', '--wt', 'other'], { FAKE_AGENT_START: 'fail' });
+  ok(r.status === 1 && r.stderr.includes('without a ready agent') && r.stderr.includes('agent start'), `N other errors fail: ${r.stderr}`);
 
   console.log(`ok: maw herdr work — ${checks} checks (${entry === join(root, 'index.mjs') ? 'source' : 'bundle'})`);
 } finally {
