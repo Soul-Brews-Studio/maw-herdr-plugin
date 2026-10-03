@@ -21,15 +21,21 @@ import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.m
 import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } from './src/cli/mod.lsStateView.mjs';
 import { cmdAudit } from './src/cli/mod.audit.mjs';
 import { cmdClean, cmdSync } from './src/cli/mod.cleanup.mjs';
-import { cmdBreak, cmdJoin, cmdLayout, cmdWhoami } from './src/cli/mod.layout.mjs';
+import { cmdJoin } from './src/cli/mod.cmdJoin.mjs';
+import { cmdBreak } from './src/cli/mod.cmdBreak.mjs';
+import { cmdLayout } from './src/cli/mod.cmdLayout.mjs';
+import { cmdWhoami } from './src/cli/mod.cmdWhoami.mjs';
+import { cmdRestore } from './src/cli/mod.cmdRestore.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|join|break|layout|whoami|watch|inbox|reply|audit|clean|sync|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|restore|kill|close|join|break|layout|whoami|watch|inbox|reply|audit|clean|sync|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
                                        (also --state <s>; combines with --path, --json)
+  ls restorable [--json]               worktrees whose FOLDER is gone while the branch and
+                                       the transcript remain (= maw herdr restore)
   ls --agents [--json]                 every agent pane across all sessions
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
   a <target> [--print] [--dry] [-y]    bring a target to the front, like maw tmux a: focus its
@@ -49,6 +55,9 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|c
                                        quit the agent, relaunch it in the same pane and
                                        name with the argv read from its running process
   resume [<target>] [--dry]            start the agent on its worktree's newest transcript
+  restore [<name|path>] [--dry] [--no-resume] [--json]
+                                       no target: what can come back. A target: git worktree
+                                       add at the SAME path from its branch, then resume it
   kill [<target>] [--dry]              ctrl+c the agent until it exits; the pane stays
   close [<target>] [--force] [--dry]   close the target's herdr space; worktree stays
   join <target>... [--cols|--rows|--main [--ratio R]] [--tell] [--dry]
@@ -477,6 +486,18 @@ async function cmdLs(args) {
   const json = args.includes('--json');
   const path = args.includes('--path');
   const rest = args.filter(a => a !== '--json' && a !== '--path');
+  // A state is a word, not a flag: --resumable read as an unknown argument with no way
+  // forward (#90). Name the spelling that works.
+  const flagged = rest.find(a => a.startsWith('--') && [...STATES, 'restorable'].includes(a.slice(2)));
+  if (flagged) throw new UsageError(`${flagged} is a state, and states are words, not flags:\n  maw herdr ls ${flagged.slice(2)}${json ? ' --json' : ''}`);
+  // restorable is not a state of a checkout on disk — its folder is gone — so the
+  // listing comes from the transcripts' side (mod.restore.mjs)
+  const at = rest.indexOf('--state');
+  if (rest[0] === 'restorable' || (at !== -1 && rest[at + 1] === 'restorable')) {
+    const extra = rest.filter((a, i) => a !== 'restorable' && !(a === '--state' && rest[i + 1] === 'restorable'));
+    if (extra.length) throw new UsageError(`unknown argument: ${extra[0]}\n  maw herdr ls restorable${json ? ' --json' : ''}`);
+    return cmdRestore(json ? ['--json'] : [], { UsageError });
+  }
   let state = takeStateFlag(rest, UsageError);
   // only the workspace tree has a checkout; --agents --json already carries cwd.
   // Anything else left over is an unknown argument, reported as one below.
@@ -1271,6 +1292,7 @@ try {
   else if (command === 'resolve') await cmdResolve(args, { UsageError });
   else if (command === 'restart') await cmdRestart(args, { UsageError });
   else if (command === 'resume') await cmdResume(args, { UsageError });
+  else if (command === 'restore') await cmdRestore(args, { UsageError });
   else if (command === 'kill') await cmdKill(args, { UsageError });
   else if (command === 'close') await cmdClose(args, { UsageError });
   else if (command === 'join' || command === 'here') await cmdJoin(args, { UsageError, roster });

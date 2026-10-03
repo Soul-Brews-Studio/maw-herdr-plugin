@@ -145,6 +145,12 @@ const repoRootOf = w => (w.repoKey ? (basename(w.repoKey) === '.git' ? dirname(w
 export async function worktreeStates({ spaces, roots, providers }) {
   const repos = new Map();
   for (const r of [...reposWithWorktrees(roots), ...spaces.map(repoRootOf).filter(Boolean)]) {
+    // A pane can sit in a folder that was deleted under it (a scratch repo under a
+    // worktree's .tmp/). Its space still names that repo, git cannot list a folder
+    // that is not there, and every `ls` warned that closed worktrees were missing —
+    // but a repo that no longer exists has none. Skipping it keeps the warning for
+    // repos git really fails on (#90, measured: one ghost warned on every run).
+    if (!existsSync(r)) continue;
     const key = real(r);
     if (!repos.has(key)) repos.set(key, r);
   }

@@ -72,7 +72,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { verifyCaller } from './mod.callerPane.mjs';
+import { verifyCaller } from './mod.verifyCaller.mjs';
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
@@ -112,7 +112,7 @@ export function sessionFromSocket(socket) {
 // Callers read from this process's own environment, as opposed to ones a verb or a
 // test passed in. Only these are checked against the process tree when "self" is
 // resolved (#88): HERDR_PANE_ID is set when the pane's process starts and is NOT
-// updated when herdr moves the pane to another workspace (mod.callerPane.mjs).
+// updated when herdr moves the pane to another workspace (mod.verifyCaller.mjs).
 const FROM_ENV = new WeakSet();
 
 /** Who is asking: the pane this process runs in, from the env herdr sets there. */

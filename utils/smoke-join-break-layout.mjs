@@ -25,8 +25,10 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { fmtRatio, paneOrder, planShares } from '../src/cli/mod.layout.mjs';
-import { ancestry, verifyCaller } from '../src/cli/mod.callerPane.mjs';
+import { fmtRatio, planShares } from '../src/cli/mod.planShares.mjs';
+import { paneOrder } from '../src/cli/mod.paneOrder.mjs';
+import { ancestry } from '../src/cli/mod.ancestry.mjs';
+import { verifyCaller } from '../src/cli/mod.verifyCaller.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const entry = process.env.MAW_LAYOUT_ENTRY || join(root, 'index.mjs');

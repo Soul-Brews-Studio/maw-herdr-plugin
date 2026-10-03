@@ -17,7 +17,11 @@
 //                                          // A path absent from the map has no
 //                                          // session this provider can resume.
 //     sessions(paths) -> Map<path, Session[]>  // optional: every session per
-//   }                                      // path, newest first (see findAllSessions)
+//                                          // path, newest first (see findAllSessions)
+//     all({ contains }) -> Map<cwd, Session[]> // optional: every session this
+//   }                                      // provider holds whose cwd contains
+//                                          // `contains`, keyed by that cwd — for
+//                                          // a folder that no longer exists (#90)
 //   Session = {
 //     provider: 'claude',
 //     id:       '9c77f5f5-…',              // what the agent's own resume takes;
@@ -26,7 +30,8 @@
 //     at:       1790000000000,             // its mtime, ms since epoch
 //     bytes:    48213,
 //     command:  "cd /code/x && claude --resume 9c77f5f5-…",  // runnable as-is
-//   }
+//     branch:   'feat/x' | null,           // all() only: the git branch the
+//   }                                      // transcript recorded, when it did
 //
 // find() is handed every path at once so a provider whose layout is not keyed
 // by directory (Codex dates its files; the cwd is inside them) scans once, not
@@ -122,7 +127,49 @@ export function claudeProvider(roots) {
     }
     return out;
   };
-  return { name: 'claude', roots, sessions, find: paths => newestOf(sessions(paths)) };
+  // Every session whose start directory contains `contains`, keyed by that directory
+  // (#90: a worktree whose folder is gone has no path to hand to sessions()). Only a
+  // directory whose NAME holds the encoded substring is opened, and only the head of
+  // its newest transcript is read: Claude writes the cwd (and gitBranch) on every
+  // record, and that cwd must encode back to the directory's own name — the encoding
+  // is lossy, so this is what proves the directory belongs to that path.
+  const all = ({ contains = '' } = {}) => {
+    const hint = contains ? encodeClaudeDir(contains) : '';
+    const out = new Map();
+    for (const root of roots) {
+      for (const d of entries(root)) {
+        if (!d.isDirectory() || (hint && !d.name.includes(hint))) continue;
+        const dir = join(root, d.name);
+        const files = [];
+        for (const e of entries(dir)) {
+          const id = basename(e.name, '.jsonl');
+          if (!e.isFile() || !e.name.endsWith('.jsonl') || !SAFE_ID.test(id)) continue;
+          const file = join(dir, e.name);
+          const s = stat(file);
+          if (s && s.size >= MIN_BYTES) files.push({ id, file, at: s.mtimeMs, bytes: s.size });
+        }
+        if (!files.length) continue;
+        files.sort((a, b) => b.at - a.at);
+        const head = readHead(files[0].file);
+        const cwd = firstString(head, 'cwd');
+        if (!cwd || (contains && !cwd.includes(contains)) || encodeClaudeDir(cwd) !== d.name) continue;
+        const recorded = firstString(head, 'gitBranch');
+        const branch = recorded && recorded !== 'HEAD' ? recorded : null;
+        const list = out.get(cwd) ?? [];
+        for (const f of files) list.push({ provider: 'claude', id: f.id, file: f.file, at: f.at, bytes: f.bytes, branch, command: `cd ${shellQuote(cwd)} && claude --resume ${f.id}` });
+        out.set(cwd, list.sort((a, b) => b.at - a.at));
+      }
+    }
+    return out;
+  };
+  return { name: 'claude', roots, sessions, all, find: paths => newestOf(sessions(paths)) };
+}
+
+/** The first `"key":"value"` string in a transcript head, unescaped, or null. */
+export function firstString(head, key) {
+  const m = head.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`));
+  if (!m) return null;
+  try { return JSON.parse(`"${m[1]}"`); } catch { return null; }
 }
 
 /** Map<path, Session[]> (newest first) to Map<path, Session>: the newest only. */
@@ -172,21 +219,10 @@ export function codexMeta(head) {
  * Only the head of each file is read. Measured on m5: 1,896 rollouts, 12 GB.
  */
 export function codexProvider(roots) {
-  const sessions = paths => {
-    const wanted = new Set(paths);
+  // One walk over every rollout's head. keyFor(cwd) says which key a session files
+  // under, or null to skip it: sessions(paths) keys by the wanted path, all() by cwd.
+  const scan = keyFor => {
     const all = new Map();
-    // A rollout may record a symlinked spelling of the directory (/var vs
-    // /private/var on macOS, a ghq alias). Resolve each distinct cwd once.
-    const resolved = new Map();
-    const match = cwd => {
-      if (wanted.has(cwd)) return cwd;
-      if (!resolved.has(cwd)) {
-        let r = null;
-        try { r = realpathSync(cwd); } catch {}
-        resolved.set(cwd, r && wanted.has(r) ? r : null);
-      }
-      return resolved.get(cwd);
-    };
     const walk = (dir, depth) => {
       for (const e of entries(dir)) {
         const full = join(dir, e.name);
@@ -198,7 +234,7 @@ export function codexProvider(roots) {
         const s = stat(full);
         if (!s || s.size < MIN_BYTES) continue;
         const meta = codexMeta(readHead(full));
-        const key = meta && match(meta.cwd);
+        const key = meta && keyFor(meta.cwd);
         if (!key) continue;
         // the uuid at the end of the name is the id `codex resume` takes
         const id = meta.id ?? e.name.slice(0, -'.jsonl'.length).slice(-36);
@@ -211,7 +247,24 @@ export function codexProvider(roots) {
     for (const list of all.values()) list.sort((a, b) => b.at - a.at);
     return all;
   };
-  return { name: 'codex', roots, sessions, find: paths => newestOf(sessions(paths)) };
+  const sessions = paths => {
+    const wanted = new Set(paths);
+    // A rollout may record a symlinked spelling of the directory (/var vs
+    // /private/var on macOS, a ghq alias). Resolve each distinct cwd once.
+    const resolved = new Map();
+    return scan(cwd => {
+      if (wanted.has(cwd)) return cwd;
+      if (!resolved.has(cwd)) {
+        let r = null;
+        try { r = realpathSync(cwd); } catch {}
+        resolved.set(cwd, r && wanted.has(r) ? r : null);
+      }
+      return resolved.get(cwd);
+    });
+  };
+  // rollouts record no branch; restore falls back to the folder name (#90)
+  const all = ({ contains = '' } = {}) => scan(cwd => (!contains || cwd.includes(contains) ? cwd : null));
+  return { name: 'codex', roots, sessions, all, find: paths => newestOf(sessions(paths)) };
 }
 
 // --- configuration -----------------------------------------------------------

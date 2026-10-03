@@ -24,42 +24,9 @@
  * environment's id on purpose (the agent keeps reading the id it was born with).
  * This decides what `self` resolves to when a verb acts on a pane.
  */
-import { execFileSync } from 'node:child_process';
-
-const sh = (file, args) => execFileSync(file, args, { encoding: 'utf8', timeout: 5_000, maxBuffer: 32 << 20, stdio: ['ignore', 'pipe', 'ignore'] });
-const withSession = (args, session) => (session ? ['--session', session, ...args] : args);
-const herdrJson = (args, session) => JSON.parse(sh('herdr', withSession(args, session)));
-
-/** This process and its ancestors: their pids and their process groups, from one `ps`. */
-export function ancestry(pid = process.pid, psOut = null) {
-  const table = new Map();
-  for (const line of (psOut ?? sh('ps', ['-A', '-o', 'pid=,ppid=,pgid='])).split('\n')) {
-    const [p, ppid, pgid] = line.trim().split(/\s+/).map(Number);
-    if (Number.isInteger(p) && p > 0) table.set(p, { ppid, pgid });
-  }
-  const pids = new Set();
-  const groups = new Set();
-  for (let p = pid; p > 1 && table.has(p) && !pids.has(p); p = table.get(p).ppid) {
-    pids.add(p);
-    groups.add(table.get(p).pgid);
-  }
-  return { pids, groups };
-}
-
-/** A pane's foreground process group and shell pid, or null when herdr says neither. */
-export function paneProcess(pane, session) {
-  const info = herdrJson(['pane', 'process-info', '--pane', pane], session)?.result?.process_info;
-  const fg = info?.foreground_process_group_id;
-  const shell = info?.shell_pid;
-  return Number.isInteger(fg) || Number.isInteger(shell) ? { fg, shell } : null;
-}
-
-/** Every pane id in the session — from `api snapshot`, the read the smokes already allow. */
-export function sessionPanes(session) {
-  const raw = herdrJson(['api', 'snapshot'], session);
-  const snap = raw?.result?.snapshot ?? raw?.result ?? raw;
-  return (snap?.panes ?? []).map(p => p.pane_id).filter(Boolean);
-}
+import { ancestry } from './mod.ancestry.mjs';
+import { paneProcess } from './mod.paneProcess.mjs';
+import { sessionPanes } from './mod.sessionPanes.mjs';
 
 const ours = (proc, me) => !!proc && (
   (Number.isInteger(proc.fg) && me.groups.has(proc.fg)) ||
