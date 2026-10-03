@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fix `work` on a folder Claude Code has never opened (a fresh clone, a new worktree): herdr starts the
+  engine but answers `agent start` with `agent_not_ready` while it waits at the folder-trust question,
+  and `work` reported that as a failed start — "open … without an agent", exit 1 — found on the first
+  live run (`maw work https://github.com/nat-build-with-oracle/oracle-office-town`). It now says the
+  agent is waiting at a startup question, names the pane to answer it in (`maw herdr a <pane>`), holds a
+  first prompt back with the `hey` command to send it after, and exits 0. It never answers the question:
+  trusting a folder is a person's call. Any other refusal still fails. `utils/smoke-work.mjs`: 46 checks.
+
 ## 26.10.3-alpha.2117 — 2026-10-03
 
 - New verb `work` (#101), the herdr port of maw-rs `maw work`: `maw herdr work <repo|.|path|url> [task]
