@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 26.10.3-alpha.1026 — 2026-10-03
+
 - Real-herdr smoke for join/break/layout/restore (#94): `utils/smoke-layout-live.mjs` checks exact
   geometry, pane id and terminal continuity, the duplicate-label refusal, and same-path restore
   then resume, on a throwaway herdr daemon with an unpaid stand-in agent; cleanup holds on SIGTERM.
