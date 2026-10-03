@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 26.10.3-alpha.2129 — 2026-10-03
+
 - Fix `work` on a folder Claude Code has never opened (a fresh clone, a new worktree): herdr starts the
   engine but answers `agent start` with `agent_not_ready` while it waits at the folder-trust question,
   and `work` reported that as a failed start — "open … without an agent", exit 1 — found on the first
