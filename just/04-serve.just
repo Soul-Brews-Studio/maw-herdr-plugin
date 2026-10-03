@@ -16,6 +16,8 @@ bun-check:
     MAW_LAYOUT_ENTRY="$output/index.js" bun utils/smoke-join-break-layout.mjs
     bun utils/smoke-restore.mjs
     MAW_RESTORE_ENTRY="$output/index.js" bun utils/smoke-restore.mjs
+    bun utils/smoke-work.mjs
+    MAW_WORK_ENTRY="$output/index.js" bun utils/smoke-work.mjs
     bun utils/smoke-help-verbs.mjs
     MAW_HELP_ENTRY="$output/index.js" bun utils/smoke-help-verbs.mjs
     bun utils/smoke-scratch-repos.mjs

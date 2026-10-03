@@ -41,6 +41,8 @@ maw herdr ls --agents           # every agent pane, every session
 maw herdr ls --json             # any of the above, as JSON
 maw herdr a <session>           # attach (alias: attach)
 maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
+maw herdr work <repo|.|path|url> [task]  # open a repo, or one task worktree (agents/<slug>), as a space
+                                #   with an agent — maw-rs `maw work`; a URL clones when missing [--wt|--dry]
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
