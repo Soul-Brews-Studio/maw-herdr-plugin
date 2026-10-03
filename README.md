@@ -46,6 +46,8 @@ maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts
 maw herdr restart [<target>]    # quit the agent, relaunch it in the same pane and name
 maw herdr resume [<target>]     # start the agent on its worktree's newest transcript
+maw herdr restore [<name>]      # list / bring back worktrees whose FOLDER is gone (branch + transcript remain)
+maw herdr ls restorable         # the same list as an ls state [--json]
 maw herdr kill [<target>]       # ctrl+c the agent until it exits; the pane stays
 maw herdr close [<target>]      # close the herdr space; the worktree stays [--force]
 maw herdr join <target>...      # bring agents' real panes into your tab (alias: here) [--cols|--rows|--main]
@@ -232,6 +234,40 @@ What the verbs rely on, measured on herdr 0.9 (#88):
 Every target is resolved before anything moves; an ambiguous one lists its panes and
 nothing moves. A label another space already uses is refused with the two commands that
 resolve it. `--dry` prints the exact `herdr pane move` lines.
+
+### Restore — a worktree whose folder is gone
+
+`resolve`, `ls` and `resume` start from checkouts that exist. A worktree whose folder
+was removed is invisible to them, even when its branch and its agent transcripts are
+all still here. `restore` starts from the transcripts instead.
+
+```console
+$ maw herdr restore                          # also: maw herdr ls restorable [--json]
+  ↺ restorable — folder gone, branch and transcript still here (2)
+    ~/code/github.com/org/alpha
+      ├─ ↺ feat-x  local branch · claude 4 sessions 248 MB · newest 9d ago
+      └─ ↺ spike-y  branch on origin · codex 1 session 3 MB · newest 2d ago
+  ✗ not restorable (1)
+      old-z — its branch is gone (tried old-z)
+$ maw herdr restore feat-x                   # git worktree add <same path> feat-x, then resume
+```
+
+- It brings the worktree back at the **same path**. Claude keys its project directories by
+  the encoded working directory, so a worktree recreated anywhere else would orphan the
+  very transcripts it is rescuing.
+- The branch is the one the newest transcript recorded, else the folder name. A branch
+  that exists only on a remote is checked out with `--track -b`.
+- A path git still registers with its folder missing gets `add -f`.
+- A folder that came back **without** `.git` (something kept writing into the path) is
+  moved aside to `<path>.husk-<time>`, the worktree is added, and its files are copied
+  back where the checkout has none. The moved folder stays as the backup.
+- Refused, changing nothing, each with the command that resolves it: a branch checked out
+  in another worktree, a branch gone everywhere, an ambiguous name. A target whose folder
+  exists is handed to `resume`. `--dry` prints the steps; `--no-resume` only puts the
+  folder back.
+- Listing reads only the head of each worktree-shaped transcript directory's newest file,
+  plus the Codex head scan `ls resumable` already does, then two git calls per repo. On a
+  machine with 248 Claude directories and 2,237 Codex rollouts it takes 0.11 s.
 
 ### Hey and peek — targeting
 

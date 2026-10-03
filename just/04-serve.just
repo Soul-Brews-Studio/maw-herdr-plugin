@@ -14,6 +14,8 @@ bun-check:
     MAW_LIFECYCLE_ENTRY="$output/index.js" bun utils/smoke-lifecycle.mjs
     bun utils/smoke-join-break-layout.mjs
     MAW_LAYOUT_ENTRY="$output/index.js" bun utils/smoke-join-break-layout.mjs
+    bun utils/smoke-restore.mjs
+    MAW_RESTORE_ENTRY="$output/index.js" bun utils/smoke-restore.mjs
     bun utils/smoke-watch-inbox.mjs
     MAW_WATCH_ENTRY="$output/index.js" bun utils/smoke-watch-inbox.mjs
     bun utils/smoke-attach-focus.mjs

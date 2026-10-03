@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- New verb `restore` and `ls restorable` (#90): list and bring back worktrees whose
+  FOLDER is gone while the branch and the agent transcripts survive — invisible to
+  resolve/ls/resume, which start from checkouts that exist. Listing starts from the
+  transcripts through a new optional provider method `all({ contains })` (Claude: only
+  `/wt/`-shaped project dirs, the head of each newest file; Codex: the existing single
+  head scan), then two git calls per repo. `restore <name>` runs `git worktree add` at
+  the SAME path (local branch, or `--track -b` from a remote; `-f` when git still
+  registers the path), moves a folder that came back without `.git` aside and copies
+  its files back, then hands over to `resume`. Refusals and `--dry` change nothing.
+  Measured on a real machine: 30 restorable worktrees listed in 0.11 s.
+- `ls --resumable` (any state written as a flag) now says states are words and prints
+  `maw herdr ls resumable`, instead of a bare "unknown argument" (#90, Neo's review).
+- `ls` no longer warns that "closed worktrees are missing from the counts" for a repo
+  whose folder no longer exists — a pane sitting in a deleted scratch repo made every
+  `ls` print that warning (#90, Neo's review).
+- Internal: the layout verbs (#88) and the `self` check are split into one function per
+  `src/cli/mod.<function>.mjs` file; no behaviour change.
+
 - New verbs `join` (alias `here`), `break` (alias `back`), `layout` and `whoami` (#88).
   `join <target>...` moves agents' real panes into the caller's tab — no restart — with
   each share set inside the `pane move` (`--cols` default, `--rows`, `--main [--ratio R]`),
