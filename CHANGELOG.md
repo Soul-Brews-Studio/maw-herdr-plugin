@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 26.10.3-alpha.916 — 2026-10-03
+
 - New verb `restore` and `ls restorable` (#90): list and bring back worktrees whose
   FOLDER is gone while the branch and the agent transcripts survive — invisible to
   resolve/ls/resume, which start from checkouts that exist. Listing starts from the
