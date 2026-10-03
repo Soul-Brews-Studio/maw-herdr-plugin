@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 26.10.3-alpha.2117 — 2026-10-03
+
 - New verb `work` (#101), the herdr port of maw-rs `maw work`: `maw herdr work <repo|.|path|url> [task]
   [--wt [slug]] [--engine <kind>] [--prompt <text>] [--attach] [--dry]`. A repo is a path, org/repo, a
   GitHub URL (repo, issue or pull) or a bare name under ghq; a URL that is not checked out is cloned with
