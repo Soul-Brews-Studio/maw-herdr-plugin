@@ -29,7 +29,7 @@ import { cmdRestore } from './src/cli/mod.cmdRestore.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|restore|kill|close|join|break|layout|whoami|watch|inbox|reply|audit|clean|sync|serve> [args]
+const HELP = `maw herdr <ls|list|a|attach|wake|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
