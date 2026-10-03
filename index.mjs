@@ -21,10 +21,11 @@ import { STATES, ghqRoots, worktreeStates } from './src/cli/mod.worktreeStates.m
 import { showWorktreeStates, snapshotFailure, stateSummaryLine, takeStateFlag } from './src/cli/mod.lsStateView.mjs';
 import { cmdAudit } from './src/cli/mod.audit.mjs';
 import { cmdClean, cmdSync } from './src/cli/mod.cleanup.mjs';
+import { cmdBreak, cmdJoin, cmdLayout, cmdWhoami } from './src/cli/mod.layout.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|watch|inbox|reply|audit|clean|sync|serve> [args]
+const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|close|join|break|layout|whoami|watch|inbox|reply|audit|clean|sync|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -50,6 +51,15 @@ const HELP = `maw herdr <ls|a|attach|wake|hey|peek|resolve|restart|resume|kill|c
   resume [<target>] [--dry]            start the agent on its worktree's newest transcript
   kill [<target>] [--dry]              ctrl+c the agent until it exits; the pane stays
   close [<target>] [--force] [--dry]   close the target's herdr space; worktree stays
+  join <target>... [--cols|--rows|--main [--ratio R]] [--tell] [--dry]
+                                       bring agents' real panes into your tab (alias: here):
+                                       no restart, history kept, each share set in the move
+  break [<target>...] [--into <space>|--label <name>] [--tell] [--dry]
+                                       move panes out to a space of their own (alias: back)
+  layout <cols|rows|main> [--ratio R] [--dry]
+                                       re-tile the tab you are in, keeping the panes' order
+  whoami [--json]                      the pane this really runs in — HERDR_PANE_ID goes
+                                       stale when a pane moves to another space
   watch [<target>] [--every] [--dry]   be told when that agent finishes: a note lands
                                        in this pane's inbox (from herdr's pushed events)
   watch --list [--all] [--json]        what this pane watches (--all: every pane's)
@@ -83,7 +93,8 @@ session's role — the place work lives — is a WORKSPACE, and one session hold
 'ls' therefore lists workspaces; 'ls --sessions' lists the servers.
 
 <target> is one grammar, shared by every verb that takes one:
-  self           the pane you are typing in (the default where a target is optional)
+  self           the pane you are typing in (the default where a target is optional),
+                 checked against the process tree: HERDR_PANE_ID goes stale when a pane moves
   /abs/path  .   the worktree containing that path (a directory inside one works)
   w5D:p1         a herdr pane id
   digger-oracle  a name: exact label, then a repo's main worktree, then an oracle's main
@@ -1262,6 +1273,10 @@ try {
   else if (command === 'resume') await cmdResume(args, { UsageError });
   else if (command === 'kill') await cmdKill(args, { UsageError });
   else if (command === 'close') await cmdClose(args, { UsageError });
+  else if (command === 'join' || command === 'here') await cmdJoin(args, { UsageError, roster });
+  else if (command === 'break' || command === 'back') await cmdBreak(args, { UsageError, roster });
+  else if (command === 'layout') await cmdLayout(args, { UsageError });
+  else if (command === 'whoami') await cmdWhoami(args, { UsageError });
   else if (command === 'watch') await cmdWatch(args, { UsageError, entry: fileURLToPath(import.meta.url) });
   else if (command === 'inbox') await cmdInbox(args, { UsageError });
   else if (command === 'reply') await cmdReply(args, { UsageError });

@@ -72,6 +72,7 @@ import { execFile, execFileSync } from 'node:child_process';
 import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { verifyCaller } from './mod.callerPane.mjs';
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
@@ -108,11 +109,19 @@ export function sessionFromSocket(socket) {
   return null;
 }
 
+// Callers read from this process's own environment, as opposed to ones a verb or a
+// test passed in. Only these are checked against the process tree when "self" is
+// resolved (#88): HERDR_PANE_ID is set when the pane's process starts and is NOT
+// updated when herdr moves the pane to another workspace (mod.callerPane.mjs).
+const FROM_ENV = new WeakSet();
+
 /** Who is asking: the pane this process runs in, from the env herdr sets there. */
 export function callerFromEnv(env = process.env) {
   const pane = env.HERDR_PANE_ID;
   if (!pane) return null;
-  return { pane, session: sessionFromSocket(env.HERDR_SOCKET_PATH) };
+  const caller = { pane, session: sessionFromSocket(env.HERDR_SOCKET_PATH) };
+  if (env === process.env) FROM_ENV.add(caller);
+  return caller;
 }
 
 /**
@@ -226,7 +235,7 @@ export function resolveAgent(all, target, verb, { caller = callerFromEnv(), cwd 
   if (form.form === 'self') {
     const me = selfPane(caller, cwd);
     const hits = all.filter(a => a.pane === me.pane && (!me.session || a.session === me.session));
-    if (hits.length === 1) return { ...hits[0], how: 'self' };
+    if (hits.length === 1) return { ...hits[0], how: selfHow(me) };
     // Only without a readable HERDR_SOCKET_PATH: the id repeats across sessions.
     if (hits.length > 1) throw choices(`"self" is herdr pane ${me.pane}, which exists in ${hits.length} sessions, and HERDR_SOCKET_PATH does not say which`, hits);
     throw new TargetError(
@@ -282,8 +291,15 @@ export function resolveAgent(all, target, verb, { caller = callerFromEnv(), cwd 
   throw new TargetError(`no agent '${target}'. workspaces: ${known.join(', ') || '(none)'}\n  see them all: maw herdr ls --agents`, 'not-found');
 }
 
+// How a resolve/--dry line says "self" was reached: plainly, or that the env was stale.
+const selfHow = me => (me?.stale ? `self — HERDR_PANE_ID ${me.stale} is stale, this pane moved` : 'self');
+
+// The pane "self" means. A caller from the environment is checked first: after a
+// cross-workspace move its HERDR_PANE_ID is stale, and kill/close/restart default
+// to self. verifyCaller only overrides on a positive match, so a detached worker
+// and every lookup failure keep the environment's value, as before.
 function selfPane(caller, cwd = process.cwd()) {
-  if (caller?.pane) return caller;
+  if (caller?.pane) return FROM_ENV.has(caller) ? verifyCaller(caller) : caller;
   throw new TargetError(
     `"self" means the herdr pane this command runs in, and HERDR_PANE_ID is not set here — not inside a herdr pane\n  name the target by path instead: maw herdr resolve ${shq(cwd)}`,
     'no-self',
@@ -471,7 +487,7 @@ export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerF
   let tiers;
   if (form.form === 'self') {
     const me = selfPane(caller, cwd);
-    tiers = [['self', t => t.panes.some(p => p.pane === me.pane) && (!me.session || t.session === me.session)]];
+    tiers = [[selfHow(me), t => t.panes.some(p => p.pane === me.pane) && (!me.session || t.session === me.session)]];
     const picked = pickTier(targets, tiers, { ambiguous });
     if (!picked) {
       throw new TargetError(

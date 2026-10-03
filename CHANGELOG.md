@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- New verbs `join` (alias `here`), `break` (alias `back`), `layout` and `whoami` (#88).
+  `join <target>...` moves agents' real panes into the caller's tab — no restart — with
+  each share set inside the `pane move` (`--cols` default, `--rows`, `--main [--ratio R]`),
+  never a resize afterwards. `break` moves panes to a new space named after the agent
+  (or its repo folder), or `--into` an existing one as a new tab; a taken label is refused
+  with the two commands that resolve it. `layout cols|rows|main` re-tiles the caller's tab
+  through a scratch tab in the same workspace, where pane ids do not change. `whoami`
+  prints the pane this really runs in. Every target is resolved before anything moves;
+  `--dry` prints the exact herdr commands; `--tell` tells each moved agent its new id.
+- Fix: `self` named the wrong pane after the caller's pane moved to another workspace.
+  `HERDR_PANE_ID` is set when the pane's process starts and is not updated by `pane move`,
+  so restart/resume/kill/close/watch defaulting to `self` addressed a pane id that no longer
+  existed — or, once reused, another pane. `self` now checks the env against the process
+  tree (`pane process-info`: the pane whose foreground group or shell is this process's or
+  an ancestor's) and only overrides it on a positive match; a detached worker and every
+  lookup failure keep the env value, as before. Inbox addresses keep the env id on purpose.
+
 ## 26.10.2-alpha.1609 — 2026-10-02
 
 - Fix: `maw herdr a <target> --print` focused the pane when run inside herdr (it only

@@ -48,6 +48,10 @@ maw herdr restart [<target>]    # quit the agent, relaunch it in the same pane a
 maw herdr resume [<target>]     # start the agent on its worktree's newest transcript
 maw herdr kill [<target>]       # ctrl+c the agent until it exits; the pane stays
 maw herdr close [<target>]      # close the herdr space; the worktree stays [--force]
+maw herdr join <target>...      # bring agents' real panes into your tab (alias: here) [--cols|--rows|--main]
+maw herdr break [<target>...]   # move panes out to a space of their own (alias: back) [--into|--label]
+maw herdr layout cols|rows|main # re-tile the tab you are in, keeping the panes' order
+maw herdr whoami                # the pane this really runs in — HERDR_PANE_ID goes stale on a move
 maw herdr watch [<target>]      # be told when that agent finishes [--every] [--stop] [--list]
 maw herdr inbox                 # notes addressed to this pane (watch results, replies); read-only
 maw herdr reply <target> <text> # file an answer in that pane's inbox, signed by this pane
@@ -141,7 +145,7 @@ maw herdr wake neo --prompt "recap the last session" --attach
 
 | form | meaning |
 |---|---|
-| `self` | the pane you are typing in (from `HERDR_PANE_ID` + `HERDR_SOCKET_PATH`); the default where a target is optional |
+| `self` | the pane you are typing in (from `HERDR_PANE_ID` + `HERDR_SOCKET_PATH`, checked against the process tree — the env goes stale when herdr moves a pane to another space); the default where a target is optional |
 | `/abs/path`, `.`, `../x` | the git worktree containing that path (a linked worktree, never its main checkout, when you are inside one) |
 | `w5D:p1` | a herdr pane id |
 | `digger-oracle` `neo` | a name: exact label → a repo's main worktree → an oracle's main worktree (`neo` = `neo-oracle`) → unique substring |
@@ -195,6 +199,39 @@ with one command per pane, whichever pane has focus.
 - **close** closes the space; the worktree and transcript stay. A space with a live
   agent, or a pane running any other job (a dev server, a test run), needs `--force`
   (the refusal lists the `kill` for each agent and a `pane read` for each job).
+
+### Join, break, layout — moving panes
+
+`join` brings agents' REAL panes into the tab you are in; `break` sends panes out to a
+space of their own; `layout` re-tiles your tab. Nothing restarts — the process, its
+history and scrollback move with the pane. Targets use the hey/peek grammar, so an agent
+sitting in someone else's tab is still found by its agent name; a pane id names any pane.
+
+```console
+$ maw herdr join alpha beta              # three even columns: you, alpha, beta
+  moved     alpha  wB:p1 → wA:p2  (wA:p1 keeps 0.333) · its space wB had nothing left and closed
+  moved     beta   wC:p1 → wA:p3  (wA:p2 keeps 0.5)
+  layout    wA:p1 40×40 (0.33w 1.00h) | wA:p2 40×40 (0.33w 1.00h) | wA:p3 40×40 (0.33w 1.00h)
+$ maw herdr layout main --ratio 0.4      # you keep a 0.4 column on the left, the rest stack right
+$ maw herdr back alpha                   # alpha to a new space named 'alpha'
+```
+
+What the verbs rely on, measured on herdr 0.9 (#88):
+
+- `pane move --ratio R` is the share the **target** pane keeps, and `--split` takes only
+  `right|down`. T panes share one area evenly when the k-th move splits the pane added
+  before it with `1/(T−k+1)` — 0.333 then 0.5 for three.
+- The share is set **in the move**. A `pane resize` afterwards is one more size change,
+  and every size change makes a Claude Code pane redraw its whole screen.
+- A pane keeps its id inside one workspace and gets a new one in another; a workspace
+  left empty closes itself. `layout` therefore parks panes in a scratch tab of the SAME
+  workspace and brings them back with their shares.
+- A moved agent's `HERDR_PANE_ID` still names its old id. `--tell` sends it one line with
+  the new id (off by default — a prompt starts a turn); `maw herdr whoami` shows the real one.
+
+Every target is resolved before anything moves; an ambiguous one lists its panes and
+nothing moves. A label another space already uses is refused with the two commands that
+resolve it. `--dry` prints the exact `herdr pane move` lines.
 
 ### Hey and peek — targeting
 
@@ -420,6 +457,14 @@ exact field/limit contracts; this README stays a map, not the spec.
 - **`herdr machine list` targets are (host, user) pairs, not hosts.** Three
   entries can be the same box under different users with different plugin
   state. Don't assume a bare hostname is unambiguous.
+- **`HERDR_PANE_ID` is frozen at birth.** herdr sets it when a pane's process starts and
+  does not update it when `pane move` takes the pane to another workspace (new id). An
+  agent moved five times still had its first id in its environment; `herdr pane current`
+  echoes the env. `self` and `maw herdr whoami` check the process tree instead (#88).
+- **Reading an agent pane's history makes the agent redraw.** `pane read --source recent`
+  or `recent-unwrapped` cost a Claude Code pane 450–640 ms of CPU per 15 reads and a full
+  redraw each time; `--source visible` cost 0 ms. Never poll history; nothing in this
+  plugin's join/break/layout reads a pane.
 - Interactive attach (`maw herdr a`) needs maw-rs
   [#992](https://github.com/Soul-Brews-Studio/maw-rs/issues/992) for stdin
   handoff; older maw prints the raw `herdr --session …` command instead.
