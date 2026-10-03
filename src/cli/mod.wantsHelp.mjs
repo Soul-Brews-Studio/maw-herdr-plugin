@@ -10,7 +10,7 @@ const HELP_FLAGS = new Set(['--help', '-h']);
 // `pek alpha -h` prints the usage without saying the verb is wrong. A new verb
 // joins this set in the same change that adds its dispatch line. `serve` is
 // absent on purpose: it parses its own --help.
-export const HELP_VERBS = new Set(['ls', 'list', 'a', 'attach', 'wake', 'hey', 'peek', 'read', 'federation', 'fed', 'resolve', 'watch', 'inbox', 'reply', 'audit', 'clean', 'sync']);
+export const HELP_VERBS = new Set(['ls', 'list', 'a', 'attach', 'wake', 'work', 'hey', 'peek', 'read', 'federation', 'fed', 'resolve', 'watch', 'inbox', 'reply', 'audit', 'clean', 'sync']);
 
 // Flags whose next argv element is a value, not a flag. `wake --prompt -h`
 // prompts the agent with "-h"; it is not a request for usage.
@@ -21,6 +21,7 @@ export const HELP_VERBS = new Set(['ls', 'list', 'a', 'attach', 'wake', 'hey', '
 // `agent start --kind -h` failed, and left it behind.
 const VALUE_FLAGS = {
   wake: new Set(['--prompt']),
+  work: new Set(['--prompt']),
   peek: new Set(['--lines', '--session']),
   hey: new Set(['--session']),
   reply: new Set(['--session']),

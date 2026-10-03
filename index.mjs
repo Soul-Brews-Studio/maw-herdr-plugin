@@ -26,10 +26,11 @@ import { cmdBreak } from './src/cli/mod.cmdBreak.mjs';
 import { cmdLayout } from './src/cli/mod.cmdLayout.mjs';
 import { cmdWhoami } from './src/cli/mod.cmdWhoami.mjs';
 import { cmdRestore } from './src/cli/mod.cmdRestore.mjs';
+import { cmdWork } from './src/cli/mod.cmdWork.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|list|a|attach|wake|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|serve> [args]
+const HELP = `maw herdr <ls|list|a|attach|wake|work|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -46,6 +47,13 @@ const HELP = `maw herdr <ls|list|a|attach|wake|hey|peek|read|resolve|restart|res
   wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
        [--own-session]                 start an oracle's agent as a workspace in the
                                        running session (--own-session: its own server)
+  work <repo|.|path|url> [task] [--wt [slug]] [--engine <kind>] [--prompt <text>] [--attach] [--dry]
+                                       open a repo, or one task worktree of it (agents/<slug>,
+                                       space <repo>-<slug>), as a space with an agent in the
+                                       running session (maw-rs: maw work). A GitHub URL is cloned
+                                       with ghq when missing; an issue/pull URL names the task and
+                                       is the agent's first prompt. A space already on that folder
+                                       is reused. --dry plans every step and runs none.
   hey <target> <message> [--dry]       submit a prompt to an agent (herdr's 'maw hey')
   peek <target> [--lines N] [--json] [--dry]
                                        read what an agent's pane is showing
@@ -1286,6 +1294,7 @@ try {
   else if (command === 'ls' || command === 'list') await cmdLs(args);
   else if (command === 'a' || command === 'attach') await cmdAttach(args);
   else if (command === 'wake') cmdWake(args);
+  else if (command === 'work') await cmdWork(args, { UsageError, runAttach });
   else if (command === 'hey') await cmdHey(args);
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);

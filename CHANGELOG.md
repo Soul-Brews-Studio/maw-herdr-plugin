@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- New verb `work` (#101), the herdr port of maw-rs `maw work`: `maw herdr work <repo|.|path|url> [task]
+  [--wt [slug]] [--engine <kind>] [--prompt <text>] [--attach] [--dry]`. A repo is a path, org/repo, a
+  GitHub URL (repo, issue or pull) or a bare name under ghq; a URL that is not checked out is cloned with
+  `ghq get` (`-p` for an ssh URL). A task gets the dashboard's task worktree — `<repo>/agents/<slug>` on
+  `agents/<slug>`, space `<repo>-<slug>`, planned by the same `planTaskWorktree` — and an issue or pull URL
+  names the task and becomes the agent's first prompt. A space already on that folder is reused, never
+  doubled. With maw's default plugin set to herdr, plain `maw work …` reaches it. `--dry` plans every
+  step and runs only `session list` and `pane list`. `utils/smoke-work.mjs`: 40 checks with fake herdr
+  and ghq on PATH, real git on throwaway repos, no live session — source and bundle.
+
 ## 26.10.3-alpha.1026 — 2026-10-03
 
 - Real-herdr smoke for join/break/layout/restore (#94): `utils/smoke-layout-live.mjs` checks exact
