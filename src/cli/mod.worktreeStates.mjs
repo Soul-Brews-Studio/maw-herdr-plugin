@@ -26,7 +26,7 @@
 
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { basename, delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { findSessions } from './mod.resumeProviders.mjs';
 
@@ -133,6 +133,24 @@ async function listAll(repos) {
 const repoRootOf = w => (w.repoKey ? (basename(w.repoKey) === '.git' ? dirname(w.repoKey) : w.repoKey) : null);
 
 /**
+ * A separate repo below a dot-folder inside another checkout is scratch (#92).
+ * Test the repo root, not its linked worktree's path: real worktrees may live in
+ * hidden folders too. A dot-folder outside any checkout does not make a repo
+ * scratch. Resolve aliases, and recognize both main (.git directory) and linked
+ * (.git file) containing checkouts without launching a git for each ancestor.
+ */
+export function isScratchRepo(repo) {
+  if (!repo) return false;
+  let child = real(resolve(repo));
+  let hidden = false;
+  for (let parent = dirname(child); parent !== child; child = parent, parent = dirname(child)) {
+    hidden ||= basename(child).startsWith('.');
+    if (hidden && existsSync(join(parent, '.git'))) return true;
+  }
+  return false;
+}
+
+/**
  * Every worktree with its state, plus each open space's state, plus the repos
  * git could not list (`unreadable`) — their closed worktrees are missing from
  * `rows`, and the caller has to say so.
@@ -143,6 +161,9 @@ const repoRootOf = w => (w.repoKey ? (basename(w.repoKey) === '.git' ? dirname(w
  * providers: resume providers; an empty list means nothing is ever resumable.
  */
 export async function worktreeStates({ spaces, roots, providers }) {
+  // Exclude scratch spaces too: otherwise they return as unclaimed rows and
+  // duplicate the containing worktree's label. Their panes are not the parent's.
+  spaces = spaces.filter(w => !isScratchRepo(repoRootOf(w)));
   const repos = new Map();
   for (const r of [...reposWithWorktrees(roots), ...spaces.map(repoRootOf).filter(Boolean)]) {
     // A pane can sit in a folder that was deleted under it (a scratch repo under a
@@ -150,7 +171,7 @@ export async function worktreeStates({ spaces, roots, providers }) {
     // that is not there, and every `ls` warned that closed worktrees were missing —
     // but a repo that no longer exists has none. Skipping it keeps the warning for
     // repos git really fails on (#90, measured: one ghost warned on every run).
-    if (!existsSync(r)) continue;
+    if (!existsSync(r) || isScratchRepo(r)) continue;
     const key = real(r);
     if (!repos.has(key)) repos.set(key, r);
   }

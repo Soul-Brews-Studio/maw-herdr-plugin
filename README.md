@@ -501,6 +501,10 @@ exact field/limit contracts; this README stays a map, not the spec.
   or `recent-unwrapped` cost a Claude Code pane 450–640 ms of CPU per 15 reads and a full
   redraw each time; `--source visible` cost 0 ms. Never poll history; nothing in this
   plugin's join/break/layout reads a pane.
+- **A scratch repo under a checkout's dot-folder is not a fleet repo** (#92). `ls` and
+  `resolve` skip a repository below `.tmp/`, `.cache/` or any dot-folder inside another
+  checkout, and its space with it — address such a pane with `herdr` directly. One caveat:
+  if your home folder is itself a git checkout, repos under `~/.config/…` count as scratch.
 - Interactive attach (`maw herdr a`) needs maw-rs
   [#992](https://github.com/Soul-Brews-Studio/maw-rs/issues/992) for stdin
   handoff; older maw prints the raw `herdr --session …` command instead.

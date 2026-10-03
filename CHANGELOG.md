@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fix `ls` and `resolve` counting a scratch repository under a dot-folder inside another
+  checkout (`wt/<name>/.tmp/<repo>`) as a fleet repo (#92): its space duplicated the checkout
+  label, so an exact name resolved to two worktrees. Scratch repos and their spaces are now
+  excluded, not attributed to the containing checkout; repos opened outside any checkout and
+  linked worktrees in hidden folders still count. `utils/smoke-scratch-repos.mjs`, 16 checks.
 - Fix manifest/CLI help drift (#93): `plugin.json` help and description and the first `HELP`
   line now name every verb and alias (`list`, `read`, `here`, `back`, `fed`, …). A new smoke,
   `utils/smoke-help-verbs.mjs`, derives the verbs from the dispatch and rejects a missing or

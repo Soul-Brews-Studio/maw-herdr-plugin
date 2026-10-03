@@ -73,6 +73,7 @@ import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { verifyCaller } from './mod.verifyCaller.mjs';
+import { isScratchRepo } from './mod.worktreeStates.mjs';
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
@@ -422,6 +423,8 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
       }));
       const wt = w.worktree;
       const where = wt?.checkout_path ?? panes.find(p => p.cwd)?.cwd ?? null;
+      const repoRoot = wt?.repo_root ?? (wt?.repo_key ? (basename(wt.repo_key) === '.git' ? dirname(wt.repo_key) : wt.repo_key) : where);
+      if (wt && isScratchRepo(repoRoot)) continue;
       const path = where ? real(where) : `herdr:${s}/${w.workspace_id}`;
       targets.push({
         kind: wt ? 'worktree' : 'space',
@@ -454,7 +457,9 @@ export async function loadTargets({ session = null, cwd = process.cwd(), paths =
   const unique = [...new Set(dirs.filter(Boolean).map(real))];
   const lists = await Promise.all(unique.map(gitWorktrees));
   const seen = new Map();
-  for (const w of lists.flat()) if (!seen.has(w.path)) seen.set(w.path, w);
+  // cwd, explicit paths, or roots can discover scratch repos even after their
+  // spaces were excluded. Do not add them back as closed worktree targets.
+  for (const w of lists.flat()) if (!isScratchRepo(w.repoRoot) && !seen.has(w.path)) seen.set(w.path, w);
 
   for (const w of seen.values()) {
     const open = targets.filter(t => t.kind === 'worktree' && t.path === w.path);
