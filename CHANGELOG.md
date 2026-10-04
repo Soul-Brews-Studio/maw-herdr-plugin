@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- New verb `wt` (#106), the `/herdr-wt` flow from the CLI: `maw herdr wt <slug> [--base REF] [--issue N]
+  [--engine claude|codex|omx] [--brief <text>] [--repo <path>] [--dry]`. It cuts
+  `<repo>/wt/<slug>-<owner>[-issue<N>]-<bangkok day>` as a herdr worktree space from `origin/<default>` after a
+  fetch (never `HEAD`: the main checkout may sit on someone's feature branch), locks it
+  (`herdr|who@host|iso|slug[|#N]`), copies a missing `.envrc`, runs `maw token use "$(maw token resolve)"` (a note
+  when nothing is assigned), makes `ψ/lab/<slug>/` where the worktree has a vault, then fires a throwaway
+  `pane run` before the engine so direnv has loaded, waits for the engine (milliseconds), names the agent
+  `<slug>-<owner>` (`<slug>` when that is over 32 characters) and, with `--issue`/`--brief`, comments the workspace
+  on the issue and briefs the pane by id. It starts the engine through the pane's shell, never `agent start`, and
+  reports a folder-trust or hooks question instead of answering it. It writes no issues. `--dry` runs only
+  reads. `work` is unchanged. `utils/smoke-wt.mjs`: 68 checks with fake herdr/maw/gh on PATH, real git on
+  throwaway repos with a bare origin — source and bundle.
+
 ## 26.10.3-alpha.2129 — 2026-10-03
 
 - Fix `work` on a folder Claude Code has never opened (a fresh clone, a new worktree): herdr starts the
