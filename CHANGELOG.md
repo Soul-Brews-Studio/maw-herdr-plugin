@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- New verb `handover` (#106), built on `wt`: `maw herdr handover <space> <oracle> [--issue N]
+  [--engine claude|codex|omx] [--dry]`. It reads the space (repo from its origin, branch, clean?, agent idle?),
+  runs `wt` in the oracle's repo (`maw locate`) with a brief whose first step is
+  `/incubate <org>/<repo> --wt <slug>`, and closes the old space only when its checkout is clean AND its agent
+  idle AND the new agent was briefed — otherwise it leaves the space open, says why and prints the close
+  command. `utils/smoke-handover.mjs`: 38 checks against fake herdr/maw/gh — source and bundle.
+
 - New verb `wt` (#106), the `/herdr-wt` flow from the CLI: `maw herdr wt <slug> [--base REF] [--issue N]
   [--engine claude|codex|omx] [--brief <text>] [--repo <path>] [--dry]`. It cuts
   `<repo>/wt/<slug>-<owner>[-issue<N>]-<bangkok day>` as a herdr worktree space from `origin/<default>` after a

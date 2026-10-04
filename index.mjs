@@ -28,10 +28,11 @@ import { cmdWhoami } from './src/cli/mod.cmdWhoami.mjs';
 import { cmdRestore } from './src/cli/mod.cmdRestore.mjs';
 import { cmdWork } from './src/cli/mod.cmdWork.mjs';
 import { cmdWt } from './src/cli/mod.cmdWt.mjs';
+import { cmdHandover } from './src/cli/mod.cmdHandover.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|list|a|attach|wake|work|wt|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|serve> [args]
+const HELP = `maw herdr <ls|list|a|attach|wake|work|wt|handover|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -62,6 +63,12 @@ const HELP = `maw herdr <ls|list|a|attach|wake|work|wt|hey|peek|read|resolve|res
                                        and (with --issue/--brief) brief it by pane id. Writes no issues.
                                        A folder-trust question is reported, never answered. --dry runs
                                        only reads.
+  handover <space> <oracle> [--issue N] [--engine claude|codex|omx] [--dry]
+                                       hand a space's repo to another oracle: read the space (repo from
+                                       its origin, branch, clean?, agent idle?), run wt in the oracle's
+                                       repo (maw locate) with a brief whose first step is
+                                       /incubate <org>/<repo> --wt <slug>, then close the old space only
+                                       when it is clean AND its agent idle; otherwise leave it, say why.
   hey <target> <message> [--dry]       submit a prompt to an agent (herdr's 'maw hey')
   peek <target> [--lines N] [--json] [--dry]
                                        read what an agent's pane is showing
@@ -1304,6 +1311,7 @@ try {
   else if (command === 'wake') cmdWake(args);
   else if (command === 'work') await cmdWork(args, { UsageError, runAttach });
   else if (command === 'wt') await cmdWt(args, { UsageError });
+  else if (command === 'handover') await cmdHandover(args, { UsageError });
   else if (command === 'hey') await cmdHey(args);
   else if (command === 'peek' || command === 'read') await cmdPeek(args);
   else if (command === 'federation' || command === 'fed') await cmdFederation(args);
