@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Targets accept `org/repo` (#109), the form `maw locate` prints. `maw a soul-brews-studio/pulse-oracle`
+  failed with "no herdr session … no worktree, workspace or pane matches"; only the clone's full path
+  reached it, and `maw a pulse` took laris-co/pulse's exact label first. Now `org/repo`, in any case, is
+  that clone's main worktree under a ghq root, found even with no space open and no `wt/`. It is a new
+  name tier right after `exact label`, so every verb on the shared grammar gets it: `a`, `resolve`,
+  `restart`, `resume`, `kill`, `close`, `watch`, `reply`. The same org/repo under two hosts lists both and
+  does nothing. `hey`/`peek` keep their agent grammar. `utils/smoke-target-grammar.mjs`: 235 checks.
+
 - New verb `handover` (#106), built on `wt`: `maw herdr handover <space> <oracle> [--issue N]
   [--engine claude|codex|omx] [--dry]`. It reads the space (repo from its origin, branch, clean?, agent idle?),
   runs `wt` in the oracle's repo (`maw locate`) with a brief whose first step is

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // The shared target grammar (#59), through the actual CLI process against a fake
 // herdr and real Git worktrees. Covers every form — self, path, `.`, pane id, name
-// (exact label, repo main worktree, unique substring) — plus the ambiguous and
+// (exact label, org/repo, repo main worktree, unique substring) — plus the ambiguous and
 // not-found cases, --dry everywhere, and hey/peek byte-for-byte against the
 // pre-#59 index.mjs (commit 2001b9b), recorded in utils/target-grammar-legacy.json
 // so the comparison can never skip — not after merge, not in a shallow CI clone.
@@ -52,6 +52,11 @@ try {
   git(gamma, 'worktree', 'add', '-q', join(gamma, 'wt', 'gone-wt'), '-b', 'gone-wt');
   rmSync(join(gamma, 'wt', 'gone-wt'), { recursive: true, force: true });                  // prunable: directory gone
   const beta = repo('beta', ['omega-one', 'omega-two']);   // agents only in linked worktrees, none in main
+  // org/repo (#109): no open space and no wt/, so only an org/repo target loads these —
+  // a mixed-case org, and one org/repo cloned under two hosts
+  const clone = (...at) => { const d = join(ghqRoot, ...at); mkdirSync(d, { recursive: true }); git(d, 'init', '-q', '-b', 'main'); git(d, 'commit', '-q', '--allow-empty', '-m', 'fixture'); return d; };
+  const solo = clone('github.com', 'Mixed-Org', 'Solo-Oracle');
+  const [twinHub, twinLab] = [clone('github.com', 'twin', 'same'), clone('gitlab.com', 'twin', 'same')];
   mkdirSync(join(alpha, 'wt', 'feat-one', 'sub'));
   mkdirSync(join(deltaSrc, 'wt', 'delta-wip', 'src'));
   mkdirSync(join(tmp, 'scratch'));
@@ -225,6 +230,20 @@ else { console.error('fake herdr: unexpected', JSON.stringify(args)); process.ex
   x = run(['resolve', 'zzz-nothing']);
   eq(x.rc, 1); ok(x.err.includes("no worktree matches 'zzz-nothing'") && x.err.includes('maw herdr resolve --list'), x.err);
 
+  // --- org/repo (#109): the form `maw locate` prints -------------------------------
+  r = json(['resolve', 'mixed-org/solo-oracle']);
+  eq(r.path, solo, 'org/repo finds a clone with no open space and no wt/'); eq(r.how, 'org/repo'); eq(r.state, 'closed'); eq(r.linked, false);
+  eq(json(['resolve', 'Mixed-Org/Solo-Oracle']).path, solo, 'org/repo in any case');
+  r = json(['resolve', 'org/alpha-oracle']);
+  eq(r.label, 'alpha-oracle', 'org/repo of an open repo is its main worktree'); eq(r.pane, 'wA:p1'); eq(r.how, 'org/repo');
+  x = run(['resolve', 'mixed-org/solo']);
+  eq(x.rc, 1, 'org/repo is exact, never a prefix'); ok(x.err.includes("no worktree matches 'mixed-org/solo'"), x.err);
+  x = run(['resolve', 'twin/same']);
+  eq(x.rc, 1, 'one org/repo under two hosts is ambiguous'); eq(x.out, '');
+  ok(x.err.includes("'twin/same' matches 2 worktrees (org/repo)") && x.err.includes(`maw herdr resolve ${twinHub}`) && x.err.includes(`maw herdr resolve ${twinLab}`), x.err);
+  x = run(['a', 'mixed-org/solo-oracle', '--dry']);
+  eq(x.rc, 0, x.err); eq(x.out.trim(), "would wake 'Solo-Oracle', then focus");
+
   // --- --dry, --list, usage ----------------------------------------------------
   const plain = run(['resolve', 'omp']);
   const dry = run(['resolve', 'omp', '--dry']);
@@ -245,6 +264,7 @@ else { console.error('fake herdr: unexpected', JSON.stringify(args)); process.ex
   const closed = resolveTarget(loaded, 'feat-two', { caller: null, cwd: tmp, verb: 'restart' });
   assert.throws(() => requirePane(closed, 'restart'), e => e.code === 'not-found' && e.message.includes(`herdr workspace create --cwd ${join(alpha, 'wt', 'feat-two')} --label feat-two`)); checks++;
   eq(requirePane(resolveTarget(loaded, 'alpha-oracle', { caller: null, cwd: tmp }), 'restart'), 'wA:p1');
+  eq(resolveTarget(loaded, 'org/alpha-oracle', { caller: null, cwd: tmp, exact: true }).how, 'org/repo', 'org/repo is exact: close takes it');
 
   const beforeHey = calls();
   const mutating = beforeHey.filter(a => !READS.has(verbOf(a)));
@@ -435,7 +455,7 @@ else { console.error('fake herdr: unexpected', JSON.stringify(args)); process.ex
   ok(writes.every(a => verbOf(a) === 'agent prompt' && a.includes('a real prompt to the fake')), `only the expected prompt reached herdr: ${JSON.stringify(writes)}`);
   eq(writes.length, 1, 'exactly the one prompt from the byte-for-byte case');
 
-  console.log(`PASS target grammar: ${checks} assertions — self (env + socket session), path/./relative/containing worktree, pane id (+cross-session ambiguity), exact label / repo main / substring, ambiguity lists and exits 1, --dry, --list, requirePane, quoting, herdr missing/garbage; hey/peek identical to ${LEGACY_REF.slice(0, 7)} on ${compared} recorded cases`);
+  console.log(`PASS target grammar: ${checks} assertions — self (env + socket session), path/./relative/containing worktree, pane id (+cross-session ambiguity), exact label / org/repo (any case, two hosts ambiguous, no space needed) / repo main / substring, ambiguity lists and exits 1, --dry, --list, requirePane, quoting, herdr missing/garbage; hey/peek identical to ${LEGACY_REF.slice(0, 7)} on ${compared} recorded cases`);
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
