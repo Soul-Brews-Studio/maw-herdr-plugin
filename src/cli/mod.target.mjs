@@ -6,8 +6,8 @@
  *   self (default)  self                     the herdr pane this command runs in
  *   path            /abs/path  .  ../x  ~/x  the worktree containing that path
  *   pane            w5D:p1                   a herdr pane id
- *   name            neo                      exact label → a repo's main worktree → an oracle's main worktree
- *                                            (neo = neo-oracle) → unique substring
+ *   name            neo                      exact label → org/repo → a repo's main worktree → an oracle's main
+ *                   Soul-Brews-Studio/x      worktree (neo = neo-oracle) → unique substring
  *
  * An ambiguous target LISTS its candidates and throws; nothing is ever picked
  * for the caller. Within ONE herdr space the focused pane (then the active tab)
@@ -18,6 +18,10 @@
  * A path means the git worktree that CONTAINS it (git's own toplevel, so `.` in a
  * linked worktree is that worktree, never its main checkout), in both grammars.
  * `self` and a path never fall back to name matching: a miss is an error.
+ *
+ * `org/repo`, the form `maw locate` prints, is the main worktree of that clone under
+ * a ghq root, org and repo in any case. Like a path, it is found with no space open
+ * and no wt/ directory.
  *
  * "self" comes from the environment herdr gives every pane it hosts:
  * HERDR_PANE_ID (w4B:p1) names the pane, HERDR_SOCKET_PATH names the server —
@@ -73,7 +77,7 @@ import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { verifyCaller } from './mod.verifyCaller.mjs';
-import { isScratchRepo } from './mod.worktreeStates.mjs';
+import { ghqRoots, isScratchRepo } from './mod.worktreeStates.mjs';
 
 const C = process.stdout.isTTY
   ? { dim: '\x1b[2m', cyan: '\x1b[36m', green: '\x1b[32m', red: '\x1b[31m', off: '\x1b[0m' }
@@ -89,6 +93,8 @@ export class TargetError extends Error {
 
 // herdr allocates pane ids past nine with letters (wD:pS), never only digits.
 const PANE_ID = /^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/;
+// `org/repo` as `maw locate` prints it (Soul-Brews-Studio/pulse-oracle): one slash, two names.
+const ORG_REPO = /^[\w.-]+\/[\w.-]+$/;
 
 // --- grammar ------------------------------------------------------------------
 
@@ -144,6 +150,7 @@ const real = p => { try { return realpathSync(p); } catch { return p; } };
 const isDir = p => { try { return statSync(p).isDirectory(); } catch { return false; } };
 const expandPath = (raw, cwd) => real(resolve(cwd, raw.replace(/^~(?=\/|$)/, homedir())));
 const within = (parent, child) => child === parent || child.startsWith(parent.endsWith(sep) ? parent : parent + sep);
+const subdirs = d => { try { return readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => e.name); } catch { return []; } };
 
 /** A value as it must appear in a command someone pastes: bare when safe, else single-quoted. */
 export const shq = v => {
@@ -349,12 +356,30 @@ async function ghqWorktreeRepos() {
   let root;
   try { root = (await run('ghq', ['root'], { timeout: 3_000 })).trim(); } catch { return []; }
   if (!root || !isDir(root)) return [];
-  const ls = d => { try { return readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('.')).map(e => e.name); } catch { return []; } };
   const out = [];
-  for (const host of ls(root).filter(h => h.includes('.'))) {
-    for (const org of ls(join(root, host))) {
-      for (const repo of ls(join(root, host, org))) {
+  for (const host of subdirs(root).filter(h => h.includes('.'))) {
+    for (const org of subdirs(join(root, host))) {
+      for (const repo of subdirs(join(root, host, org))) {
         if (isDir(join(root, host, org, repo, 'wt'))) out.push(join(root, host, org, repo));
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The clones an `org/repo` target names: <root>/<host>/<org>/<repo> under every ghq
+ * root, org and repo in any case — `maw locate` prints Soul-Brews-Studio/pulse-oracle,
+ * people type soul-brews-studio/pulse-oracle. Compared per readdir entry, so a
+ * case-sensitive disk answers the same as a case-insensitive one.
+ */
+function orgRepoDirs(target) {
+  const [org, repo] = target.toLowerCase().split('/');
+  const out = [];
+  for (const root of ghqRoots()) {
+    for (const host of subdirs(root).filter(h => h.includes('.'))) {
+      for (const o of subdirs(join(root, host)).filter(n => n.toLowerCase() === org)) {
+        for (const r of subdirs(join(root, host, o)).filter(n => n.toLowerCase() === repo)) out.push(join(root, host, o, r));
       }
     }
   }
@@ -535,6 +560,9 @@ export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerF
   const partly = t => lc(t.label).includes(q) || lc(t.name).includes(q);
   tiers = [
     ['exact label', t => lc(t.label) === q || lc(t.name) === q],
+    // `org/repo` is that clone's main worktree: the last two segments of its root, so it
+    // holds under any ghq root. Exact too, so it stays in the exact-verb tier list.
+    ['org/repo', t => t.kind === 'worktree' && !t.linked && lc(t.repoRoot).split(sep).slice(-2).join('/') === q],
     ['repo main worktree', t => t.kind === 'worktree' && !t.linked && lc(t.repo) === q],
     // An oracle is called by its short name: `neo` is the neo-oracle main checkout. An exact
     // convention, not a partial match, so it stays in the exact-verb tier list too.
@@ -562,10 +590,11 @@ export function resolveTarget(targets, raw, { verb = 'resolve', caller = callerF
   return finish(picked.hit, form, picked.how, null, strictPane);
 }
 
-/** loadTargets + resolveTarget, with the target's own path added to discovery. */
+/** loadTargets + resolveTarget, with the target's own path (or org/repo clones) added to discovery. */
 export async function resolveLive(raw, { session = null, cwd = process.cwd(), ...opts } = {}) {
   const form = classifyTarget(raw);
-  const paths = form.form === 'path' ? [expandPath(form.value, cwd)] : [];
+  const paths = form.form === 'path' ? [expandPath(form.value, cwd)]
+    : form.form === 'name' && ORG_REPO.test(form.value) ? orgRepoDirs(form.value) : [];
   const targets = await loadTargets({ session, cwd, paths });
   return resolveTarget(targets, raw, { cwd, ...opts });
 }

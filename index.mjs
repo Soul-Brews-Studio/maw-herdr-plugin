@@ -129,6 +129,7 @@ session's role — the place work lives — is a WORKSPACE, and one session hold
                  checked against the process tree: HERDR_PANE_ID goes stale when a pane moves
   /abs/path  .   the worktree containing that path (a directory inside one works)
   w5D:p1         a herdr pane id
+  org/repo       that ghq clone's main worktree, in any case (the form 'maw locate' prints)
   digger-oracle  a name: exact label, then a repo's main worktree, then an oracle's main
                  worktree (neo = neo-oracle), then a unique substring
 hey and peek also take an agent name or a workspace/tab label, as they always have.

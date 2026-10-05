@@ -157,6 +157,7 @@ maw herdr wake neo --prompt "recap the last session" --attach
 | `self` | the pane you are typing in (from `HERDR_PANE_ID` + `HERDR_SOCKET_PATH`, checked against the process tree — the env goes stale when herdr moves a pane to another space); the default where a target is optional |
 | `/abs/path`, `.`, `../x` | the git worktree containing that path (a linked worktree, never its main checkout, when you are inside one) |
 | `w5D:p1` | a herdr pane id |
+| `Soul-Brews-Studio/pulse-oracle` | `org/repo`, the form `maw locate` prints: that clone's main worktree under a ghq root, org and repo in any case, found even with no space open |
 | `digger-oracle` `neo` | a name: exact label → a repo's main worktree → an oracle's main worktree (`neo` = `neo-oracle`) → unique substring |
 
 An ambiguous target lists every candidate as a runnable command and exits 1;
