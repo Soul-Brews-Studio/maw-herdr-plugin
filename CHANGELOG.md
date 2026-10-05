@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 26.10.5-alpha.1134 — 2026-10-05
+
+- Fix `work` opening the space in herdr session `default` when run from a pane in another session (#113): it now uses the caller's session; outside herdr it still picks `default`.
+
 ## 26.10.5-alpha.715 — 2026-10-05
 
 - Targets accept `org/repo` (#109), the form `maw locate` prints. `maw a soul-brews-studio/pulse-oracle`
