@@ -18,8 +18,8 @@ import { sessionSocket } from './mod.watch.mjs';
  *   other — the caller is inside herdr, but a client shows one session at a time
  *   away  — the caller is outside herdr: focus, then attach the session
  */
-export async function planFocus(raw, { caller = null, cwd = process.cwd(), session = null } = {}) {
-  const r = await resolveLive(raw, { verb: 'a', cwd, session });
+export async function planFocus(raw, { caller = null, cwd = process.cwd(), session = null, exact = false } = {}) {
+  const r = await resolveLive(raw, { verb: 'a', cwd, session, exact });
   const pane = requirePane(r, 'a');
   const where = !caller ? 'away' : caller.session === r.session ? 'here' : 'other';
   return { r, pane, session: r.session, where };

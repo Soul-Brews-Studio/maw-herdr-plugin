@@ -13,6 +13,8 @@
 //   - --print and --dry never focus anything
 //   - a running session's exact name keeps the old meaning (attach), a STOPPED
 //     session never shadows a live workspace of the same name
+//   - a STOPPED session named exactly beats names that only contain it (#115): it is
+//     started after asking, and from inside herdr only the command is printed
 //   - ambiguous and unknown targets do nothing and end with runnable commands
 //   - herdr refusing the focus is reported with a fix line, not a stack trace
 //
@@ -84,6 +86,7 @@ if (verb === 'session list') console.log(JSON.stringify({ sessions: [
   { name: 'default', running: true, default: true, socket_path: ${JSON.stringify(sockDefault)} },
   { name: 'side', running: true, socket_path: ${JSON.stringify(sockSide)} },
   { name: 'charlie', running: false },
+  { name: 'home', running: false },   // #115: no target is named exactly 'home'; two only contain it
 ] }));
 else if (verb === 'api snapshot') {
   const snap = JSON.parse(JSON.stringify(snaps[session]));
@@ -213,6 +216,31 @@ try {
   r = await cli(['a', 'charlie', '--dry'], { pane: 'wA:p1' });
   eq(r.rc, 0, r.err); ok(r.out.includes('would  focus wC:p1'), `stopped session 'charlie' must not shadow the charlie workspace: ${r.out}`);
 
+  // 5b. a STOPPED session named exactly beats names that only contain it (#115):
+  //     'home' is inside 'oracle-home' and 'gm-home', and nothing is named exactly 'home'
+  resetAll();
+  r = await cli(['a', 'home', '--dry'], { pane: 'wA:p1' });
+  eq(r.rc, 0, r.err); eq(r.out.trim(), 'session home (stopped) — would start it and attach: herdr --session home');
+  r = await cli(['a', 'home', '--print']);
+  eq(r.rc, 0, r.err); eq(r.out.trim(), 'herdr --session home');
+  r = await cli(['a', 'home'], { pane: 'wA:p1' });
+  eq(r.rc, 1, 'inside herdr nothing is started: herdr does not nest');
+  ok(r.err.includes('does not start inside its own panes') && r.err.trimEnd().endsWith('\n  herdr --session home'), r.err);
+  r = await cli(['a', 'home']);
+  eq(r.rc, 1); ok(r.err.includes('may resume its agents') && r.err.includes('maw herdr a home -y   (start it, then attach)'), `non-TTY does not ask: ${r.err}`);
+  for (const answer of ['', 'n']) {
+    r = await cli(['a', 'home'], { wake: answer });
+    eq(r.rc, 1); ok(r.err.includes('Start herdr session "home"? herdr may resume its agents. [y/N] ') && r.err.includes('aborted — nothing was done.'), r.err);
+  }
+  r = await cli(['a', 'home', '-y']);
+  ok(r.rc !== 0 && r.out.includes("starting herdr session 'home': herdr --session home") && r.err.includes('not a terminal'), `-y starts it (stops at "not a terminal" here): ${r.out}${r.err}`);
+  r = await cli(['a', 'home'], { wake: 'y' });
+  ok(r.rc !== 0 && r.out.includes("starting herdr session 'home'"), r.out + r.err);
+  eq(focuses(herdrD).length + focuses(herdrS).length, 0, 'a stopped session focuses no pane');
+  ok(exeVerbs().every(v => v === 'session list' || v === 'api snapshot'), `only reads reached the herdr executable: ${exeVerbs()}`);
+  r = await cli(['a', 'hom', '--dry'], { pane: 'wA:p1' });
+  eq(r.rc, 1); ok(!r.out.includes('would start') && r.err.includes("'hom' matches 2"), `a partial session name never starts it: ${r.out}${r.err}`);
+
   // 6. ambiguous target: nothing focused, candidates as runnable lines
   resetAll();
   r = await cli(['a', 'asker'], { pane: 'wB:p1' });
@@ -341,7 +369,7 @@ try {
   ok(r.rc !== 0, 'refused focus fails');
   ok(r.err.includes('did not focus wX:p1') && r.err.includes('maw herdr resolve') && !r.err.includes('    at '), r.err);
 
-  console.log(`PASS attach/focus: ${checks} assertions — same-session focus (agent and shell space), other-session focus + switch line, outside focus-then-attach, --print/--dry act on nothing, running vs stopped session names, oracle short name (neo = neo-oracle, exact label wins), ambiguity (plain and picker: pick/cancel/invalid, closed not offered), unknown, closed target (wake prompt, -y, --dry), refused focus`);
+  console.log(`PASS attach/focus: ${checks} assertions — same-session focus (agent and shell space), other-session focus + switch line, outside focus-then-attach, --print/--dry act on nothing, stopped exact session over partial names (#115), running vs stopped session names, oracle short name (neo = neo-oracle, exact label wins), ambiguity (plain and picker: pick/cancel/invalid, closed not offered), unknown, closed target (wake prompt, -y, --dry), refused focus`);
 } finally {
   await herdrD.close();
   await herdrS.close();

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Fix `a <name>` passing over a STOPPED herdr session named exactly `<name>` when other names merely
+  contain it (#115): `maw a homekeeper` listed three closed `…-homekeeper-…` worktrees and never offered
+  the stopped `homekeeper` session. An exact stopped-session name now loses only to an exact worktree or
+  workspace name (exact label, org/repo, repo main, oracle name), as before (`charlie` still focuses the
+  charlie workspace), and beats partial matches. Such a session is started, since `herdr --session <name>`
+  launches it, after a [y/N] question (`-y` skips it), because herdr restores its spaces and by default
+  resumes their agents. From inside herdr nothing is started: herdr does not launch within its own panes
+  (`allow_nested = false`), so `a` prints the command to run from a terminal outside herdr. `--dry`/`--print`
+  say what would run; a partial session name still never starts one. `utils/smoke-attach-focus.mjs`: 160
+  checks.
+
 ## 26.10.5-alpha.1134 — 2026-10-05
 
 - Fix `work` opening the space in herdr session `default` when run from a pane in another session (#113): it now uses the caller's session; outside herdr it still picks `default`.
