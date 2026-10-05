@@ -43,7 +43,9 @@ const HELP = `maw herdr <ls|list|a|attach|wake|work|wt|handover|hey|peek|read|re
   ls --sessions [--json]               herdr server instances (what 'herdr session list' means)
   a <target> [--print] [--dry] [-y]    bring a target to the front, like maw tmux a: focus its
                                        pane (inside herdr) or attach its session; a session
-                                       name attaches that session (alias: attach). An ambiguous
+                                       name attaches that session (alias: attach), and a
+                                       stopped one is started after asking, from outside
+                                       herdr (herdr does not nest). An ambiguous
                                        name asks which one when run in a terminal; a target
                                        with no pane asks to wake it (-y: wake without asking).
   wake <oracle> [--engine <kind>] [--prompt <text>] [--attach] [--dry-run]
@@ -662,6 +664,31 @@ async function wakeForAttach(err, { target, scope, yes }) {
   return true;
 }
 
+/**
+ * `a <name>` where <name> is exactly a STOPPED herdr session and no worktree or
+ * workspace has that exact name (#115). Attaching is starting: `herdr --session
+ * <name>` launches its server, which restores its spaces and, with herdr's default
+ * resume_agents_on_restore, resumes their agents. So it asks first, like a wake, and
+ * never runs inside herdr, which does not launch within its own panes by default
+ * (allow_nested = false): there it prints the command to run from outside.
+ */
+async function startStoppedSession(match, { dry, print, yes }) {
+  const line = attachArgv(match).join(' ');
+  if (dry) { console.log(`  session ${match.session} (stopped) — would start it and attach: ${line}`); return; }
+  if (print) { console.log(line); return; }
+  if (process.env.HERDR_ENV === '1') {
+    throw new Error(`herdr session '${match.session}' is stopped, and herdr does not start inside its own panes (allow_nested) — start it from a terminal outside herdr:\n  ${line}`);
+  }
+  if (!yes) {
+    if (!pickerAvailable()) throw new Error(`herdr session '${match.session}' is stopped; starting it may resume its agents\n  maw herdr a ${shq(match.session)} -y   (start it, then attach)`);
+    const got = await ask(`  Start herdr session "${match.session}"? herdr may resume its agents. [y/N] `, wakeAnswerEnv());
+    if (got.sigint) { console.error('\n  aborted — nothing was done.'); process.exitCode = 130; return; }
+    if (!/^(y|yes)$/i.test((got.line ?? '').trim())) { console.error('  aborted — nothing was done.'); process.exitCode = 1; return; }
+  }
+  console.log(`  starting herdr session '${match.session}': ${line}`);
+  runAttach(attachArgv(match));
+}
+
 /** Ask which candidate. Returns { args } to continue with, or null after saying nothing was done. */
 async function askWhich(err) {
   const choices = err.choices;
@@ -688,6 +715,8 @@ async function askWhich(err) {
  * herdr's switch-client — then the session is attached if the caller is not
  * already its client. A target the grammar cannot find falls back to the old
  * session prefix/substring match, so nothing that attached before stops working.
+ * A stopped session named exactly is started (asked first, never inside herdr) when
+ * no worktree or workspace has that exact name.
  */
 async function cmdAttach(args, { picked = false, woke = false } = {}) {
   const dry = takeDry(args);
@@ -708,10 +737,14 @@ async function cmdAttach(args, { picked = false, woke = false } = {}) {
     if (dry) { console.log(`  session ${exact.session} (${exact.status}) — would attach: ${attachArgv(exact).join(' ')}`); return; }
     return attachSession(exact, target, print);
   }
+  // It does beat names that merely CONTAIN the target, so the grammar runs exact-only
+  // (#115: `a homekeeper` listed three closed …-homekeeper-… worktrees and never
+  // offered the stopped homekeeper session).
+  const stopped = known.find(s => s.session === target && s.status !== 'active');
 
   let plan;
   try {
-    plan = await planFocus(target, { caller: callerFromEnv(), session: scope });
+    plan = await planFocus(target, { caller: callerFromEnv(), session: scope, exact: Boolean(stopped) });
   } catch (err) {
     if (err instanceof TargetError && err.wake && !woke) {
       if (dry) { console.log(`  would wake '${err.wake.label}', then focus`); return; }
@@ -721,6 +754,9 @@ async function cmdAttach(args, { picked = false, woke = false } = {}) {
       }
       if (!(await wakeForAttach(err, { target, scope, yes }))) return;
       return cmdAttach([target, ...(scope ? ['--session', scope] : []), ...(print ? ['--print'] : [])], { picked: true, woke: true });
+    }
+    if (stopped && err instanceof TargetError && (err.code === 'inexact' || (err.code === 'not-found' && !err.wake && !/prunable worktree/.test(err.message)))) {
+      return startStoppedSession(stopped, { dry, print, yes });
     }
     if (!picked && !dry && !print && err instanceof TargetError && err.code === 'ambiguous' && err.choices?.length > 0 && pickerAvailable()) {
       const choice = await askWhich(err);

@@ -39,7 +39,7 @@ maw herdr ls resumable          # every worktree in one state: running|open|resu
 maw herdr ls --sessions         # herdr server instances
 maw herdr ls --agents           # every agent pane, every session
 maw herdr ls --json             # any of the above, as JSON
-maw herdr a <session>           # attach (alias: attach)
+maw herdr a <target|session>    # focus a target or attach a session; a stopped one starts after asking
 maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr work <repo|.|path|url> [task]  # open a repo, or one task worktree (agents/<slug>), as a space
                                 #   with an agent — maw-rs `maw work`; a URL clones when missing [--wt|--dry]
