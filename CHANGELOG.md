@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 26.10.5-alpha.1200 — 2026-10-05
+
 - Fix `a <name>` passing over a STOPPED herdr session named exactly `<name>` when other names merely
   contain it (#115): `maw a homekeeper` listed three closed `…-homekeeper-…` worktrees and never offered
   the stopped `homekeeper` session. An exact stopped-session name now loses only to an exact worktree or
