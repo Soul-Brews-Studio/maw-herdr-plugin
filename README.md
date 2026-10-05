@@ -43,6 +43,9 @@ maw herdr a <session>           # attach (alias: attach)
 maw herdr wake <oracle> [--engine <kind>] [--prompt <text>] [--attach]
 maw herdr work <repo|.|path|url> [task]  # open a repo, or one task worktree (agents/<slug>), as a space
                                 #   with an agent — maw-rs `maw work`; a URL clones when missing [--wt|--dry]
+maw herdr wt <slug> [--base REF] [--issue N] [--engine claude|codex|omx] [--brief <text>] [--repo <path>] [--dry]
+                                #   the /herdr-wt flow: <repo>/wt/<slug>-<owner>[-issue<N>]-<day> from origin/<default>,
+                                #   locked, token fixed, engine started via the pane's shell, agent named, briefed by pane id
 maw herdr hey <target> <msg>    # submit a prompt to an agent
 maw herdr peek <target>         # read what an agent's pane shows [--lines N]
 maw herdr resolve [<target>]    # what a target resolves to, and how; never acts

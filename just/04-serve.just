@@ -18,6 +18,8 @@ bun-check:
     MAW_RESTORE_ENTRY="$output/index.js" bun utils/smoke-restore.mjs
     bun utils/smoke-work.mjs
     MAW_WORK_ENTRY="$output/index.js" bun utils/smoke-work.mjs
+    bun utils/smoke-wt.mjs
+    MAW_WT_ENTRY="$output/index.js" bun utils/smoke-wt.mjs
     bun utils/smoke-help-verbs.mjs
     MAW_HELP_ENTRY="$output/index.js" bun utils/smoke-help-verbs.mjs
     bun utils/smoke-scratch-repos.mjs
