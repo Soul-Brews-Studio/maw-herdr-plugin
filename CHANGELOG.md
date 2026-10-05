@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 26.10.5-alpha.715 — 2026-10-05
+
 - Targets accept `org/repo` (#109), the form `maw locate` prints. `maw a soul-brews-studio/pulse-oracle`
   failed with "no herdr session … no worktree, workspace or pane matches"; only the clone's full path
   reached it, and `maw a pulse` took laris-co/pulse's exact label first. Now `org/repo`, in any case, is
