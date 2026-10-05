@@ -116,7 +116,9 @@ async function resolveBase(repo, given, dry) {
   throw new TargetError(`cannot tell origin's default branch in ${repo} — refusing to branch from HEAD, which may be someone's feature branch\n  git -C ${shq(repo)} remote set-head origin -a\n  git -C ${shq(repo)} branch -r`, 'not-found');
 }
 
-export async function cmdWt(args, { UsageError = Error } = {}) {
+/** → { dry } | { space, pane, name, briefed } — handover reads it to decide whether the old space may close.
+ *  briefPrefix: lines put before the brief (handover's first step); it is sent even with no --issue/--brief. */
+export async function cmdWt(args, { UsageError = Error, briefPrefix = null } = {}) {
   const o = parseArgs(args, UsageError);
   const repo = await mainRepo(o.repo ?? process.cwd());
   const name = wtName(o.slug, repo, o.issue);
@@ -131,7 +133,8 @@ export async function cmdWt(args, { UsageError = Error } = {}) {
   const token = await tryRun('maw', ['token', 'resolve'], { cwd: repo });
   const issueRepo = o.issue ? await tryRun('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], { cwd: repo }) : null;
   if (o.issue && !issueRepo) throw new TargetError(`--issue ${o.issue} needs a GitHub repo to name it in — gh repo view failed in ${repo}\n  gh repo view --json nameWithOwner\n  gh auth status`, 'not-found');
-  const briefText = o.issue || o.brief !== null ? briefFor(o.issue, issueRepo, o.brief) : null;
+  const body = o.issue || o.brief !== null ? briefFor(o.issue, issueRepo, o.brief) : null;
+  const briefText = briefPrefix || body ? [briefPrefix, body].filter(Boolean).join('\n') : null;
 
   const create = ['worktree', 'create', '--cwd', repo, '--branch', name, '--base', base, '--path', dest, '--no-focus'];
   const lockArgs = ['-C', repo, 'worktree', 'lock', '--reason', reason, dest];
@@ -156,7 +159,7 @@ export async function cmdWt(args, { UsageError = Error } = {}) {
   if (o.dry) {
     console.log('Plan:');
     for (const line of plan) console.log(`  ${line.replaceAll("'<pane>'", '<pane>')}`);   // the pane is only known once herdr makes it
-    return;
+    return { dry: true };
   }
 
   // 1 — the worktree, as a herdr space
@@ -218,6 +221,7 @@ export async function cmdWt(args, { UsageError = Error } = {}) {
     console.log(`    maw herdr a ${shq(pane)}`);
     console.log(`    then: ${herdrLine(['agent', 'rename', pane, agent])}`);
     if (briefText !== null) console.log(`  brief held back; send it after answering:\n    ${herdrLine(['agent', 'prompt', pane, briefText])}`);
+    return { space, pane, name, briefed: false };
   };
   try { await run('herdr', waitArgs, { timeout: 200_000 }); }
   catch { return held('waiting at a startup question (it never reached its prompt)'); }
@@ -236,4 +240,5 @@ export async function cmdWt(args, { UsageError = Error } = {}) {
     catch (err) { throw new TargetError(`brief not delivered to ${pane} — ${err.detail || err.message}; read the pane before re-sending\n  herdr pane read ${shq(pane)} --source visible --lines 20`, 'herdr'); }
   }
   console.log(`  bring it up: maw herdr a ${shq(pane)}`);
+  return { space, pane, name, briefed: briefText !== null };
 }
