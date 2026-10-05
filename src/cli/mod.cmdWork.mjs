@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { TargetError, shq } from './mod.target.mjs';
+import { TargetError, callerFromEnv, shq } from './mod.target.mjs';
 import { herdrJson, herdrLine } from './mod.herdrCall.mjs';
 import { planTaskWorktree, taskSlug } from '../serve/bun/mod.planTaskWorktree.ts';
 
@@ -94,6 +94,9 @@ async function runningSession() {
   try { list = JSON.parse(await run('herdr', ['session', 'list', '--json'])).sessions ?? []; }
   catch (err) { throw new TargetError(`herdr session list failed — ${err?.code === 'ENOENT' ? 'herdr is not on PATH' : err?.detail || err?.message}\n  herdr session list --json`, 'herdr'); }
   const running = list.filter(s => s.running).map(s => s.name);
+  // Run from inside herdr, the space opens in the caller's own session, not 'default'.
+  const mine = callerFromEnv()?.session;
+  if (mine && running.includes(mine)) return mine;
   if (running.includes('default')) return 'default';
   if (running.length === 1) return running[0];
   if (!running.length) throw new TargetError('no herdr session is running — start one, then run this again\n  herdr', 'not-found');
