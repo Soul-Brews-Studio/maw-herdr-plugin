@@ -6,7 +6,7 @@
 #   ticket.sh pick     <issue>   [--oneshot] [--repo <path>] [--slug <s>] [--model <m>] [--permission-mode <p>]
 #                                [--session <herdr-session>] [--notify <pane>] [--no-run] [--dry-run] [--json]
 #   ticket.sh continue <issue|worktree> <message…>   [--repo <path>] [--model <m>] [--notify <pane>]
-#   ticket.sh open     <issue|worktree>              [--repo <path>] [--session <herdr-session>] [--json]
+#   ticket.sh open     <issue|worktree>              [--repo <path>] [--session <herdr-session>] [--session-id <uuid>] [--json]
 #   ticket.sh status   <issue|worktree>              [--repo <path>]
 #
 # Any repo with a GitHub origin. Needs git gh herdr claude jq direnv python3 uuidgen (maw for tokens, if present).
@@ -35,7 +35,7 @@ case "$cmd" in
 esac
 target=${1:-}; [ -n "$target" ] || die "$cmd needs an issue number or a worktree path" "$me $cmd 12"
 shift
-REPO="" SLUG="" MODEL="" PERM="" NOTIFY="" NORUN=0 DRY=0 MODE=agent SESSION=""
+REPO="" SLUG="" MODEL="" PERM="" NOTIFY="" NORUN=0 DRY=0 MODE=agent SESSION="" SID=""
 MSG=()
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,6 +45,7 @@ while [ $# -gt 0 ]; do
     --permission-mode) PERM=$2; shift 2 ;;
     --notify) NOTIFY=$2; shift 2 ;;
     --session) SESSION=$2; shift 2 ;;
+    --session-id) SID=$2; shift 2 ;;   # open/continue: resume exactly this conversation, not the newest one there
     --oneshot) MODE=oneshot; shift ;;
     --no-run) NORUN=1; shift ;;
     --dry-run) DRY=1; shift ;;
@@ -53,6 +54,7 @@ while [ $# -gt 0 ]; do
     *) MSG+=("$1"); shift ;;
   esac
 done
+case "$SID" in ""|????????-????-????-????-????????????) ;; *) die "--session-id wants a full uuid, got '$SID'" "claude agents --json | jq -r '.[].sessionId'" ;; esac
 
 # ── the herdr server. herdr lets an inherited HERDR_SOCKET_PATH beat HERDR_SESSION (measured 2026-10-08: an app
 # relaunched from a pane carried that pane's socket and its HERDR_PANE_ID), so an explicit --session clears both.
@@ -362,7 +364,7 @@ EOF
   ;;
 # ─────────────────────────────────────────────────────────────────────────────────────── continue
 continue)
-  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=$(session_of "$dest")   # die ran in $(): re-emit its JSON
+  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=${SID:-$(session_of "$dest")}   # die ran in $(): re-emit its JSON
   [ -n "$U" ] || die "no claude session found for $dest" "$me pick <issue>"
   [ ${#MSG[@]} -gt 0 ] || die "continue needs a message" "$me continue $(q "$target") \"what to do next\""
   ls="" lp=""; read -r ls lp <<<"$(live_at "$U")"
@@ -380,7 +382,7 @@ continue)
   ;;
 # ─────────────────────────────────────────────────────────────────────────────────────────── open
 open)
-  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=$(session_of "$dest")   # die ran in $(): re-emit its JSON
+  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=${SID:-$(session_of "$dest")}   # die ran in $(): re-emit its JSON
   [ -n "$U" ] || die "no claude session found for $dest" "$me pick <issue>"
   ls="" lp=""; read -r ls lp <<<"$(live_at "$U")"
   if [ -n "$lp" ]; then
@@ -399,7 +401,7 @@ open)
   ;;
 # ───────────────────────────────────────────────────────────────────────────────────────── status
 status)
-  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=$(session_of "$dest")   # die ran in $(): re-emit its JSON
+  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=${SID:-$(session_of "$dest")}   # die ran in $(): re-emit its JSON
   st="$(git -C "$dest" rev-parse --absolute-git-dir)/oneshot"
   branch=$(git -C "$dest" branch --show-current)
   echo "worktree $dest"
