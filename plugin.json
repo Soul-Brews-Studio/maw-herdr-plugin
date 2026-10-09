@@ -16,7 +16,7 @@
   ],
   "cli": {
     "command": "herdr",
-    "help": "maw herdr <ls|list|a|attach|wake|work|wt|handover|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|serve> [--json] [--print] [--dry]",
+    "help": "maw herdr <ls|list|a|attach|wake|work|wt|handover|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|ticket|serve> [--json] [--print] [--dry]",
     "interactive": true
   },
   "engine": {
