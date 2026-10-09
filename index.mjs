@@ -6,6 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { runServe } from './src/serve/mod.runServe.mjs';
+import { cmdTicket } from './src/cli/mod.cmdTicket.mjs';
 import { TargetError, callerFromEnv, cmdResolve, label, resolveAgent, shq, takeDry } from './src/cli/mod.target.mjs';
 import { describeFocus, focusPane, planFocus } from './src/cli/mod.attachFocus.mjs';
 import { pickCandidate } from './src/cli/mod.pickCandidate.mjs';
@@ -32,7 +33,7 @@ import { cmdHandover } from './src/cli/mod.cmdHandover.mjs';
 
 const execFileP = promisify(execFile);
 
-const HELP = `maw herdr <ls|list|a|attach|wake|work|wt|handover|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|federation|fed|serve> [args]
+const HELP = `maw herdr <ls|list|a|attach|wake|work|wt|handover|hey|peek|read|resolve|restart|resume|restore|kill|close|join|here|break|back|layout|whoami|watch|inbox|reply|audit|clean|sync|ticket|federation|fed|serve> [args]
   ls [--json]                          workspaces, grouped machine → repo → worktree
   ls --path                            ...with each workspace's checkout path beneath it
   ls <running|open|resumable|cold>     every worktree in that state, open space or not
@@ -117,6 +118,8 @@ const HELP = `maw herdr <ls|list|a|attach|wake|work|wt|handover|hey|peek|read|re
         --token-file PATH             required operator token file
         [--herdr PATH] [--data-dir PATH]
         [--mcp]                       also serve MCP at /mcp (writes always need the token)
+  ticket <pick|open|continue|status>   one GitHub issue -> one worktree -> an agent (/herdr-ticket);
+                                       --json for the oracle apps
   federation [--json]                  the mesh: who federates with whom (alias: fed)
 
 Mirrors 'maw ls', 'maw a', 'maw wake' and 'maw hey' against the herdr multiplexer.
@@ -1343,6 +1346,7 @@ try {
   if (['help', '--help', '-h'].includes(command)) console.log(HELP);
   else if (wantsHelp(command, args)) console.log(HELP);
   else if (command === 'serve') process.exitCode = await runServe(args);
+  else if (command === 'ticket') process.exitCode = cmdTicket(args);
   else if (command === 'ls' || command === 'list') await cmdLs(args);
   else if (command === 'a' || command === 'attach') await cmdAttach(args);
   else if (command === 'wake') cmdWake(args);
