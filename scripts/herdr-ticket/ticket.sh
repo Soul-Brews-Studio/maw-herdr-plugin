@@ -15,7 +15,7 @@
 # --session: the herdr server to use. An inherited HERDR_SOCKET_PATH beats HERDR_SESSION in herdr, so this drops it.
 set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-me="bash $(printf %q "$here/ticket.sh")"
+me=${TICKET_ME:-"bash $(printf %q "$here/ticket.sh")"}   # maw herdr ticket sets TICKET_ME, so fixes say the verb
 JSON=0
 
 die() {
@@ -362,7 +362,7 @@ EOF
   ;;
 # ─────────────────────────────────────────────────────────────────────────────────────── continue
 continue)
-  dest=$(resolve_dest); U=$(session_of "$dest")
+  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=$(session_of "$dest")   # die ran in $(): re-emit its JSON
   [ -n "$U" ] || die "no claude session found for $dest" "$me pick <issue>"
   [ ${#MSG[@]} -gt 0 ] || die "continue needs a message" "$me continue $(q "$target") \"what to do next\""
   ls="" lp=""; read -r ls lp <<<"$(live_at "$U")"
@@ -380,7 +380,7 @@ continue)
   ;;
 # ─────────────────────────────────────────────────────────────────────────────────────────── open
 open)
-  dest=$(resolve_dest); U=$(session_of "$dest")
+  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=$(session_of "$dest")   # die ran in $(): re-emit its JSON
   [ -n "$U" ] || die "no claude session found for $dest" "$me pick <issue>"
   ls="" lp=""; read -r ls lp <<<"$(live_at "$U")"
   if [ -n "$lp" ]; then
@@ -399,7 +399,7 @@ open)
   ;;
 # ───────────────────────────────────────────────────────────────────────────────────────── status
 status)
-  dest=$(resolve_dest); U=$(session_of "$dest")
+  dest=$(resolve_dest) || { [ "$JSON" = 1 ] && printf '%s\n' "$dest"; exit 1; }; U=$(session_of "$dest")   # die ran in $(): re-emit its JSON
   st="$(git -C "$dest" rev-parse --absolute-git-dir)/oneshot"
   branch=$(git -C "$dest" branch --show-current)
   echo "worktree $dest"

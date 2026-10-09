@@ -26,7 +26,7 @@ export function cmdTicket(args) {
     console.error(`✗ ticket.sh is missing from this plugin install\n  ls ${dirname(TICKET_SH)}`);
     return 1;
   }
-  const r = spawnSync('bash', [TICKET_SH, ...args], { stdio: 'inherit' });
+  const r = spawnSync('bash', [TICKET_SH, ...args], { stdio: 'inherit', env: { ...process.env, TICKET_ME: 'maw herdr ticket' } });
   if (r.error) {
     console.error(`✗ could not run ticket.sh: ${r.error.message}\n  bash ${TICKET_SH} --help`);
     return 1;
