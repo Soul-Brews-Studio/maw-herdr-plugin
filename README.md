@@ -6,29 +6,23 @@ dashboard server is TypeScript on Bun — no compiler, no native helper.
 
 ## Install
 
-```bash
-maw plugin install Soul-Brews-Studio/maw-herdr-plugin --root ~/.maw/plugins
-maw plugin ls          # herdr, health: ok
-maw herdr ls
+```
+maw plugin install Soul-Brews-Studio/maw-herdr-plugin
+maw herdr --help
 ```
 
-`owner/repo` expands to GitHub; `owner/repo@ref` pins branch/tag. Command is
-`herdr`, not `herder`.
+Update: `maw plugin update herdr`
 
-From a clone, use the justfile (split into `local`/`remote`/`fleet` modules):
+## Quick start
 
-```bash
-just local install              # this machine, from source
-just serve install               # build + install the plugin package
-just remote up god@white.local   # install + smoke on a remote
-just fleet status                # versions across every machine
+```
+maw herdr ls                     # workspaces, grouped machine → repo → worktree
+maw herdr ls resumable           # worktrees with a conversation to resume
+maw herdr wake neo --dry-run     # what waking an oracle would do
+maw herdr peek neo               # read an agent's pane
 ```
 
-⚠️ **Never `maw plugin install .` from a checkout that went through `/incubate`.**
-`/incubate`'s `ψ` symlink cycles back into itself — the installer walks it
-forever. Measured: 3.5 GB written before kill, plugin left with no
-`index.mjs`. `just install` stages via `git archive` (tracked files only, no
-`ψ`), which is immune.
+The command is `herdr`, not `herder`. Every verb is listed under [Verbs](#verbs).
 
 ## Verbs
 
@@ -522,20 +516,6 @@ exact field/limit contracts; this README stays a map, not the spec.
 - `herdr` on `PATH` (verified against 0.9.0)
 - `bun` (maw runs dev-tier plugins with it)
 
-## Smoke
-
-```bash
-bun utils/smoke-layout-live.mjs   # join/break/layout/restore against a throwaway herdr daemon
-bun utils/smoke-send-live.mjs     # live send against a throwaway herdr daemon (needs herdr)
-bun utils/smoke-help-verbs.mjs    # dispatch, HELP and plugin.json name the same verbs
-just local smoke                  # here, against the installed plugin
-just remote smoke god@white.local # there
-just serve check                  # Bun build, API/process smokes
-```
-
-Skips with a `SKIP:` line (exit 0) when `maw`/`herdr` isn't on `PATH` — safe
-in CI.
-
 ## Serving a dashboard
 
 ```bash
@@ -560,3 +540,36 @@ and is on by default under `--insecure-no-token`. Tokens and tickets never reach
 it. A page that sits on "offline" with nothing in the log was blocked by the
 browser before the request left — usually Private Network Access on an HTTPS
 page reaching loopback.
+
+## Development
+
+`owner/repo` expands to GitHub; `owner/repo@ref` pins a branch or tag.
+
+From a clone, use the justfile (split into `local`/`remote`/`fleet` modules):
+
+```bash
+just local install              # this machine, from source
+just serve install               # build + install the plugin package
+just remote up god@white.local   # install + smoke on a remote
+just fleet status                # versions across every machine
+```
+
+⚠️ **Never `maw plugin install .` from a checkout that went through `/incubate`.**
+`/incubate`'s `ψ` symlink cycles back into itself — the installer walks it
+forever. Measured: 3.5 GB written before kill, plugin left with no
+`index.mjs`. `just install` stages via `git archive` (tracked files only, no
+`ψ`), which is immune.
+
+### Smoke
+
+```bash
+bun utils/smoke-layout-live.mjs   # join/break/layout/restore against a throwaway herdr daemon
+bun utils/smoke-send-live.mjs     # live send against a throwaway herdr daemon (needs herdr)
+bun utils/smoke-help-verbs.mjs    # dispatch, HELP and plugin.json name the same verbs
+just local smoke                  # here, against the installed plugin
+just remote smoke god@white.local # there
+just serve check                  # Bun build, API/process smokes
+```
+
+Skips with a `SKIP:` line (exit 0) when `maw`/`herdr` isn't on `PATH` — safe
+in CI.
