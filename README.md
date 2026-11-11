@@ -487,6 +487,20 @@ Config layering, worktree cleanup, teams inventory, and delivery-feed details
 are documented inline in `server/` and `src/serve/bun/` — read the source for
 exact field/limit contracts; this README stays a map, not the spec.
 
+## Configuration
+
+Nothing is required: every verb works with no env set. These override the defaults.
+
+| Variable | Meaning |
+|---|---|
+| `MAW_HERDR_RESUME_PROVIDERS` | which transcript stores `resume` searches, comma list (default `claude,codex`; empty = none) |
+| `MAW_HERDR_CLAUDE_ROOTS` | Claude transcript roots, path-list (default `$CLAUDE_CONFIG_DIR/projects`, else `~/.claude/projects`) |
+| `MAW_HERDR_CODEX_ROOTS` | Codex transcript roots, path-list (default `$CODEX_HOME/sessions`, else `~/.codex/sessions`) |
+| `MAW_HOME` / `MAW_STATE_DIR` | maw state dir; `herdr/lifecycle.log` goes under it (default `~/.maw`; `MAW_XDG=1` uses `$XDG_STATE_HOME/maw`) |
+| `XDG_CONFIG_HOME` | Linux only: watch records and inboxes live in `$XDG_CONFIG_HOME/maw-herdr` (macOS: `~/Library/Application Support/maw-herdr`) |
+| `HERDR_PANE_ID`, `HERDR_SOCKET_PATH` | set by herdr inside its panes; tell `hey`/`reply` who is asking |
+| `MAW_SERVE_TOKEN`, `MAW_ENGINE_SERVE_PORT`, `MAW_ENGINE_SERVE_PREFIX` | `serve --engine` only, set by the maw gateway (prefix must be `/api/herdr`, `PORT` must match the port) |
+
 ## Traps
 
 - **herdr and tmux are sibling multiplexers, not layers.** `maw ls`/`maw herdr
