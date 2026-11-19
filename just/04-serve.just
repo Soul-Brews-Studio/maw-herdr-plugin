@@ -67,6 +67,8 @@ bun-check:
     MAW_FEDERATION_ENTRY="$output/index.js" node utils/smoke-federation-serve.mjs
     bun utils/smoke-terminal-serve.mjs
     MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-terminal-serve.mjs
+    bun utils/smoke-extension-origin-serve.mjs
+    MAW_TERMINAL_ENTRY="$output/index.js" bun utils/smoke-extension-origin-serve.mjs
     bun utils/smoke-terminal-limits.ts
     node utils/smoke-ls-path-help.mjs
     MAW_LS_ENTRY="$output/index.js" node utils/smoke-ls-path-help.mjs

@@ -549,11 +549,19 @@ maw herdr serve --insecure-no-token --listen 127.0.0.1:3488 --demo-minutes 60 \
 
 # writes — send, wake, cleanup — need the token file
 maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457
+
+# a browser extension (side-panel terminal) is named by its id from chrome://extensions
+maw herdr serve --token-file ~/.maw-herdr-token --listen 127.0.0.1:3457 \
+  --allow-origin chrome-extension://ialmjihoifgnkncbgbppcfnfjcclkoef
 ```
 
 Loopback pages and `god.buildwithoracle.com` are allowed built-in. Everything
 else is opt-in per origin: an allowed origin can read every pane this server can
 see, so there are no wildcards.
+
+An extension sends `Origin: chrome-extension://<id>`. It is never built in and
+never counts as loopback: only the exact id given to `--allow-origin` gets in,
+and it still needs the token for `/api/auth/ws-ticket` before `/ws/pty`.
 
 `--access-log` prints an nginx-style line per request to stderr as it happens,
 and is on by default under `--insecure-no-token`. Tokens and tickets never reach

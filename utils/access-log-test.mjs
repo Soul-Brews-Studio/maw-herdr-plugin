@@ -33,5 +33,20 @@ is("parse normalises", parseAllowedOrigin("https://bridge.buildwithoracle.com/")
 throws("wildcard refused", () => parseAllowedOrigin("https://*.example.com"));
 throws("path refused", () => parseAllowedOrigin("https://x.com/app"));
 
+// A browser extension sends `Origin: chrome-extension://<id>` (#122). It gets in
+// only when the operator names that exact id; never built in, never "loopback".
+const ext = "chrome-extension://ialmjihoifgnkncbgbppcfnfjcclkoef";
+is("extension allowlisted", requestOrigin(req(ext), [ext]), ext);
+throws("extension not allowlisted", () => requestOrigin(req(ext)));
+throws("other extension rejected", () => requestOrigin(req("chrome-extension://ckahnoplifjlkbennikhalnecadkeepe"), [ext]));
+throws("extension with path rejected", () => requestOrigin(req(ext + "/x"), [ext]));
+throws("http allowlist does not admit extension", () => requestOrigin(req(ext), ["https://village.buildwithoracle.com"]));
+is("parse extension", parseAllowedOrigin(ext), ext);
+is("parse extension trailing slash", parseAllowedOrigin(ext + "/"), ext);
+throws("extension bad id refused", () => parseAllowedOrigin("chrome-extension://not-an-id"));
+throws("extension uppercase id refused", () => parseAllowedOrigin("chrome-extension://IALMJIHOIFGNKNCBGBPPCFNFJCCLKOEF"));
+throws("extension path refused", () => parseAllowedOrigin(ext + "/sidepanel.html"));
+throws("extension wildcard refused", () => parseAllowedOrigin("chrome-extension://*"));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
