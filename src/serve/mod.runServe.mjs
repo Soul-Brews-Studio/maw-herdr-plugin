@@ -16,7 +16,8 @@ for a quick demo; writes still require --token-file and the server stops itself
 after --demo-minutes (default 30). Loopback is not a boundary against a browser. Help needs no Herdr.
 --allow-origin names another site that may read this fleet from a browser;
 loopback pages and god.buildwithoracle.com are allowed already. Repeatable,
-exact scheme://host[:port], no wildcards. An allowed origin can read every pane.
+exact scheme://host[:port], or a browser extension as chrome-extension://<id>,
+no wildcards. An allowed origin can read every pane.
 --access-log prints an nginx-style line per request to stderr, flushed as it
 happens. It is on by default with --insecure-no-token, since that is the server
 whose traffic you want to watch. Tokens and tickets are never logged.

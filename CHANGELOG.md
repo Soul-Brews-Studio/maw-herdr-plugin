@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- `serve --allow-origin` accepts an exact browser extension origin, `chrome-extension://<32-letter id>` (#122).
+  Before, an extension's `Origin` failed the `https?://` match and got `403 origin_not_allowed` before the
+  allowlist was read, and the flag itself refused the value at startup, so no extension could mint a ticket or
+  open `/ws/pty`. An extension is never built in and never treated as loopback. Bad ids, paths and wildcards are
+  refused with a copy-paste fix. `utils/smoke-extension-origin-serve.mjs` runs the real server (source and
+  bundle): a stranger extension is refused, the named one reads `/api/sessions` with an exact CORS echo, its
+  ticket is origin-bound (it cannot be replayed from a loopback page), and the PTY attaches.
+
 ## 26.10.5-alpha.1200 — 2026-10-05
 
 - Fix `a <name>` passing over a STOPPED herdr session named exactly `<name>` when other names merely
